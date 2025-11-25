@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { documentAPI } from '../../services/api';
-import { getSessionId } from '../../utils/auth';
+import { getSessionId, getToken } from '../../utils/auth';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -32,7 +32,27 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections }) => {
       setContent(markdownContent);
       setStructure(documentStructure);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to load document');
+      const errorMessage = err.response?.data?.error || err.message || 'Failed to load document';
+      
+      // If 401 Unauthorized, try to get more info
+      if (err.response?.status === 401) {
+        console.error('401 Unauthorized when fetching document');
+        console.error('Error details:', err.response?.data);
+        console.error('Session ID:', sessionId);
+        
+        // Check if token exists
+        const token = getToken();
+        if (!token) {
+          setError('Authentication required. Please log in again.');
+          console.error('No token found in localStorage');
+        } else {
+          setError('Authentication failed. Please try refreshing the page.');
+          console.error('Token exists but authentication failed. Token length:', token.length);
+        }
+      } else {
+        setError(errorMessage);
+      }
+      
       console.error('Failed to fetch document:', err);
     } finally {
       setLoading(false);
@@ -47,9 +67,10 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections }) => {
   useEffect(() => {
     if (refreshTrigger > 0) {
       // Small delay to ensure backend has written the file
+      // Increased delay to avoid race conditions with token/auth
       setTimeout(() => {
         fetchDocument();
-      }, 500);
+      }, 1000);
     }
   }, [refreshTrigger]);
 

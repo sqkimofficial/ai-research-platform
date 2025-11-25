@@ -52,6 +52,25 @@ export const chatAPI = {
       attached_sections: attachedSections
     });
   },
+  approveContent: (sessionId, pendingContentId, editedContent = null) => {
+    return api.post('/api/chat/approve', {
+      session_id: sessionId,
+      pending_content_id: pendingContentId,
+      edited_content: editedContent
+    });
+  },
+  rejectContent: (sessionId, pendingContentId) => {
+    return api.post('/api/chat/reject', {
+      session_id: sessionId,
+      pending_content_id: pendingContentId
+    });
+  },
+  rewriteContent: (sessionId, originalMessage) => {
+    return api.post('/api/chat/rewrite', {
+      session_id: sessionId,
+      original_message: originalMessage
+    });
+  },
 };
 
 // Document API

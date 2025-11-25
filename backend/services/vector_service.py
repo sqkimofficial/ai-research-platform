@@ -7,8 +7,8 @@ import uuid
 class VectorService:
     def __init__(self):
         self.openai_service = OpenAIService()
-        self.chunk_size = 500  # Characters per chunk
-        self.chunk_overlap = 50  # Overlap between chunks
+        self.chunk_size = 1000  # Characters per chunk (increased for better context)
+        self.chunk_overlap = 100  # Overlap between chunks (increased for better continuity)
     
     def chunk_text(self, text: str) -> List[Dict[str, any]]:
         """Split text into chunks with metadata"""

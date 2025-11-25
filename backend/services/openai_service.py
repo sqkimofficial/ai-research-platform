@@ -81,11 +81,16 @@ class OpenAIService:
             # Step 2: Try standard JSON parsing first
             try:
                 parsed = json.loads(json_str)
+                # Handle both Stage 1 (document_content) and Stage 2 (updated_document_content) responses
                 return {
                     'message': parsed.get('message', ''),
-                    'document_content': parsed.get('document_content', ''),
-                    'document_structure': parsed.get('document_structure', []),
+                    'document_content': parsed.get('document_content', '') or parsed.get('updated_document_content', ''),
+                    'updated_document_content': parsed.get('updated_document_content', ''),
+                    'document_structure': parsed.get('document_structure', []) or parsed.get('updated_document_structure', []),
+                    'updated_document_structure': parsed.get('updated_document_structure', []),
                     'placement': parsed.get('placement'),
+                    'placement_applied': parsed.get('placement_applied', ''),
+                    'placement_explanation': parsed.get('placement_explanation', ''),
                     'sources': parsed.get('sources', [])
                 }
             except json.JSONDecodeError as e:
@@ -98,10 +103,16 @@ class OpenAIService:
                 # Try parsing the fixed JSON
                 try:
                     parsed = json.loads(fixed_json)
+                    # Handle both Stage 1 and Stage 2 responses
                     return {
                         'message': parsed.get('message', ''),
-                        'document_content': parsed.get('document_content', ''),
-                        'document_structure': parsed.get('document_structure', []),
+                        'document_content': parsed.get('document_content', '') or parsed.get('updated_document_content', ''),
+                        'updated_document_content': parsed.get('updated_document_content', ''),
+                        'document_structure': parsed.get('document_structure', []) or parsed.get('updated_document_structure', []),
+                        'updated_document_structure': parsed.get('updated_document_structure', []),
+                        'placement': parsed.get('placement'),
+                        'placement_applied': parsed.get('placement_applied', ''),
+                        'placement_explanation': parsed.get('placement_explanation', ''),
                         'sources': parsed.get('sources', [])
                     }
                 except json.JSONDecodeError:
@@ -262,11 +273,41 @@ class OpenAIService:
                         placement = None
                 break
         
+        # Try to extract placement_applied and placement_explanation
+        placement_applied = ''
+        placement_explanation = ''
+        
+        placement_applied_patterns = [
+            r'"placement_applied"\s*:\s*"((?:[^"\\]|\\.)*)"',
+            r'"placement_applied"\s*:\s*"([^"]*)"',
+        ]
+        for pattern in placement_applied_patterns:
+            match = re.search(pattern, json_str, re.DOTALL)
+            if match:
+                placement_applied = match.group(1)
+                placement_applied = placement_applied.replace('\\n', '\n').replace('\\r', '\r').replace('\\t', '\t')
+                placement_applied = placement_applied.replace('\\"', '"').replace('\\\\', '\\')
+                break
+        
+        placement_explanation_patterns = [
+            r'"placement_explanation"\s*:\s*"((?:[^"\\]|\\.)*)"',
+            r'"placement_explanation"\s*:\s*"([^"]*)"',
+        ]
+        for pattern in placement_explanation_patterns:
+            match = re.search(pattern, json_str, re.DOTALL)
+            if match:
+                placement_explanation = match.group(1)
+                placement_explanation = placement_explanation.replace('\\n', '\n').replace('\\r', '\r').replace('\\t', '\t')
+                placement_explanation = placement_explanation.replace('\\"', '"').replace('\\\\', '\\')
+                break
+        
         return {
             'message': message,
             'document_content': doc_content,
             'document_structure': doc_structure if isinstance(doc_structure, list) else [],
             'placement': placement,
+            'placement_applied': placement_applied,
+            'placement_explanation': placement_explanation,
             'sources': sources if isinstance(sources, list) else []
         }
     

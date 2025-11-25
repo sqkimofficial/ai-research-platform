@@ -98,7 +98,7 @@ class ChatSessionModel:
         return db.chat_sessions.find_one({'session_id': session_id})
     
     @staticmethod
-    def add_message(session_id, role, content, sources=None, document_content=None, document_structure=None, placement=None):
+    def add_message(session_id, role, content, sources=None, document_content=None, document_structure=None, placement=None, status=None, pending_content_id=None):
         """Add a message to the session"""
         db = Database.get_db()
         message = {
@@ -117,6 +117,10 @@ class ChatSessionModel:
                 message['document_structure'] = document_structure
             if placement is not None:
                 message['placement'] = placement
+            if status is not None:
+                message['status'] = status  # "pending_approval", "approved", "rejected"
+            if pending_content_id is not None:
+                message['pending_content_id'] = pending_content_id
         db.chat_sessions.update_one(
             {'session_id': session_id},
             {
@@ -142,6 +146,51 @@ class ChatSessionModel:
             {'user_id': user_id}
         ).sort('updated_at', -1))
         return sessions
+    
+    @staticmethod
+    def update_pending_content(session_id, content_data):
+        """Update or set pending content for a session"""
+        db = Database.get_db()
+        pending_content_id = str(uuid.uuid4())
+        update_data = {
+            'pending_content': content_data,
+            'pending_content_id': pending_content_id,
+            'updated_at': datetime.utcnow()
+        }
+        db.chat_sessions.update_one(
+            {'session_id': session_id},
+            {'$set': update_data}
+        )
+        return pending_content_id
+    
+    @staticmethod
+    def get_pending_content(session_id):
+        """Get pending content for a session"""
+        session = ChatSessionModel.get_session(session_id)
+        if session:
+            pending_content = session.get('pending_content')
+            pending_content_id = session.get('pending_content_id')
+            if pending_content and pending_content_id:
+                return {
+                    'pending_content': pending_content,
+                    'pending_content_id': pending_content_id
+                }
+        return None
+    
+    @staticmethod
+    def clear_pending_content(session_id):
+        """Clear pending content for a session"""
+        db = Database.get_db()
+        db.chat_sessions.update_one(
+            {'session_id': session_id},
+            {
+                '$unset': {
+                    'pending_content': '',
+                    'pending_content_id': ''
+                },
+                '$set': {'updated_at': datetime.utcnow()}
+            }
+        )
 
 class DocumentModel:
     @staticmethod

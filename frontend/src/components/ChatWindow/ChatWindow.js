@@ -10,6 +10,10 @@ const ChatWindow = ({ sessionId: propSessionId, onAIMessage, attachedSections = 
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionIdState] = useState(null);
   const [currentAttachedSections, setCurrentAttachedSections] = useState([]);
+  const [editingContent, setEditingContent] = useState({}); // { pendingContentId: editedContent }
+  const [showRewritePrompt, setShowRewritePrompt] = useState(false);
+  const [rejectedMessageId, setRejectedMessageId] = useState(null);
+  const [originalUserMessage, setOriginalUserMessage] = useState('');
   const messagesEndRef = useRef(null);
   
   // Update attached sections when prop changes
@@ -93,23 +97,30 @@ const ChatWindow = ({ sessionId: propSessionId, onAIMessage, attachedSections = 
 
     try {
       const response = await chatAPI.sendMessage(sessionId, userMessage, attachedSectionsToSend);
-      // Extract message, document_content, and sources from response
+      // Extract message, document_content, sources, status, and pending_content_id from response
       const chatMessage = response.data.response || '';
       const documentContent = response.data.document_content || '';
       const sources = response.data.sources || [];
+      const status = response.data.status;
+      const pendingContentId = response.data.pending_content_id;
       
       const aiMessage = {
         role: 'assistant',
         content: chatMessage,
         sources: sources,
+        document_content: documentContent,
+        status: status,
+        pending_content_id: pendingContentId,
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, aiMessage]);
       
-      // Notify parent component if document content was added (for document refresh)
-      if (onAIMessage && documentContent) {
-        onAIMessage(documentContent);
+      // Store original user message for rewrite if needed
+      if (status === 'pending_approval') {
+        setOriginalUserMessage(userMessage);
       }
+      
+      // Don't notify parent for pending content - only notify when approved
     } catch (error) {
       console.error('Failed to send message:', error);
       const errorMessage = {
@@ -122,6 +133,123 @@ const ChatWindow = ({ sessionId: propSessionId, onAIMessage, attachedSections = 
       setLoading(false);
     }
   };
+  
+  const handleApprove = async (pendingContentId, editedContent) => {
+    if (!sessionId) return;
+    
+    setLoading(true);
+    try {
+      const response = await chatAPI.approveContent(sessionId, pendingContentId, editedContent);
+      
+      // Update message status
+      setMessages((prev) => prev.map(msg => 
+        msg.pending_content_id === pendingContentId
+          ? { ...msg, status: 'approved', document_content: null }
+          : msg
+      ));
+      
+      // Clear editing state
+      setEditingContent((prev) => {
+        const newState = { ...prev };
+        delete newState[pendingContentId];
+        return newState;
+      });
+      
+      // Notify parent to refresh document
+      if (onAIMessage) {
+        onAIMessage('approved');
+      }
+      
+      // Add success message
+      const successMessage = {
+        role: 'assistant',
+        content: response.data.message || 'Content approved and placed successfully.',
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, successMessage]);
+      
+    } catch (error) {
+      console.error('Failed to approve content:', error);
+      alert('Failed to approve content. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const handleReject = async (pendingContentId) => {
+    if (!sessionId) return;
+    
+    setLoading(true);
+    try {
+      const response = await chatAPI.rejectContent(sessionId, pendingContentId);
+      
+      // Update message status
+      setMessages((prev) => prev.map(msg => 
+        msg.pending_content_id === pendingContentId
+          ? { ...msg, status: 'rejected' }
+          : msg
+      ));
+      
+      // Show rewrite prompt
+      setShowRewritePrompt(true);
+      setRejectedMessageId(pendingContentId);
+      
+      // Add rejection message
+      const rejectionMessage = {
+        role: 'assistant',
+        content: response.data.message || 'Content rejected. Would you like to request a rewrite?',
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, rejectionMessage]);
+      
+    } catch (error) {
+      console.error('Failed to reject content:', error);
+      alert('Failed to reject content. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const handleRewrite = async () => {
+    if (!sessionId || !originalUserMessage) return;
+    
+    setLoading(true);
+    setShowRewritePrompt(false);
+    
+    try {
+      const response = await chatAPI.rewriteContent(sessionId, originalUserMessage);
+      
+      const chatMessage = response.data.response || '';
+      const documentContent = response.data.document_content || '';
+      const sources = response.data.sources || [];
+      const status = response.data.status;
+      const pendingContentId = response.data.pending_content_id;
+      
+      const rewriteMessage = {
+        role: 'assistant',
+        content: chatMessage,
+        sources: sources,
+        document_content: documentContent,
+        status: status,
+        pending_content_id: pendingContentId,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, rewriteMessage]);
+      
+    } catch (error) {
+      console.error('Failed to rewrite content:', error);
+      alert('Failed to rewrite content. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const handleEdit = (pendingContentId, editedContent) => {
+    setEditingContent((prev) => ({
+      ...prev,
+      [pendingContentId]: editedContent
+    }));
+  };
 
   return (
     <div className="chat-window">
@@ -132,8 +260,28 @@ const ChatWindow = ({ sessionId: propSessionId, onAIMessage, attachedSections = 
           </div>
         )}
         {messages.map((message, index) => (
-          <MessageBubble key={index} message={message} />
+          <MessageBubble 
+            key={index} 
+            message={message}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onEdit={handleEdit}
+            editedContent={editingContent[message.pending_content_id]}
+          />
         ))}
+        {showRewritePrompt && (
+          <div className="rewrite-prompt">
+            <p>Content was rejected. Would you like to request a rewrite?</p>
+            <div className="rewrite-actions">
+              <button className="rewrite-btn" onClick={handleRewrite} disabled={loading}>
+                Request Rewrite
+              </button>
+              <button className="cancel-rewrite-btn" onClick={() => setShowRewritePrompt(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
         {loading && (
           <div className="loading-indicator">
             <div className="typing-dots">
