@@ -1,0 +1,80 @@
+===============================================
+AI RESEARCH PLATFORM - CHROME EXTENSION SETUP
+===============================================
+
+INSTALLATION
+------------
+1. Open Chrome and go to: chrome://extensions/
+2. Enable "Developer mode" (toggle in top-right corner)
+3. Click "Load unpacked"
+4. Select the "chrome-extension" folder from this project
+5. The extension icon should appear in your Chrome toolbar
+
+
+GETTING YOUR CREDENTIALS
+------------------------
+1. Start the backend server (python app.py)
+2. Open the AI Research Platform in your browser
+3. Log in to your account
+4. Select any chat session within a project
+
+5. Check the backend terminal - you will see:
+   ============================================================
+   SESSION ENTRY - Use these for Chrome Extension:
+     JWT Token: eyJhbGciOiJI... (long string)
+     Project ID: abc123-def456-... (UUID format)
+   ============================================================
+
+6. Copy these values
+
+
+CONFIGURING THE EXTENSION
+-------------------------
+1. Click the extension icon in Chrome toolbar
+2. Paste your JWT Token
+3. Paste your Project ID
+4. Click "Save Configuration"
+5. Click "Test Connection" to verify it works
+
+
+USING THE EXTENSION
+-------------------
+1. Go to any webpage (research paper, article, etc.)
+2. Select/highlight any text with your mouse
+3. A popup will appear with:
+   - Preview of selected text
+   - Text area to add a note (optional)
+4. Click "Save Highlight"
+5. Done! Your highlight is saved to your project
+
+
+VIEWING YOUR HIGHLIGHTS
+-----------------------
+1. Go to the AI Research Platform homepage
+2. Click the "Highlights" tab
+3. Click on a project to expand it
+4. Click on a URL to see all highlights from that page
+
+
+TIPS
+----
+- You only need JWT Token + Project ID (no session ID needed)
+- Highlights are grouped by URL within each project
+- Add notes to remember why you saved something
+- Press Ctrl+Enter to quickly save a highlight
+- Press Escape to close the popup without saving
+
+
+TROUBLESHOOTING
+---------------
+- "Unauthorized" error: Your JWT token may have expired. 
+  Log in again and copy a fresh token from the backend logs.
+
+- Extension not appearing: Make sure Developer mode is enabled
+  and reload the extension after any changes.
+
+- Highlights not saving: Check that the backend server is running
+  on port 5001.
+
+===============================================
+

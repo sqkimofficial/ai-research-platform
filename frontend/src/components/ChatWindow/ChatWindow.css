@@ -1,0 +1,478 @@
+.chat-window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: #f5f5f5;
+}
+
+.project-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background-color: #007bff;
+  color: white;
+  border-bottom: 2px solid #0056b3;
+}
+
+.badge-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.9;
+}
+
+.badge-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.empty-state {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #666;
+  font-size: 16px;
+}
+
+.message-bubble {
+  max-width: 70%;
+  padding: 12px 16px;
+  border-radius: 18px;
+  word-wrap: break-word;
+}
+
+.user-message {
+  align-self: flex-end;
+  background-color: #007bff;
+  color: white;
+}
+
+.assistant-message {
+  align-self: flex-start;
+  background-color: white;
+  color: #333;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.message-content {
+  margin-bottom: 0;
+  line-height: 1.5;
+}
+
+.message-timestamp {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 4px;
+}
+
+.message-sources {
+  margin-top: 32px; /* Two lines of spacing (approximately 2 * line-height * font-size) */
+  padding-top: 0;
+  border-top: none;
+}
+
+.sources-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.sources-list {
+  margin: 0;
+  padding-left: 0;
+  list-style-type: none;
+}
+
+.sources-list li {
+  margin-bottom: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.source-link {
+  color: #007bff;
+  text-decoration: none;
+  word-break: break-all;
+  display: inline-block;
+  transition: color 0.2s;
+}
+
+.source-link:hover {
+  text-decoration: underline;
+  color: #0056b3;
+}
+
+.source-text {
+  color: #666;
+  word-break: break-all;
+}
+
+.attached-sections-preview {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.attached-label {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  opacity: 0.9;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.attached-markdown {
+  font-size: 11px;
+  font-family: 'Monaco', 'Courier New', monospace;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+  padding: 8px;
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  opacity: 0.9;
+  line-height: 1.4;
+}
+
+.loading-indicator {
+  align-self: flex-start;
+  padding: 12px 16px;
+}
+
+.typing-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.typing-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #999;
+  animation: typing 1.4s infinite;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.7;
+  }
+  30% {
+    transform: translateY(-10px);
+    opacity: 1;
+  }
+}
+
+.chat-input-form {
+  display: flex;
+  padding: 16px;
+  background-color: white;
+  border-top: 1px solid #e0e0e0;
+  gap: 12px;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 12px 16px;
+  border: 1px solid #ddd;
+  border-radius: 24px;
+  font-size: 14px;
+  outline: none;
+}
+
+.chat-input:focus {
+  border-color: #007bff;
+}
+
+.chat-input:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.send-button {
+  padding: 12px 24px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.send-button:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.send-button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.attached-sections-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: #e7f3ff;
+  border: 1px solid #b3d9ff;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.attached-count {
+  color: #0066cc;
+  font-weight: 500;
+}
+
+.clear-attached-button {
+  background: none;
+  border: none;
+  color: #0066cc;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: bold;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+}
+
+.clear-attached-button:hover {
+  background-color: #b3d9ff;
+}
+
+/* Pending Content Styles */
+.pending-content-preview {
+  margin-top: 16px;
+  padding: 16px;
+  background-color: #f8f9fa;
+  border: 2px solid #007bff;
+  border-radius: 8px;
+}
+
+.pending-content-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #007bff;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pending-content-preview-markdown {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 12px;
+  background-color: white;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  margin-bottom: 12px;
+}
+
+.pending-content-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.approve-btn, .reject-btn, .edit-content-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.approve-btn {
+  background-color: #28a745;
+  color: white;
+}
+
+.approve-btn:hover {
+  background-color: #218838;
+}
+
+.reject-btn {
+  background-color: #dc3545;
+  color: white;
+}
+
+.reject-btn:hover {
+  background-color: #c82333;
+}
+
+.edit-content-btn {
+  background-color: #6c757d;
+  color: white;
+}
+
+.edit-content-btn:hover {
+  background-color: #5a6268;
+}
+
+/* Content Editor Styles */
+.pending-content-editor {
+  margin-bottom: 12px;
+}
+
+.content-editor-textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+.content-editor-textarea:focus {
+  border-color: #007bff;
+}
+
+.content-editor-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.save-edit-btn, .cancel-edit-btn {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.save-edit-btn {
+  background-color: #007bff;
+  color: white;
+}
+
+.save-edit-btn:hover {
+  background-color: #0056b3;
+}
+
+.cancel-edit-btn {
+  background-color: #6c757d;
+  color: white;
+}
+
+.cancel-edit-btn:hover {
+  background-color: #5a6268;
+}
+
+/* Content Status Styles */
+.content-status {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.approved-status {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.rejected-status {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+/* Rewrite Prompt Styles */
+.rewrite-prompt {
+  margin-top: 16px;
+  padding: 16px;
+  background-color: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+}
+
+.rewrite-prompt p {
+  margin: 0 0 12px 0;
+  color: #856404;
+  font-size: 14px;
+}
+
+.rewrite-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.rewrite-btn, .cancel-rewrite-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.rewrite-btn {
+  background-color: #ffc107;
+  color: #856404;
+}
+
+.rewrite-btn:hover:not(:disabled) {
+  background-color: #e0a800;
+}
+
+.rewrite-btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.cancel-rewrite-btn {
+  background-color: #6c757d;
+  color: white;
+}
+
+.cancel-rewrite-btn:hover {
+  background-color: #5a6268;
+}
+
