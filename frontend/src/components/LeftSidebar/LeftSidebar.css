@@ -1,0 +1,147 @@
+.left-sidebar {
+  width: 48px;
+  height: 100%;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  border-right: 1px solid rgba(0, 50, 98, 0.2);
+  flex-shrink: 0;
+  padding: 24px 8px;
+  box-sizing: border-box;
+}
+
+.sidebar-top,
+.sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  position: relative;
+}
+
+.sidebar-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  color: rgba(0, 50, 98, 1);
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.sidebar-button svg {
+  width: 20px;
+  height: 20px;
+  transition: transform 0.2s ease;
+}
+
+.sidebar-button span {
+  display: none;
+}
+
+.sidebar-button:hover {
+  background: rgba(0, 50, 98, 0.08);
+}
+
+.sidebar-button:hover svg {
+  transform: scale(1.05);
+}
+
+/* Account button at bottom - slightly larger icon area */
+.sidebar-bottom .sidebar-button {
+  width: 24px;
+  height: 24px;
+}
+
+.sidebar-bottom .sidebar-button svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* Account Dropdown */
+.account-dropdown {
+  position: absolute;
+  bottom: 32px;
+  left: 40px;
+  min-width: 180px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 50, 98, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 50, 98, 0.15);
+  overflow: hidden;
+  animation: slideUp 0.15s ease-out;
+  z-index: 1000;
+}
+
+.dropdown-project-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: rgba(0, 50, 98, 0.04);
+  border-bottom: 1px solid rgba(0, 50, 98, 0.1);
+}
+
+.project-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(0, 50, 98, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.project-name-display {
+  font-size: 13px;
+  font-weight: 600;
+  color: #003262;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #323232;
+  font-size: 13px;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 500;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.dropdown-item:hover {
+  background: rgba(0, 50, 98, 0.05);
+}
+
+.logout-item {
+  color: #b32525;
+}
+
+.logout-item:hover {
+  background: rgba(179, 37, 37, 0.08);
+}

@@ -1,7 +1,22 @@
+/* Import DM Sans font */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+
+* {
+  font-family: 'DM Sans', sans-serif;
+}
+
 .app {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  background-color: #fdfcfb;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
 }
 
 .main-content {
@@ -11,86 +26,73 @@
 }
 
 .chat-section {
-  flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 250px;
+  flex-shrink: 0;
+  background: #ffffff;
 }
 
 .document-section {
-  flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  min-width: 400px;
-  max-width: 50%;
+  min-width: 250px;
+  flex-shrink: 0;
+  background: #fdfcfb;
 }
 
 .right-panel-section {
-  width: 60px;
+  width: 48px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   flex-shrink: 0;
 }
 
-.app-header {
+/* Resize Divider */
+.resize-divider {
+  width: 1px;
+  background: rgba(0, 50, 98, 0.2);
+  cursor: col-resize;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 16px 24px;
-  background-color: white;
-  border-bottom: 1px solid #e0e0e0;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+  transition: all 0.15s ease;
 }
 
-.app-header h1 {
-  font-size: 24px;
-  color: #333;
+.resize-divider:hover {
+  width: 4px;
+  background: rgba(0, 50, 98, 0.3);
 }
 
-.logout-button {
-  padding: 8px 16px;
-  background-color: #dc3545;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
+.resize-divider.resizing {
+  width: 4px;
+  background: rgba(0, 50, 98, 0.5);
 }
 
-.logout-button:hover {
-  background-color: #c82333;
+.resize-handle {
+  display: none;
 }
 
-.back-button {
-  padding: 8px 16px;
-  background-color: #6c757d;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background-color 0.2s;
-}
-
-.back-button:hover {
-  background-color: #5a6268;
-}
-
+/* Auth Styles - Updated with new color scheme */
 .auth-container {
   display: flex;
   justify-content: center;
   align-items: center;
   height: 100vh;
-  background-color: #f5f5f5;
+  background-color: #fdfcfb;
 }
 
 .auth-box {
-  background: white;
+  background: #ffffff;
   padding: 40px;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  border: 1px solid rgba(0, 50, 98, 0.2);
+  box-shadow: 0 4px 24px rgba(0, 50, 98, 0.08);
   width: 100%;
   max-width: 400px;
 }
@@ -98,13 +100,15 @@
 .auth-box h1 {
   text-align: center;
   margin-bottom: 30px;
-  color: #333;
+  color: #323232;
+  font-size: 24px;
+  font-weight: 600;
 }
 
 .auth-tabs {
   display: flex;
   margin-bottom: 20px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid rgba(0, 50, 98, 0.2);
 }
 
 .auth-tabs button {
@@ -113,14 +117,20 @@
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 16px;
-  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+  color: #5b5b5b;
   border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.auth-tabs button:hover {
+  color: rgba(0, 50, 98, 1);
 }
 
 .auth-tabs button.active {
-  color: #007bff;
-  border-bottom-color: #007bff;
+  color: rgba(0, 50, 98, 1);
+  border-bottom-color: rgba(0, 50, 98, 1);
 }
 
 .auth-box form {
@@ -130,39 +140,79 @@
 }
 
 .auth-box input {
-  padding: 12px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 14px;
+  padding: 12px 16px;
+  border: 1px solid rgba(0, 50, 98, 0.2);
+  border-radius: 8px;
+  font-size: 13px;
+  color: #323232;
+  background: #fafafa;
+  transition: all 0.2s ease;
+}
+
+.auth-box input::placeholder {
+  color: #a8a8a8;
 }
 
 .auth-box input:focus {
   outline: none;
-  border-color: #007bff;
+  border-color: rgba(0, 50, 98, 0.5);
+  background: #ffffff;
 }
 
-.auth-box button {
+.auth-box button[type="submit"] {
   padding: 12px;
-  background-color: #007bff;
+  background-color: #003262;
   color: white;
   border: none;
-  border-radius: 4px;
-  font-size: 16px;
+  border-radius: 8px;
+  font-size: 14px;
   cursor: pointer;
   font-weight: 500;
+  transition: all 0.2s ease;
 }
 
-.auth-box button:hover {
-  background-color: #0056b3;
+.auth-box button[type="submit"]:hover {
+  background-color: #002347;
 }
 
 .error-message {
-  color: #dc3545;
-  font-size: 14px;
+  color: #b32525;
+  font-size: 12px;
   text-align: center;
-  padding: 8px;
-  background-color: #f8d7da;
-  border-radius: 4px;
+  padding: 10px 12px;
+  background-color: rgba(179, 37, 37, 0.08);
+  border: 1px solid rgba(179, 37, 37, 0.2);
+  border-radius: 8px;
 }
 
+.logout-button {
+  padding: 8px 16px;
+  background-color: #b32525;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
 
+.logout-button:hover {
+  background-color: #8f1e1e;
+}
+
+.back-button {
+  padding: 8px 16px;
+  background-color: rgba(0, 50, 98, 0.1);
+  color: rgba(0, 50, 98, 0.7);
+  border: 1px solid rgba(0, 50, 98, 0.2);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.back-button:hover {
+  background-color: rgba(0, 50, 98, 0.15);
+}

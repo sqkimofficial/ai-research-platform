@@ -2,9 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import { chatAPI } from '../../services/api';
 import { getSessionId, setSessionId } from '../../utils/auth';
 import MessageBubble from './MessageBubble';
+import ProjectSelector from '../ProjectSelector/ProjectSelector';
 import './ChatWindow.css';
 
-const ChatWindow = ({ sessionId: propSessionId, activeDocumentId, onAIMessage, attachedSections = [], attachedHighlights = [], onClearAttachedHighlights }) => {
+const ChatWindow = ({ 
+  sessionId: propSessionId, 
+  isNewChat = false,
+  selectedProjectId = null,
+  onSessionCreated,
+  activeDocumentId, 
+  onAIMessage, 
+  attachedSections = [], 
+  attachedHighlights = [], 
+  onClearAttachedHighlights 
+}) => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -15,6 +26,8 @@ const ChatWindow = ({ sessionId: propSessionId, activeDocumentId, onAIMessage, a
   const [showRewritePrompt, setShowRewritePrompt] = useState(false);
   const [rejectedMessageId, setRejectedMessageId] = useState(null);
   const [originalUserMessage, setOriginalUserMessage] = useState('');
+  const [showProjectSelector, setShowProjectSelector] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState(null); // Store message while selecting project
   const messagesEndRef = useRef(null);
   
   // Update attached sections when prop changes
@@ -42,13 +55,20 @@ const ChatWindow = ({ sessionId: propSessionId, activeDocumentId, onAIMessage, a
 
   useEffect(() => {
     initializeSession();
-  }, [propSessionId]);
+  }, [propSessionId, isNewChat]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
   const initializeSession = async () => {
+    // If it's a new chat, don't create session yet - wait for first message
+    if (isNewChat) {
+      setMessages([]);
+      setSessionIdState(null);
+      return;
+    }
+    
     try {
       // Use propSessionId if provided, otherwise check localStorage
       const sessionIdToUse = propSessionId || getSessionId();
@@ -62,16 +82,14 @@ const ChatWindow = ({ sessionId: propSessionId, activeDocumentId, onAIMessage, a
           setSessionId(sessionIdToUse);
         }
       } else {
-        // Create new session
-        const response = await chatAPI.createSession();
-        const newSessionId = response.data.session_id;
-        setSessionId(newSessionId);
-        setSessionIdState(newSessionId);
+        // No session and not new chat mode - start new chat
         setMessages([]);
+        setSessionIdState(null);
       }
     } catch (error) {
       console.error('Failed to initialize session:', error);
-      alert('Failed to initialize chat session. Please try again.');
+      setMessages([]);
+      setSessionIdState(null);
     }
   };
 
@@ -81,9 +99,64 @@ const ChatWindow = ({ sessionId: propSessionId, activeDocumentId, onAIMessage, a
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!inputMessage.trim() || loading || !sessionId) return;
+    if (!inputMessage.trim() || loading) return;
 
     const userMessage = inputMessage.trim();
+    
+    // If this is a new chat and no session exists, need to create one first
+    if (isNewChat && !sessionId) {
+      // If we have a selected project, create session with it
+      if (selectedProjectId) {
+        await createSessionAndSendMessage(selectedProjectId, userMessage);
+      } else {
+        // Show project selector
+        setPendingMessage(userMessage);
+        setShowProjectSelector(true);
+      }
+      return;
+    }
+    
+    // If we have a session, send the message
+    if (sessionId) {
+      await sendMessageToSession(sessionId, userMessage);
+    }
+  };
+  
+  const createSessionAndSendMessage = async (projectId, userMessage) => {
+    setInputMessage('');
+    setLoading(true);
+    
+    try {
+      // Create the session first
+      const sessionResponse = await chatAPI.createSession(projectId);
+      const newSessionId = sessionResponse.data.session_id;
+      
+      setSessionId(newSessionId);
+      setSessionIdState(newSessionId);
+      
+      // Notify parent about the new session
+      if (onSessionCreated) {
+        onSessionCreated(newSessionId);
+      }
+      
+      // Now send the message
+      await sendMessageToSession(newSessionId, userMessage);
+    } catch (error) {
+      console.error('Failed to create session:', error);
+      setLoading(false);
+      alert('Failed to create chat session. Please try again.');
+    }
+  };
+  
+  const handleProjectSelected = async (projectId, projectName) => {
+    setShowProjectSelector(false);
+    if (pendingMessage) {
+      await createSessionAndSendMessage(projectId, pendingMessage);
+      setPendingMessage(null);
+    }
+  };
+  
+  const sendMessageToSession = async (targetSessionId, userMessage) => {
     const attachedSectionsToSend = currentAttachedSections;
     const attachedHighlightsToSend = currentAttachedHighlights;
     
@@ -151,7 +224,7 @@ const ChatWindow = ({ sessionId: propSessionId, activeDocumentId, onAIMessage, a
           content: `Highlight: "${h.text}"${h.note ? `\nNote: ${h.note}` : ''}${h.source ? `\nSource: ${h.sourceTitle || h.source}` : ''}`
         }))
       ];
-      const response = await chatAPI.sendMessage(sessionId, userMessage, allAttachments);
+      const response = await chatAPI.sendMessage(targetSessionId, userMessage, allAttachments);
       // Extract message, document_content, sources, status, and pending_content_id from response
       const chatMessage = response.data.response || '';
       const documentContent = response.data.document_content || '';
@@ -308,22 +381,88 @@ const ChatWindow = ({ sessionId: propSessionId, activeDocumentId, onAIMessage, a
 
   return (
     <div className="chat-window">
+      {/* Chat Header - Shows title only */}
+      {messages.length > 0 && (
+        <div className="chat-header">
+          <h1 className="chat-title">Research Session</h1>
+        </div>
+      )}
+      
       <div className="chat-messages">
         {messages.length === 0 && (
-          <div className="empty-state">
-            <p>Start a conversation by sending a message below.</p>
+          <div className="new-chat-empty-state">
+            <div className="empty-state-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </div>
+            <h2>New Chat</h2>
+            <p>Start a conversation with your AI research assistant.</p>
+            <p className="empty-state-hint">Type a message below to begin.</p>
           </div>
         )}
-        {messages.map((message, index) => (
-          <MessageBubble 
-            key={index} 
-            message={message}
-            onApprove={handleApprove}
-            onReject={handleReject}
-            onEdit={handleEdit}
-            editedContent={editingContent[message.pending_content_id]}
-          />
-        ))}
+        {(() => {
+          // Group messages into conversation pairs (user prompt + assistant responses)
+          const pairs = [];
+          let currentPair = null;
+          
+          messages.forEach((message, index) => {
+            if (message.role === 'user') {
+              // Start a new pair with user message
+              if (currentPair) {
+                pairs.push(currentPair);
+              }
+              currentPair = {
+                userMessage: message,
+                userIndex: index,
+                assistantMessages: []
+              };
+            } else if (currentPair) {
+              // Add assistant message to current pair
+              currentPair.assistantMessages.push({ message, index });
+            } else {
+              // Orphan assistant message (shouldn't happen normally)
+              pairs.push({
+                userMessage: null,
+                userIndex: null,
+                assistantMessages: [{ message, index }]
+              });
+            }
+          });
+          
+          // Don't forget the last pair
+          if (currentPair) {
+            pairs.push(currentPair);
+          }
+          
+          return pairs.map((pair, pairIndex) => (
+            <div key={pairIndex} className="conversation-pair">
+              {pair.userMessage && (
+                <div className="user-prompt-sticky">
+                  <MessageBubble 
+                    message={pair.userMessage}
+                    onApprove={handleApprove}
+                    onReject={handleReject}
+                    onEdit={handleEdit}
+                    editedContent={editingContent[pair.userMessage.pending_content_id]}
+                  />
+                </div>
+              )}
+              <div className="assistant-responses">
+                {pair.assistantMessages.map(({ message, index }) => (
+                  <MessageBubble 
+                    key={index} 
+                    message={message}
+                    onApprove={handleApprove}
+                    onReject={handleReject}
+                    onEdit={handleEdit}
+                    editedContent={editingContent[message.pending_content_id]}
+                  />
+                ))}
+              </div>
+            </div>
+          ));
+        })()}
         {showRewritePrompt && (
           <div className="rewrite-prompt">
             <p>Content was rejected. Would you like to request a rewrite?</p>
@@ -397,27 +536,52 @@ const ChatWindow = ({ sessionId: propSessionId, activeDocumentId, onAIMessage, a
           )}
         </div>
       )}
-      <form className="chat-input-form" onSubmit={handleSendMessage}>
-        <input
-          type="text"
-          className="chat-input"
-          value={inputMessage}
-          onChange={(e) => setInputMessage(e.target.value)}
-          placeholder={
-            currentAttachedSections.length > 0 || currentAttachedHighlights.length > 0
-              ? `Type your message (${currentAttachedSections.length + currentAttachedHighlights.length} item${currentAttachedSections.length + currentAttachedHighlights.length !== 1 ? 's' : ''} attached)...`
-              : "Type your message..."
-          }
-          disabled={loading || !sessionId}
+      <div className="chat-input-area">
+        <div className="chat-input-container">
+          <form className="chat-input-form" onSubmit={handleSendMessage}>
+            <input
+              type="text"
+              className="chat-input"
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              placeholder="Ask Anything..."
+              disabled={loading}
+            />
+            <div className="chat-input-actions">
+              <button type="button" className="write-mode-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+                <span>Write</span>
+                <svg className="caret-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </button>
+              <button
+                type="submit"
+                className="send-button"
+                disabled={loading || !inputMessage.trim()}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+      
+      {showProjectSelector && (
+        <ProjectSelector
+          onSelectProject={handleProjectSelected}
+          onClose={() => {
+            setShowProjectSelector(false);
+            setPendingMessage(null);
+          }}
         />
-        <button
-          type="submit"
-          className="send-button"
-          disabled={loading || !inputMessage.trim() || !sessionId}
-        >
-          Send
-        </button>
-      </form>
+      )}
     </div>
   );
 };

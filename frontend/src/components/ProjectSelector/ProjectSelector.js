@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { projectAPI } from '../../services/api';
 import './ProjectSelector.css';
 
-const ProjectSelector = ({ onSelectProject, onClose }) => {
+const ProjectSelector = ({ onSelectProject, onClose, isRequired = false }) => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -29,8 +29,8 @@ const ProjectSelector = ({ onSelectProject, onClose }) => {
     }
   };
 
-  const handleSelectProject = (projectId) => {
-    onSelectProject(projectId);
+  const handleSelectProject = (project) => {
+    onSelectProject(project.project_id, project.project_name);
   };
 
   const handleCreateProject = async (e) => {
@@ -52,7 +52,7 @@ const ProjectSelector = ({ onSelectProject, onClose }) => {
       const projectId = response.data.project_id;
       
       // Immediately select the newly created project
-      onSelectProject(projectId);
+      onSelectProject(projectId, newProjectName.trim());
     } catch (err) {
       console.error('Failed to create project:', err);
       setError(err.response?.data?.error || 'Failed to create project. Please try again.');
@@ -82,7 +82,9 @@ const ProjectSelector = ({ onSelectProject, onClose }) => {
       <div className="project-selector-modal">
         <div className="project-selector-header">
           <h2>Select a Project</h2>
-          <button className="close-button" onClick={onClose}>×</button>
+          {!isRequired && onClose && (
+            <button className="close-button" onClick={onClose}>×</button>
+          )}
         </div>
 
         {error && <div className="error-message">{error}</div>}
@@ -99,7 +101,7 @@ const ProjectSelector = ({ onSelectProject, onClose }) => {
                   <div
                     key={project.project_id}
                     className="project-item"
-                    onClick={() => handleSelectProject(project.project_id)}
+                    onClick={() => handleSelectProject(project)}
                   >
                     <div className="project-name">{project.project_name}</div>
                     {project.description && (

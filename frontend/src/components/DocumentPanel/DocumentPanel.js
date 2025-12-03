@@ -1,13 +1,39 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { documentAPI, chatAPI, projectAPI, highlightsAPI, pdfAPI } from '../../services/api';
-import { getSessionId, getToken } from '../../utils/auth';
+import { documentAPI, projectAPI, highlightsAPI, pdfAPI } from '../../services/api';
+import { getToken } from '../../utils/auth';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import SectionSelector from './SectionSelector';
 import './DocumentPanel.css';
 
-const DocumentPanel = ({ refreshTrigger, onAttachSections, onAttachHighlight, onActiveDocumentChange, highlightsTabTrigger, pdfTabTrigger }) => {
+// Close icon SVG (X) from Figma
+const CloseIcon = ({ color = "rgba(0, 50, 98, 1)" }) => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path 
+      d="M5.33337 5.33337L10.6667 10.6667M10.6667 5.33337L5.33337 10.6667" 
+      stroke={color} 
+      strokeWidth="1.5" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+// Plus icon (rotated close icon) from Figma
+const PlusIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path 
+      d="M5.33337 5.33337L10.6667 10.6667M10.6667 5.33337L5.33337 10.6667" 
+      stroke="rgba(0, 50, 98, 1)" 
+      strokeWidth="1.5" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, highlightsTabTrigger, pdfTabTrigger }) => {
   const [documents, setDocuments] = useState([]); // All open documents
   const [activeDocumentId, setActiveDocumentId] = useState(null); // Currently active tab
   const [content, setContent] = useState('');
@@ -23,7 +49,7 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onAttachHighlight, on
   const [viewAllMode, setViewAllMode] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState({}); // { projectId: true/false }
   const [projects, setProjects] = useState([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [selectedProjectId, setSelectedProjectId] = useState(propSelectedProjectId);
   const [currentProjectName, setCurrentProjectName] = useState(null);
   const [newDocumentTitle, setNewDocumentTitle] = useState('');
   const [activeTabId, setActiveTabId] = useState(null); // Can be document_id, highlights_tab_id, or pdf_tab_id
@@ -107,28 +133,15 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onAttachHighlight, on
     };
   }, [activeTabType, activeTabId, expandedPdfProjects, pdfData, pdfTabs]);
 
-  // Get project_id from session
+  // Sync with prop selectedProjectId - this is the primary source of truth
   useEffect(() => {
-    const loadProjectFromSession = async () => {
-      const sessionId = getSessionId();
-      if (!sessionId) return;
-      
-      try {
-        const response = await chatAPI.getSession(sessionId);
-        const projectId = response.data.project_id;
-        const projectName = response.data.project_name;
-        if (projectId) {
-          setSelectedProjectId(projectId);
-          setCurrentProjectName(projectName);
-          await loadAvailableDocuments(projectId);
-        }
-      } catch (err) {
-        console.error('Failed to load project from session:', err);
-      }
-    };
-    
-    loadProjectFromSession();
-  }, []);
+    if (propSelectedProjectId) {
+      setSelectedProjectId(propSelectedProjectId);
+      loadAvailableDocuments(propSelectedProjectId);
+      // Reset view mode when project changes
+      setViewAllMode(false);
+    }
+  }, [propSelectedProjectId]);
 
   // Show document list when no documents are open
   useEffect(() => {
@@ -1004,57 +1017,6 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onAttachHighlight, on
 
   return (
     <div className="document-panel">
-      <div className="document-panel-header">
-        <h2>Research Output</h2>
-        <div className="document-actions">
-          {!isEditing ? (
-            <>
-              {structure.length > 0 && (
-                <button 
-                  onClick={() => setShowSectionSelector(!showSectionSelector)} 
-                  className="attach-button"
-                  disabled={loading}
-                  title="Select sections to attach to chat"
-                >
-                  {showSectionSelector ? 'Hide' : 'Attach Sections'}
-                </button>
-              )}
-              <button 
-                onClick={handleEdit} 
-                className="edit-button"
-                disabled={loading || !activeDocumentId}
-              >
-                Edit
-              </button>
-              <button 
-                onClick={handleRefresh} 
-                className="refresh-button"
-                disabled={loading || !activeDocumentId}
-              >
-                {loading ? 'Loading...' : 'Refresh'}
-              </button>
-            </>
-          ) : (
-            <>
-              <button 
-                onClick={handleSave} 
-                className="save-button"
-                disabled={loading}
-              >
-                {loading ? 'Saving...' : 'Save'}
-              </button>
-              <button 
-                onClick={handleCancel} 
-                className="cancel-button"
-                disabled={loading}
-              >
-                Cancel
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-      
       {/* Tab Bar */}
       <div className="document-tabs">
         {/* Document tabs */}
@@ -1070,7 +1032,7 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onAttachHighlight, on
               onClick={(e) => handleCloseTab(doc.document_id, e)}
               title="Close tab"
             >
-              ×
+              <CloseIcon />
             </button>
           </div>
         ))}
@@ -1078,18 +1040,18 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onAttachHighlight, on
         {highlightsTabs.map((tab, index) => (
           <div
             key={tab.id}
-            className={`document-tab highlights-tab ${activeTabType === 'highlights' && activeTabId === tab.id ? 'active' : ''}`}
+            className={`document-tab ${activeTabType === 'highlights' && activeTabId === tab.id ? 'active' : ''}`}
             onClick={() => handleHighlightsTabClick(tab.id)}
           >
             <span className="tab-title">
-              <span className="highlights-tab-icon">✨</span> Highlights {highlightsTabs.length > 1 ? index + 1 : ''}
+              Web Highlights {highlightsTabs.length > 1 ? index + 1 : ''}
             </span>
             <button
               className="tab-close-button"
               onClick={(e) => handleCloseHighlightsTab(tab.id, e)}
               title="Close highlights tab"
             >
-              ×
+              <CloseIcon />
             </button>
           </div>
         ))}
@@ -1097,28 +1059,28 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onAttachHighlight, on
         {pdfTabs.map((tab, index) => (
           <div
             key={tab.id}
-            className={`document-tab pdf-tab ${activeTabType === 'pdf' && activeTabId === tab.id ? 'active' : ''}`}
+            className={`document-tab ${activeTabType === 'pdf' && activeTabId === tab.id ? 'active' : ''}`}
             onClick={() => handlePdfTabClick(tab.id)}
           >
             <span className="tab-title">
-              <span className="pdf-tab-icon">🖼️</span> Highlight Docs {pdfTabs.length > 1 ? index + 1 : ''}
+              Highlight Docs {pdfTabs.length > 1 ? index + 1 : ''}
             </span>
             <button
               className="tab-close-button"
               onClick={(e) => handleClosePdfTab(tab.id, e)}
               title="Close Highlight Docs tab"
             >
-              ×
+              <CloseIcon />
             </button>
           </div>
         ))}
         {/* Add document button - always visible */}
         <button
-          className="document-tab add-tab-button"
+          className="add-tab-button"
           onClick={handleAddDocument}
           title="Add document"
         >
-          + Add
+          <PlusIcon />
         </button>
       </div>
 
@@ -1564,7 +1526,15 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onAttachHighlight, on
             {(!activeDocumentId || showDocumentList) && (
               <div className="document-list-view">
             <div className="document-list-header-inline">
-              <h3>Select or Create Document</h3>
+              <div className="document-list-title-section">
+                <h3>Select or Create Document</h3>
+                {propCurrentProjectName && (
+                  <span className="current-project-badge">
+                    <span className="project-badge-icon">📁</span>
+                    {propCurrentProjectName}
+                  </span>
+                )}
+              </div>
               {activeDocumentId && (
                 <button
                   className="close-list-button"

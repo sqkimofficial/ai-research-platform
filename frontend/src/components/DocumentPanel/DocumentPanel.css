@@ -393,8 +393,8 @@
 .document-tabs {
   display: flex;
   align-items: center;
-  background-color: #f0f0f0;
-  border-bottom: 1px solid #e0e0e0;
+  background-color: #ffffff;
+  border-bottom: 1px solid rgba(0, 50, 98, 0.2);
   overflow-x: auto;
   overflow-y: hidden;
   flex-shrink: 0;
@@ -403,67 +403,83 @@
 .document-tab {
   display: flex;
   align-items: center;
-  padding: 8px 16px;
-  background-color: #e0e0e0;
-  border-right: 1px solid #ccc;
+  gap: 10px;
+  padding: 6px 8px;
+  background-color: #ffffff;
+  border-right: 1px solid rgba(0, 50, 98, 0.2);
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.2s;
+  transition: background-color 0.15s ease;
   position: relative;
-  min-width: 120px;
-  max-width: 200px;
 }
 
 .document-tab:hover {
-  background-color: #d0d0d0;
+  background-color: rgba(0, 50, 98, 0.04);
 }
 
 .document-tab.active {
-  background-color: white;
-  border-bottom: 2px solid #007bff;
-  font-weight: 500;
+  background-color: rgba(0, 50, 98, 0.06);
 }
 
 .tab-title {
-  flex: 1;
+  width: 108px;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-right: 8px;
+  white-space: nowrap;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #000000;
 }
 
 .tab-close-button {
   background: none;
   border: none;
-  font-size: 18px;
-  color: #666;
   cursor: pointer;
   padding: 0;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
-  transition: background-color 0.2s;
+  border-radius: 2px;
+  transition: background-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.tab-close-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .tab-close-button:hover {
-  background-color: #ccc;
-  color: #333;
+  background-color: rgba(0, 50, 98, 0.1);
 }
 
 .add-tab-button {
-  background-color: #007bff;
-  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+  background-color: rgba(229, 234, 239, 0.43);
   border: none;
-  padding: 8px 16px;
+  border-right: 1px solid rgba(229, 234, 239, 1);
   cursor: pointer;
-  font-weight: 500;
-  transition: background-color 0.2s;
+  transition: background-color 0.15s ease;
 }
 
 .add-tab-button:hover {
-  background-color: #0056b3;
+  background-color: rgba(229, 234, 239, 0.7);
+}
+
+.add-tab-button svg {
+  width: 16px;
+  height: 16px;
+  transform: rotate(45deg);
 }
 
 /* Document List Modal */
@@ -644,14 +660,37 @@
   align-items: center;
   margin-bottom: 24px;
   padding-bottom: 16px;
-  border-bottom: 2px solid #e0e0e0;
+  border-bottom: 1px solid rgba(0, 50, 98, 0.15);
+}
+
+.document-list-title-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .document-list-header-inline h3 {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: #333;
+  color: #003262;
+}
+
+.current-project-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background-color: rgba(0, 50, 98, 0.08);
+  border: 1px solid rgba(0, 50, 98, 0.15);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #003262;
+}
+
+.project-badge-icon {
+  font-size: 12px;
 }
 
 .close-list-button {
@@ -798,21 +837,7 @@
   border-bottom: none;
 }
 
-/* Highlights Tab Styles */
-.highlights-tab {
-  background-color: #fff3cd !important;
-  border-bottom: 2px solid #ffc107 !important;
-}
-
-.highlights-tab.active {
-  background-color: #fff3cd !important;
-  border-bottom: 2px solid #ffc107 !important;
-}
-
-.highlights-tab-icon {
-  margin-right: 6px;
-  font-size: 16px;
-}
+/* Highlights Tab Styles - unified with document tabs */
 
 .highlights-content {
   height: 100%;
@@ -1327,21 +1352,7 @@
   background-color: #f0f7ff;
 }
 
-/* PDF Tab Styles */
-.pdf-tab {
-  background-color: #ffe4e1 !important;
-  border-bottom: 2px solid #dc3545 !important;
-}
-
-.pdf-tab.active {
-  background-color: #ffe4e1 !important;
-  border-bottom: 2px solid #dc3545 !important;
-}
-
-.pdf-tab-icon {
-  margin-right: 6px;
-  font-size: 16px;
-}
+/* PDF Tab Styles - unified with document tabs */
 
 .pdf-content {
   height: 100%;
