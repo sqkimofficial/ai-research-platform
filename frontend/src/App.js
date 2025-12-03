@@ -24,6 +24,7 @@ function App() {
   const [activeDocumentId, setActiveDocumentId] = useState(null);
   const [highlightsTabTrigger, setHighlightsTabTrigger] = useState(0);
   const [pdfTabTrigger, setPdfTabTrigger] = useState(0);
+  const [researchDocsTabTrigger, setResearchDocsTabTrigger] = useState(0);
   const [showProjectSelector, setShowProjectSelector] = useState(false);
   const [currentProjectName, setCurrentProjectName] = useState('');
   
@@ -327,11 +328,13 @@ function App() {
               }}
               highlightsTabTrigger={highlightsTabTrigger}
               pdfTabTrigger={pdfTabTrigger}
+              researchDocsTabTrigger={researchDocsTabTrigger}
             />
           </div>
           <RightPanel 
             onHighlightsClick={() => setHighlightsTabTrigger(prev => prev + 1)}
             onPDFsClick={() => setPdfTabTrigger(prev => prev + 1)}
+            onResearchDocsClick={() => setResearchDocsTabTrigger(prev => prev + 1)}
           />
         </div>
       </div>
