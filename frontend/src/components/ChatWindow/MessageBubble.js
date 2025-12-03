@@ -8,6 +8,7 @@ const MessageBubble = ({ message, onApprove, onReject, onEdit, editedContent }) 
   const isUser = message.role === 'user';
   const sources = message.sources || [];
   const attachedSections = message.attachedSections || [];
+  const attachedHighlights = message.attachedHighlights || [];
   const status = message.status;
   const documentContent = message.document_content || '';
   const pendingContentId = message.pending_content_id;
@@ -51,6 +52,20 @@ const MessageBubble = ({ message, onApprove, onReject, onEdit, editedContent }) 
         <div className="attached-sections-preview">
           <div className="attached-label">Attached sections ({attachedSections.length}):</div>
           <pre className="attached-markdown">{attachedSections.map(s => s.content).join('\n\n')}</pre>
+        </div>
+      )}
+      {isUser && attachedHighlights.length > 0 && (
+        <div className="attached-highlights-preview">
+          <div className="attached-label">Attached highlights ({attachedHighlights.length}):</div>
+          <div className="attached-highlights-content">
+            {attachedHighlights.map((h, idx) => (
+              <div key={h.id || idx} className="attached-highlight-preview-item">
+                <span className="highlight-quote">"{h.text}"</span>
+                {h.note && <span className="highlight-note-preview">Note: {h.note}</span>}
+                {h.source && <span className="highlight-source-preview">From: {h.sourceTitle || h.source}</span>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
       <div className="message-content">

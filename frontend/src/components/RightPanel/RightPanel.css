@@ -43,3 +43,31 @@
   font-size: 24px;
 }
 
+.pdfs-icon-button {
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 8px;
+  background-color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.pdfs-icon-button:hover {
+  background-color: #fff0f0;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.pdfs-icon-button:active {
+  transform: translateY(0);
+}
+
+.pdfs-icon {
+  font-size: 24px;
+}
+

@@ -12,6 +12,7 @@ from routes.chat import chat_bp
 from routes.document import document_bp
 from routes.project import project_bp
 from routes.highlight import highlight_bp
+from routes.pdf import pdf_bp
 
 # Validate configuration
 Config.validate()
@@ -25,6 +26,7 @@ app.register_blueprint(chat_bp, url_prefix='/api/chat')
 app.register_blueprint(document_bp, url_prefix='/api')
 app.register_blueprint(project_bp, url_prefix='/api/project')
 app.register_blueprint(highlight_bp, url_prefix='/api/highlights')
+app.register_blueprint(pdf_bp, url_prefix='/api/pdfs')
 
 @app.route('/api/health', methods=['GET'])
 def health_check():

@@ -16,8 +16,10 @@ function App() {
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [documentRefreshTrigger, setDocumentRefreshTrigger] = useState(0);
   const [attachedSections, setAttachedSections] = useState([]);
+  const [attachedHighlights, setAttachedHighlights] = useState([]);
   const [activeDocumentId, setActiveDocumentId] = useState(null);
   const [highlightsTabTrigger, setHighlightsTabTrigger] = useState(0);
+  const [pdfTabTrigger, setPdfTabTrigger] = useState(0);
 
   useEffect(() => {
     // Check if user is already logged in
@@ -164,6 +166,8 @@ function App() {
               setDocumentRefreshTrigger(prev => prev + 1);
             }}
             attachedSections={attachedSections}
+            attachedHighlights={attachedHighlights}
+            onClearAttachedHighlights={() => setAttachedHighlights([])}
           />
         </div>
         <div className="document-section">
@@ -172,14 +176,24 @@ function App() {
             onAttachSections={(sections) => {
               setAttachedSections(sections);
             }}
+            onAttachHighlight={(highlight) => {
+              setAttachedHighlights(prev => {
+                // Avoid duplicates
+                const exists = prev.some(h => h.id === highlight.id);
+                if (exists) return prev;
+                return [...prev, highlight];
+              });
+            }}
             onActiveDocumentChange={(documentId) => {
               setActiveDocumentId(documentId);
             }}
             highlightsTabTrigger={highlightsTabTrigger}
+            pdfTabTrigger={pdfTabTrigger}
           />
         </div>
         <RightPanel 
           onHighlightsClick={() => setHighlightsTabTrigger(prev => prev + 1)}
+          onPDFsClick={() => setPdfTabTrigger(prev => prev + 1)}
         />
       </div>
     </div>

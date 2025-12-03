@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { documentAPI, chatAPI, projectAPI, highlightsAPI } from '../../services/api';
+import React, { useState, useEffect, useRef } from 'react';
+import { documentAPI, chatAPI, projectAPI, highlightsAPI, pdfAPI } from '../../services/api';
 import { getSessionId, getToken } from '../../utils/auth';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -7,7 +7,7 @@ import rehypeRaw from 'rehype-raw';
 import SectionSelector from './SectionSelector';
 import './DocumentPanel.css';
 
-const DocumentPanel = ({ refreshTrigger, onAttachSections, onActiveDocumentChange, highlightsTabTrigger }) => {
+const DocumentPanel = ({ refreshTrigger, onAttachSections, onAttachHighlight, onActiveDocumentChange, highlightsTabTrigger, pdfTabTrigger }) => {
   const [documents, setDocuments] = useState([]); // All open documents
   const [activeDocumentId, setActiveDocumentId] = useState(null); // Currently active tab
   const [content, setContent] = useState('');
@@ -26,13 +26,86 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onActiveDocumentChang
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [currentProjectName, setCurrentProjectName] = useState(null);
   const [newDocumentTitle, setNewDocumentTitle] = useState('');
-  const [activeTabId, setActiveTabId] = useState(null); // Can be document_id or highlights_tab_id
-  const [activeTabType, setActiveTabType] = useState('document'); // 'document' or 'highlights'
+  const [activeTabId, setActiveTabId] = useState(null); // Can be document_id, highlights_tab_id, or pdf_tab_id
+  const [activeTabType, setActiveTabType] = useState('document'); // 'document', 'highlights', or 'pdf'
   const [highlightsTabs, setHighlightsTabs] = useState([]); // Array of { id, selectedUrlData }
   const [highlightsProjects, setHighlightsProjects] = useState([]);
   const [highlightsData, setHighlightsData] = useState({});
   const [expandedHighlightsProjects, setExpandedHighlightsProjects] = useState({});
   const [highlightsLoading, setHighlightsLoading] = useState(false);
+  
+  // PDF-related state
+  const [pdfTabs, setPdfTabs] = useState([]); // Array of { id, selectedPdfData }
+  const [pdfProjects, setPdfProjects] = useState([]);
+  const [pdfData, setPdfData] = useState({}); // { projectId: [pdfs] }
+  const [expandedPdfProjects, setExpandedPdfProjects] = useState({});
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const fileInputRef = useRef(null);
+  const pollingIntervalRef = useRef(null);
+  
+  // PDF highlight note editing state
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editingNoteText, setEditingNoteText] = useState('');
+
+  // Auto-poll for PDF extraction status updates
+  useEffect(() => {
+    const pollForUpdates = async () => {
+      // Check if any expanded project has PDFs in processing state
+      for (const projectId of Object.keys(expandedPdfProjects)) {
+        if (expandedPdfProjects[projectId] && pdfData[projectId]) {
+          const hasProcessing = pdfData[projectId].some(
+            pdf => pdf.extraction_status === 'processing'
+          );
+          if (hasProcessing) {
+            // Reload PDFs for this project
+            try {
+              const response = await pdfAPI.getPDFs(projectId);
+              const projectPdfs = response.data.pdfs || [];
+              setPdfData(prev => ({
+                ...prev,
+                [projectId]: projectPdfs
+              }));
+            } catch (err) {
+              console.error('Failed to poll PDF status:', err);
+            }
+          }
+        }
+      }
+
+      // Also check if currently viewing a PDF that's still processing
+      const activePdfTab = pdfTabs.find(tab => tab.id === activeTabId);
+      if (activePdfTab?.selectedPdfData?.extractionStatus === 'processing') {
+        try {
+          const response = await pdfAPI.getHighlights(activePdfTab.selectedPdfData.pdf.pdf_id);
+          setPdfTabs(prev => prev.map(tab => 
+            tab.id === activeTabId ? {
+              ...tab,
+              selectedPdfData: {
+                ...tab.selectedPdfData,
+                highlights: response.data.highlights || [],
+                extractionStatus: response.data.extraction_status,
+                extractionError: response.data.extraction_error
+              }
+            } : tab
+          ));
+        } catch (err) {
+          console.error('Failed to poll PDF highlights:', err);
+        }
+      }
+    };
+
+    // Start polling if we're on a PDF tab
+    if (activeTabType === 'pdf') {
+      pollingIntervalRef.current = setInterval(pollForUpdates, 3000); // Poll every 3 seconds
+    }
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, [activeTabType, activeTabId, expandedPdfProjects, pdfData, pdfTabs]);
 
   // Get project_id from session
   useEffect(() => {
@@ -187,6 +260,18 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onActiveDocumentChang
     }
   }, [highlightsTabTrigger]);
 
+  // Create new PDF tab when trigger changes
+  useEffect(() => {
+    if (pdfTabTrigger > 0) {
+      const newTabId = `pdf-${Date.now()}`;
+      const newTab = { id: newTabId, selectedPdfData: null };
+      setPdfTabs(prev => [...prev, newTab]);
+      setActiveTabId(newTabId);
+      setActiveTabType('pdf');
+      loadPdfProjects();
+    }
+  }, [pdfTabTrigger]);
+
   // Load projects for highlights
   const loadHighlightsProjects = async () => {
     try {
@@ -227,6 +312,324 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onActiveDocumentChang
       ...prev,
       [projectId]: !isExpanded
     }));
+  };
+
+  // Load projects for PDFs
+  const loadPdfProjects = async () => {
+    try {
+      setPdfLoading(true);
+      const response = await projectAPI.getAllProjects();
+      setPdfProjects(response.data.projects || []);
+    } catch (err) {
+      console.error('Failed to load projects for PDFs:', err);
+      setError('Failed to load projects for PDFs.');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  // Load PDFs for a project
+  const loadPdfsForProject = async (projectId) => {
+    try {
+      const response = await pdfAPI.getPDFs(projectId);
+      const projectPdfs = response.data.pdfs || [];
+      setPdfData(prev => ({
+        ...prev,
+        [projectId]: projectPdfs
+      }));
+    } catch (err) {
+      console.error('Failed to load PDFs:', err);
+      setError('Failed to load PDFs for this project.');
+    }
+  };
+
+  const togglePdfProject = async (projectId) => {
+    const isExpanded = expandedPdfProjects[projectId];
+    
+    if (!isExpanded && !pdfData[projectId]) {
+      await loadPdfsForProject(projectId);
+    }
+    
+    setExpandedPdfProjects(prev => ({
+      ...prev,
+      [projectId]: !isExpanded
+    }));
+  };
+
+  const handlePdfClick = async (projectId, pdf) => {
+    try {
+      // Fetch highlights for the PDF
+      const highlightsResponse = await pdfAPI.getHighlights(pdf.pdf_id);
+      const selectedData = {
+        projectId,
+        pdf,
+        highlights: highlightsResponse.data.highlights || [],
+        extractionStatus: highlightsResponse.data.extraction_status,
+        extractionError: highlightsResponse.data.extraction_error
+      };
+      // Update the selectedPdfData for the active PDF tab
+      setPdfTabs(prev => prev.map(tab => 
+        tab.id === activeTabId ? { ...tab, selectedPdfData: selectedData } : tab
+      ));
+    } catch (err) {
+      console.error('Failed to load PDF highlights:', err);
+      setError('Failed to load PDF highlights.');
+    }
+  };
+
+  const handleBackToPdfTable = () => {
+    // Clear selectedPdfData for the active PDF tab
+    setPdfTabs(prev => prev.map(tab => 
+      tab.id === activeTabId ? { ...tab, selectedPdfData: null } : tab
+    ));
+  };
+
+  // Get active PDF tab data
+  const getActivePdfTab = () => {
+    return pdfTabs.find(tab => tab.id === activeTabId);
+  };
+
+  // Get selected PDF data for the active PDF tab
+  const getSelectedPdfData = () => {
+    const activeTab = getActivePdfTab();
+    return activeTab?.selectedPdfData || null;
+  };
+
+  // Handle PDF file upload
+  const handlePdfUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const validExtensions = ['.pdf', '.jpg', '.jpeg', '.png'];
+    const fileName = file.name.toLowerCase();
+    const isValidFile = validExtensions.some(ext => fileName.endsWith(ext));
+    
+    if (!isValidFile) {
+      setError('Please select a PDF, JPG, or PNG file');
+      return;
+    }
+
+    // Find the expanded project for upload
+    const expandedProjectId = Object.keys(expandedPdfProjects).find(id => expandedPdfProjects[id]);
+    if (!expandedProjectId) {
+      setError('Please expand a project first to upload a document');
+      return;
+    }
+
+    try {
+      setUploadingPdf(true);
+      setError('');
+      
+      await pdfAPI.uploadPDF(expandedProjectId, file);
+      
+      // Reload PDFs for the project
+      await loadPdfsForProject(expandedProjectId);
+      
+      // Clear file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } catch (err) {
+      console.error('Failed to upload PDF:', err);
+      setError(err.response?.data?.error || 'Failed to upload PDF');
+    } finally {
+      setUploadingPdf(false);
+    }
+  };
+
+  // Handle PDF delete
+  const handleDeletePdf = async (pdfId, projectId) => {
+    if (!window.confirm('Are you sure you want to delete this PDF?')) {
+      return;
+    }
+
+    try {
+      await pdfAPI.deletePDF(pdfId);
+      await loadPdfsForProject(projectId);
+    } catch (err) {
+      console.error('Failed to delete PDF:', err);
+      setError('Failed to delete PDF');
+    }
+  };
+
+  // Handle PDF highlight delete
+  const handleDeletePdfHighlight = async (pdfId, highlightId) => {
+    if (!window.confirm('Are you sure you want to delete this highlight?')) {
+      return;
+    }
+
+    try {
+      await pdfAPI.deleteHighlight(pdfId, highlightId);
+      
+      // Update the selected PDF data
+      const activePdfTab = getActivePdfTab();
+      if (activePdfTab?.selectedPdfData) {
+        const updatedHighlights = activePdfTab.selectedPdfData.highlights.filter(
+          h => h.highlight_id !== highlightId
+        );
+        setPdfTabs(prev => prev.map(tab => 
+          tab.id === activeTabId ? {
+            ...tab,
+            selectedPdfData: {
+              ...tab.selectedPdfData,
+              highlights: updatedHighlights
+            }
+          } : tab
+        ));
+      }
+    } catch (err) {
+      console.error('Failed to delete PDF highlight:', err);
+      setError('Failed to delete PDF highlight');
+    }
+  };
+
+  // Handle re-extract highlights
+  const handleReextractHighlights = async (pdfId) => {
+    try {
+      await pdfAPI.reextractHighlights(pdfId);
+      setError('');
+      
+      // Update status to processing
+      setPdfTabs(prev => prev.map(tab => 
+        tab.id === activeTabId && tab.selectedPdfData?.pdf?.pdf_id === pdfId ? {
+          ...tab,
+          selectedPdfData: {
+            ...tab.selectedPdfData,
+            extractionStatus: 'processing'
+          }
+        } : tab
+      ));
+    } catch (err) {
+      console.error('Failed to re-extract highlights:', err);
+      setError('Failed to re-extract highlights');
+    }
+  };
+
+  // Refresh PDF highlights
+  const handleRefreshPdfHighlights = async () => {
+    const pdfData = getSelectedPdfData();
+    if (!pdfData) return;
+
+    try {
+      const response = await pdfAPI.getHighlights(pdfData.pdf.pdf_id);
+      setPdfTabs(prev => prev.map(tab => 
+        tab.id === activeTabId ? {
+          ...tab,
+          selectedPdfData: {
+            ...tab.selectedPdfData,
+            highlights: response.data.highlights || [],
+            extractionStatus: response.data.extraction_status,
+            extractionError: response.data.extraction_error
+          }
+        } : tab
+      ));
+    } catch (err) {
+      console.error('Failed to refresh PDF highlights:', err);
+      setError('Failed to refresh highlights');
+    }
+  };
+
+  // Get color class for highlight
+  const getColorClass = (colorTag) => {
+    const colorMap = {
+      yellow: 'highlight-color-yellow',
+      orange: 'highlight-color-orange',
+      pink: 'highlight-color-pink',
+      red: 'highlight-color-red',
+      green: 'highlight-color-green',
+      blue: 'highlight-color-blue',
+      purple: 'highlight-color-purple'
+    };
+    return colorMap[colorTag] || 'highlight-color-yellow';
+  };
+
+  // Get icon for document type based on filename
+  const getDocumentIcon = (filename) => {
+    if (!filename) return '📄';
+    const lower = filename.toLowerCase();
+    if (lower.endsWith('.pdf')) return '📄';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return '🖼️';
+    if (lower.endsWith('.png')) return '🖼️';
+    return '📄';
+  };
+
+  // Attach a web highlight to chat
+  const handleAttachWebHighlight = (highlight, urlDoc) => {
+    if (!onAttachHighlight) return;
+    
+    const attachedHighlight = {
+      id: `web-${highlight.highlight_id}`,
+      type: 'web',
+      text: highlight.text,
+      note: highlight.note,
+      tags: highlight.tags,
+      source: urlDoc.source_url,
+      sourceTitle: urlDoc.page_title,
+      timestamp: highlight.timestamp
+    };
+    
+    onAttachHighlight(attachedHighlight);
+  };
+
+  // Attach a PDF/image highlight to chat
+  const handleAttachPdfHighlight = (highlight, pdf) => {
+    if (!onAttachHighlight) return;
+    
+    const attachedHighlight = {
+      id: `pdf-${highlight.highlight_id}`,
+      type: 'pdf',
+      text: highlight.text,
+      note: highlight.note,
+      colorTag: highlight.color_tag,
+      pageNumber: highlight.page_number,
+      source: pdf.filename,
+      timestamp: highlight.timestamp
+    };
+    
+    onAttachHighlight(attachedHighlight);
+  };
+
+  // Start editing a PDF highlight note
+  const handleStartEditNote = (highlight) => {
+    setEditingNoteId(highlight.highlight_id);
+    setEditingNoteText(highlight.note || '');
+  };
+
+  // Save PDF highlight note
+  const handleSaveNote = async (pdfId, highlightId) => {
+    try {
+      // Update note via API - we need to add this endpoint
+      await pdfAPI.updateHighlightNote(pdfId, highlightId, editingNoteText);
+      
+      // Update local state
+      setPdfTabs(prev => prev.map(tab => {
+        if (tab.id === activeTabId && tab.selectedPdfData) {
+          const updatedHighlights = tab.selectedPdfData.highlights.map(h => 
+            h.highlight_id === highlightId ? { ...h, note: editingNoteText } : h
+          );
+          return {
+            ...tab,
+            selectedPdfData: {
+              ...tab.selectedPdfData,
+              highlights: updatedHighlights
+            }
+          };
+        }
+        return tab;
+      }));
+      
+      setEditingNoteId(null);
+      setEditingNoteText('');
+    } catch (err) {
+      console.error('Failed to save note:', err);
+      setError('Failed to save note');
+    }
+  };
+
+  // Cancel editing note
+  const handleCancelEditNote = () => {
+    setEditingNoteId(null);
+    setEditingNoteText('');
   };
 
   const handleUrlClick = (projectId, urlDoc) => {
@@ -425,9 +828,24 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onActiveDocumentChang
   };
 
   const handleAddDocument = () => {
-    setShowDocumentList(!showDocumentList);
-    if (!showDocumentList && selectedProjectId) {
-      loadAvailableDocuments(selectedProjectId);
+    // If we're on a different tab type (highlights or PDF), switch to document tab first
+    if (activeTabType !== 'document') {
+      setActiveTabType('document');
+      // If there's an active document, use it as the active tab
+      if (activeDocumentId) {
+        setActiveTabId(activeDocumentId);
+      }
+      // Always show the document list when switching from another tab type
+      setShowDocumentList(true);
+      if (selectedProjectId) {
+        loadAvailableDocuments(selectedProjectId);
+      }
+    } else {
+      // If already on document tab, toggle the document list
+      setShowDocumentList(!showDocumentList);
+      if (!showDocumentList && selectedProjectId) {
+        loadAvailableDocuments(selectedProjectId);
+      }
     }
   };
 
@@ -531,11 +949,46 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onActiveDocumentChang
     }
   };
 
+  const handleClosePdfTab = (tabId, e) => {
+    e.stopPropagation();
+    const newPdfTabs = pdfTabs.filter(tab => tab.id !== tabId);
+    setPdfTabs(newPdfTabs);
+    
+    // If closing active tab, switch to another tab or go to document
+    if (tabId === activeTabId) {
+      if (newPdfTabs.length > 0) {
+        setActiveTabId(newPdfTabs[0].id);
+        setActiveTabType('pdf');
+      } else if (highlightsTabs.length > 0) {
+        setActiveTabId(highlightsTabs[0].id);
+        setActiveTabType('highlights');
+      } else if (documents.length > 0) {
+        setActiveTabId(activeDocumentId || documents[0].document_id);
+        setActiveTabType('document');
+        if (!activeDocumentId) {
+          setActiveDocumentId(documents[0].document_id);
+        }
+      } else {
+        setActiveTabId(null);
+        setActiveTabType('document');
+        setShowDocumentList(true);
+      }
+    }
+  };
+
   const handleHighlightsTabClick = (tabId) => {
     setActiveTabId(tabId);
     setActiveTabType('highlights');
     if (highlightsProjects.length === 0) {
       loadHighlightsProjects();
+    }
+  };
+
+  const handlePdfTabClick = (tabId) => {
+    setActiveTabId(tabId);
+    setActiveTabType('pdf');
+    if (pdfProjects.length === 0) {
+      loadPdfProjects();
     }
   };
 
@@ -640,6 +1093,25 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onActiveDocumentChang
             </button>
           </div>
         ))}
+        {/* PDF/Image tabs */}
+        {pdfTabs.map((tab, index) => (
+          <div
+            key={tab.id}
+            className={`document-tab pdf-tab ${activeTabType === 'pdf' && activeTabId === tab.id ? 'active' : ''}`}
+            onClick={() => handlePdfTabClick(tab.id)}
+          >
+            <span className="tab-title">
+              <span className="pdf-tab-icon">🖼️</span> Highlight Docs {pdfTabs.length > 1 ? index + 1 : ''}
+            </span>
+            <button
+              className="tab-close-button"
+              onClick={(e) => handleClosePdfTab(tab.id, e)}
+              title="Close Highlight Docs tab"
+            >
+              ×
+            </button>
+          </div>
+        ))}
         {/* Add document button - always visible */}
         <button
           className="document-tab add-tab-button"
@@ -695,6 +1167,13 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onActiveDocumentChang
                             <div className="highlight-item-header">
                               <span className="highlight-item-icon">✨</span>
                               <span className="highlight-item-date">{formatShortDate(highlight.timestamp)}</span>
+                              <button 
+                                className="attach-highlight-btn"
+                                onClick={() => handleAttachWebHighlight(highlight, getSelectedUrlData().urlDoc)}
+                                title="Attach to chat"
+                              >
+                                📎 Attach
+                              </button>
                               <button 
                                 className="delete-highlight-btn-item"
                                 onClick={() => handleDeleteHighlight(getSelectedUrlData().projectId, getSelectedUrlData().urlDoc.source_url, highlight.highlight_id)}
@@ -795,6 +1274,271 @@ const DocumentPanel = ({ refreshTrigger, onAttachSections, onActiveDocumentChang
                                     {urlDoc.highlights?.length || 0} highlight{(urlDoc.highlights?.length || 0) !== 1 ? 's' : ''}
                                   </td>
                                   <td className="url-date">{formatShortDate(urlDoc.updated_at)}</td>
+                                </tr>
+                              ))
+                            )
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            )}
+          </div>
+        )}
+
+        {/* PDF Tab Content */}
+        {activeTabType === 'pdf' && (
+          <div className="pdf-content">
+            {getSelectedPdfData() ? (
+              /* Split View: PDF Viewer (70%) + Highlights List (30%) */
+              <div className="pdf-split-view">
+                <div className="pdf-viewer-section">
+                  <div className="pdf-viewer-header">
+                    <button 
+                      className="back-to-table-button"
+                      onClick={handleBackToPdfTable}
+                      title="Back to table"
+                    >
+                      ← Back
+                    </button>
+                    <div className="pdf-info-header">
+                      <span className="pdf-filename-header">{getSelectedPdfData().pdf.filename}</span>
+                      <span className="pdf-status-header">
+                        Status: {getSelectedPdfData().extractionStatus}
+                        {getSelectedPdfData().extractionStatus === 'processing' && ' (AI is extracting highlights...)'}
+                      </span>
+                    </div>
+                    <button
+                      className="refresh-pdf-button"
+                      onClick={handleRefreshPdfHighlights}
+                      title="Refresh highlights"
+                    >
+                      🔄 Refresh
+                    </button>
+                  </div>
+                  <iframe
+                    src={pdfAPI.getPDFFileUrl(getSelectedPdfData().pdf.pdf_id)}
+                    className="pdf-iframe"
+                    title="PDF viewer"
+                  />
+                </div>
+                <div className="pdf-highlights-section">
+                  <div className="pdf-highlights-header">
+                    <h3>Highlights ({getSelectedPdfData().highlights.length})</h3>
+                    {getSelectedPdfData().extractionStatus === 'failed' && (
+                      <button
+                        className="reextract-button"
+                        onClick={() => handleReextractHighlights(getSelectedPdfData().pdf.pdf_id)}
+                        title="Re-extract highlights"
+                      >
+                        🔄 Re-extract
+                      </button>
+                    )}
+                  </div>
+                  {getSelectedPdfData().extractionError && (
+                    <div className="extraction-error">
+                      Error: {getSelectedPdfData().extractionError}
+                    </div>
+                  )}
+                  <div className="pdf-highlights-list">
+                    {getSelectedPdfData().highlights.length === 0 ? (
+                      <div className="no-highlights-message-pdf">
+                        {getSelectedPdfData().extractionStatus === 'processing' ? (
+                          <p>AI is extracting highlights from this PDF. Please refresh in a moment.</p>
+                        ) : getSelectedPdfData().extractionStatus === 'failed' ? (
+                          <p>Failed to extract highlights. Click "Re-extract" to try again.</p>
+                        ) : (
+                          <p>No highlights found in this PDF.</p>
+                        )}
+                      </div>
+                    ) : (
+                      getSelectedPdfData().highlights.map((highlight, hIndex) => (
+                        <div key={hIndex} className={`pdf-highlight-item ${getColorClass(highlight.color_tag)}`}>
+                          <div className="pdf-highlight-item-header">
+                            <span className={`pdf-highlight-color-tag ${getColorClass(highlight.color_tag)}`}>
+                              {highlight.color_tag}
+                            </span>
+                            {highlight.page_number && (
+                              <span className="pdf-highlight-page">Page {highlight.page_number}</span>
+                            )}
+                            <button 
+                              className="attach-highlight-btn"
+                              onClick={() => handleAttachPdfHighlight(highlight, getSelectedPdfData().pdf)}
+                              title="Attach to chat"
+                            >
+                              📎 Attach
+                            </button>
+                            <button 
+                              className="edit-note-btn-pdf"
+                              onClick={() => handleStartEditNote(highlight)}
+                              title="Add/Edit note"
+                            >
+                              📝
+                            </button>
+                            <button 
+                              className="delete-highlight-btn-pdf"
+                              onClick={() => handleDeletePdfHighlight(getSelectedPdfData().pdf.pdf_id, highlight.highlight_id)}
+                              title="Delete highlight"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                          <div className="pdf-highlight-item-content">
+                            <p className="pdf-highlight-text">"{highlight.text}"</p>
+                            {editingNoteId === highlight.highlight_id ? (
+                              <div className="pdf-highlight-note-edit">
+                                <textarea
+                                  value={editingNoteText}
+                                  onChange={(e) => setEditingNoteText(e.target.value)}
+                                  placeholder="Add a note..."
+                                  className="note-edit-textarea"
+                                />
+                                <div className="note-edit-actions">
+                                  <button 
+                                    className="note-save-btn"
+                                    onClick={() => handleSaveNote(getSelectedPdfData().pdf.pdf_id, highlight.highlight_id)}
+                                  >
+                                    Save
+                                  </button>
+                                  <button 
+                                    className="note-cancel-btn"
+                                    onClick={handleCancelEditNote}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              highlight.note && (
+                                <div className="pdf-highlight-note">
+                                  <span className="note-label">Note:</span> {highlight.note}
+                                </div>
+                              )
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Table View: Projects and PDFs */
+              pdfLoading ? (
+                <div className="loading-message">Loading PDFs...</div>
+              ) : pdfProjects.length === 0 ? (
+                <div className="empty-state">
+                  <p>No projects yet. Create a project to start uploading highlight documents!</p>
+                </div>
+              ) : (
+                <div className="pdf-table-container">
+                  {/* Hidden file input for upload */}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handlePdfUpload}
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    style={{ display: 'none' }}
+                  />
+                  
+                  <table className="pdf-table">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>Project / Document</th>
+                        <th>Highlights</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pdfProjects.map((project) => (
+                        <React.Fragment key={project.project_id}>
+                          {/* Project Row */}
+                          <tr 
+                            className={`project-row ${expandedPdfProjects[project.project_id] ? 'expanded' : ''}`}
+                            onClick={() => togglePdfProject(project.project_id)}
+                          >
+                            <td className="expand-cell">
+                              <span className={`expand-icon ${expandedPdfProjects[project.project_id] ? 'expanded' : ''}`}>
+                                ▶
+                              </span>
+                            </td>
+                            <td className="project-name">
+                              <span className="project-icon">📁</span>
+                              {project.project_name}
+                            </td>
+                            <td className="project-description">{project.description || '—'}</td>
+                            <td></td>
+                            <td className="project-date">{formatShortDate(project.updated_at)}</td>
+                            <td className="project-actions">
+                              {expandedPdfProjects[project.project_id] && (
+                                <button
+                                  className="upload-pdf-button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    fileInputRef.current?.click();
+                                  }}
+                                  disabled={uploadingPdf}
+                                  title="Upload PDF, JPG, or PNG"
+                                >
+                                  {uploadingPdf ? '⏳' : '➕'} Upload
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+
+                          {/* PDF Rows (when project is expanded) */}
+                          {expandedPdfProjects[project.project_id] && pdfData[project.project_id] && (
+                            pdfData[project.project_id].length === 0 ? (
+                              <tr className="pdf-row no-pdfs">
+                                <td></td>
+                                <td colSpan="5" className="no-pdfs-message">
+                                  No documents uploaded yet. Click "Upload" to add a PDF, JPG, or PNG.
+                                </td>
+                              </tr>
+                            ) : (
+                              pdfData[project.project_id].map((pdf, pdfIndex) => (
+                                <tr 
+                                  key={`${project.project_id}-pdf-${pdfIndex}`}
+                                  className="pdf-row clickable-pdf-row"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handlePdfClick(project.project_id, pdf);
+                                  }}
+                                >
+                                  <td className="expand-cell"></td>
+                                  <td className="pdf-cell">
+                                    <span className="pdf-icon">{getDocumentIcon(pdf.filename)}</span>
+                                    <div className="pdf-info">
+                                      <span className="pdf-filename">{pdf.filename}</span>
+                                    </div>
+                                  </td>
+                                  <td className="pdf-highlight-count">
+                                    {pdf.highlights?.length || 0} highlight{(pdf.highlights?.length || 0) !== 1 ? 's' : ''}
+                                  </td>
+                                  <td className={`pdf-status pdf-status-${pdf.extraction_status}`}>
+                                    {pdf.extraction_status === 'completed' ? '✅' : 
+                                     pdf.extraction_status === 'processing' ? '⏳' : 
+                                     pdf.extraction_status === 'failed' ? '❌' : '⏸️'}
+                                    {' '}{pdf.extraction_status}
+                                  </td>
+                                  <td className="pdf-date">{formatShortDate(pdf.updated_at)}</td>
+                                  <td className="pdf-actions">
+                                    <button
+                                      className="delete-pdf-button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeletePdf(pdf.pdf_id, project.project_id);
+                                      }}
+                                      title="Delete PDF"
+                                    >
+                                      🗑️
+                                    </button>
+                                  </td>
                                 </tr>
                               ))
                             )

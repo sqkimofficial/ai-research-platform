@@ -564,6 +564,242 @@ class HighlightModel:
         return result.modified_count > 0
 
 
+class PDFDocumentModel:
+    """Model for managing PDF documents and images with extracted highlights"""
+    
+    # Standard colors for normalization (matching the AI prompt)
+    STANDARD_COLORS = ['yellow', 'orange', 'pink', 'red', 'green', 'blue', 'purple']
+    
+    @staticmethod
+    def normalize_color(color_string):
+        """
+        Normalize a color string to one of the standard colors.
+        Handles variations like 'light yellow', 'dark blue', 'bright red', etc.
+        """
+        if not color_string:
+            return 'yellow'  # Default color
+        
+        color_lower = color_string.lower().strip()
+        
+        # Direct mapping for common variations
+        color_mappings = {
+            # Yellow variations
+            'yellow': 'yellow', 'light yellow': 'yellow', 'dark yellow': 'yellow',
+            'bright yellow': 'yellow', 'pale yellow': 'yellow', 'golden': 'yellow',
+            'gold': 'yellow', 'amber': 'yellow', 'mustard': 'yellow', 'lemon': 'yellow',
+            # Red variations
+            'red': 'red', 'light red': 'red', 'dark red': 'red', 'bright red': 'red',
+            'crimson': 'red', 'scarlet': 'red', 'maroon': 'red', 'burgundy': 'red',
+            'cherry': 'red', 'ruby': 'red', 'rose': 'pink',
+            # Green variations
+            'green': 'green', 'light green': 'green', 'dark green': 'green',
+            'bright green': 'green', 'lime': 'green', 'olive': 'green',
+            'forest': 'green', 'emerald': 'green', 'mint': 'green', 'teal': 'cyan',
+            # Blue variations
+            'blue': 'blue', 'light blue': 'blue', 'dark blue': 'blue',
+            'bright blue': 'blue', 'navy': 'blue', 'royal blue': 'blue',
+            'sky blue': 'blue', 'azure': 'blue', 'cobalt': 'blue', 'indigo': 'purple',
+            'cyan': 'blue', 'aqua': 'blue', 'turquoise': 'blue', 'teal': 'blue',
+            # Orange variations
+            'orange': 'orange', 'light orange': 'orange', 'dark orange': 'orange',
+            'bright orange': 'orange', 'peach': 'orange', 'coral': 'orange',
+            'tangerine': 'orange', 'apricot': 'orange',
+            # Pink variations
+            'pink': 'pink', 'light pink': 'pink', 'dark pink': 'pink',
+            'bright pink': 'pink', 'hot pink': 'pink', 'magenta': 'pink',
+            'fuchsia': 'pink', 'salmon': 'pink',
+            # Purple variations
+            'purple': 'purple', 'light purple': 'purple', 'dark purple': 'purple',
+            'bright purple': 'purple', 'violet': 'purple', 'lavender': 'purple',
+            'plum': 'purple', 'mauve': 'purple', 'lilac': 'purple',
+        }
+        
+        # Check direct mapping first
+        if color_lower in color_mappings:
+            return color_mappings[color_lower]
+        
+        # Check if any standard color is contained in the string
+        for standard_color in PDFDocumentModel.STANDARD_COLORS:
+            if standard_color in color_lower:
+                return standard_color
+        
+        # Default to yellow if no match
+        return 'yellow'
+    
+    @staticmethod
+    def create_pdf_document(user_id, project_id, filename, file_data, content_type='application/pdf'):
+        """
+        Create a new PDF document entry.
+        
+        Args:
+            user_id: User ID
+            project_id: Project ID
+            filename: Original filename
+            file_data: Binary PDF data (base64 encoded string)
+            content_type: MIME type
+        
+        Returns:
+            pdf_document_id
+        """
+        db = Database.get_db()
+        pdf_id = str(uuid.uuid4())
+        
+        pdf_doc = {
+            'pdf_id': pdf_id,
+            'user_id': user_id,
+            'project_id': project_id,
+            'filename': filename,
+            'file_data': file_data,  # Base64 encoded PDF data
+            'content_type': content_type,
+            'highlights': [],  # Will be populated by AI extraction
+            'extraction_status': 'pending',  # pending, processing, completed, failed
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
+        }
+        
+        db.pdf_documents.insert_one(pdf_doc)
+        return pdf_id
+    
+    @staticmethod
+    def get_pdf_document(pdf_id):
+        """Get a PDF document by ID"""
+        db = Database.get_db()
+        return db.pdf_documents.find_one({'pdf_id': pdf_id})
+    
+    @staticmethod
+    def get_pdf_documents_by_project(user_id, project_id):
+        """Get all PDF documents for a project (without file data for performance)"""
+        db = Database.get_db()
+        # Exclude file_data for listing to improve performance
+        return list(db.pdf_documents.find(
+            {'user_id': user_id, 'project_id': project_id},
+            {'file_data': 0}
+        ).sort('updated_at', -1))
+    
+    @staticmethod
+    def get_all_pdf_documents(user_id):
+        """Get all PDF documents for a user (without file data)"""
+        db = Database.get_db()
+        return list(db.pdf_documents.find(
+            {'user_id': user_id},
+            {'file_data': 0}
+        ).sort('updated_at', -1))
+    
+    @staticmethod
+    def get_pdf_file_data(pdf_id):
+        """Get just the file data for a PDF document"""
+        db = Database.get_db()
+        doc = db.pdf_documents.find_one(
+            {'pdf_id': pdf_id},
+            {'file_data': 1, 'content_type': 1, 'filename': 1}
+        )
+        return doc
+    
+    @staticmethod
+    def update_highlights(pdf_id, highlights):
+        """
+        Update the highlights for a PDF document.
+        Each highlight should have: text, color_tag, page_number (optional), position (optional)
+        """
+        db = Database.get_db()
+        
+        # Normalize colors for all highlights
+        normalized_highlights = []
+        for h in highlights:
+            normalized_h = h.copy()
+            normalized_h['color_tag'] = PDFDocumentModel.normalize_color(h.get('color', h.get('color_tag', 'yellow')))
+            normalized_h['highlight_id'] = str(uuid.uuid4())
+            normalized_h['timestamp'] = datetime.utcnow()
+            normalized_highlights.append(normalized_h)
+        
+        result = db.pdf_documents.update_one(
+            {'pdf_id': pdf_id},
+            {
+                '$set': {
+                    'highlights': normalized_highlights,
+                    'extraction_status': 'completed',
+                    'updated_at': datetime.utcnow()
+                }
+            }
+        )
+        return result.modified_count > 0
+    
+    @staticmethod
+    def update_extraction_status(pdf_id, status, error_message=None):
+        """Update the extraction status of a PDF document"""
+        db = Database.get_db()
+        update_data = {
+            'extraction_status': status,
+            'updated_at': datetime.utcnow()
+        }
+        if error_message:
+            update_data['extraction_error'] = error_message
+        
+        db.pdf_documents.update_one(
+            {'pdf_id': pdf_id},
+            {'$set': update_data}
+        )
+    
+    @staticmethod
+    def add_highlight(pdf_id, highlight_text, color, page_number=None, note=None):
+        """Add a single highlight to a PDF document"""
+        db = Database.get_db()
+        highlight_id = str(uuid.uuid4())
+        
+        highlight = {
+            'highlight_id': highlight_id,
+            'text': highlight_text,
+            'color_tag': PDFDocumentModel.normalize_color(color),
+            'page_number': page_number,
+            'note': note,
+            'timestamp': datetime.utcnow()
+        }
+        
+        db.pdf_documents.update_one(
+            {'pdf_id': pdf_id},
+            {
+                '$push': {'highlights': highlight},
+                '$set': {'updated_at': datetime.utcnow()}
+            }
+        )
+        return highlight_id
+    
+    @staticmethod
+    def delete_highlight(pdf_id, highlight_id):
+        """Delete a specific highlight from a PDF document"""
+        db = Database.get_db()
+        result = db.pdf_documents.update_one(
+            {'pdf_id': pdf_id},
+            {
+                '$pull': {'highlights': {'highlight_id': highlight_id}},
+                '$set': {'updated_at': datetime.utcnow()}
+            }
+        )
+        return result.modified_count > 0
+    
+    @staticmethod
+    def update_highlight_note(pdf_id, highlight_id, note):
+        """Update the note for a specific highlight"""
+        db = Database.get_db()
+        result = db.pdf_documents.update_one(
+            {'pdf_id': pdf_id, 'highlights.highlight_id': highlight_id},
+            {
+                '$set': {
+                    'highlights.$.note': note,
+                    'updated_at': datetime.utcnow()
+                }
+            }
+        )
+        return result.modified_count > 0
+    
+    @staticmethod
+    def delete_pdf_document(pdf_id, user_id):
+        """Delete a PDF document"""
+        db = Database.get_db()
+        result = db.pdf_documents.delete_one({'pdf_id': pdf_id, 'user_id': user_id})
+        return result.deleted_count > 0
+
+
 class DocumentTypeModel:
     """Model for managing document element types globally across all sessions"""
     

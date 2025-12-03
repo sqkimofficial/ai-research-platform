@@ -147,6 +147,67 @@ export const highlightsAPI = {
   },
 };
 
+// Highlight Documents API (PDF, JPG, PNG)
+export const pdfAPI = {
+  // Upload a document file (PDF, JPG, PNG)
+  uploadPDF: (projectId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('project_id', projectId);
+    return api.post('/api/pdfs', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+  // Get all documents (optionally filtered by project)
+  getPDFs: (projectId = null) => {
+    let url = '/api/pdfs';
+    if (projectId) {
+      url += `?project_id=${projectId}`;
+    }
+    return api.get(url);
+  },
+  // Get a specific document
+  getPDF: (pdfId) => {
+    return api.get(`/api/pdfs?pdf_id=${pdfId}`);
+  },
+  // Get document file URL for viewing
+  getPDFFileUrl: (pdfId) => {
+    const token = getToken();
+    return `${API_BASE_URL}/api/pdfs/file/${pdfId}?token=${token}`;
+  },
+  // Get highlights for a document
+  getHighlights: (pdfId) => {
+    return api.get(`/api/pdfs/highlights/${pdfId}`);
+  },
+  // Add a highlight to a document
+  addHighlight: (pdfId, text, color = 'yellow', pageNumber = null, note = null) => {
+    return api.post(`/api/pdfs/highlights/${pdfId}`, {
+      text,
+      color,
+      page_number: pageNumber,
+      note
+    });
+  },
+  // Delete a highlight from a document
+  deleteHighlight: (pdfId, highlightId) => {
+    return api.delete(`/api/pdfs/highlights/${pdfId}/${highlightId}`);
+  },
+  // Update a highlight's note
+  updateHighlightNote: (pdfId, highlightId, note) => {
+    return api.put(`/api/pdfs/highlights/${pdfId}/${highlightId}`, { note });
+  },
+  // Delete a document
+  deletePDF: (pdfId) => {
+    return api.delete(`/api/pdfs/${pdfId}`);
+  },
+  // Re-extract highlights from a document
+  reextractHighlights: (pdfId) => {
+    return api.post(`/api/pdfs/reextract/${pdfId}`);
+  },
+};
+
 export default api;
 
 
