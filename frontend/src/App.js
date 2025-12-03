@@ -187,7 +187,7 @@ function App() {
     setIsChatsPanelOpen(false);
   };
 
-  const handleSwitchSession = (sessionId, projectId, projectName) => {
+  const handleSwitchSession = (sessionId) => {
     if (sessionId === null) {
       // New chat requested - keep current project (the one selected at login)
       handleNewChat(selectedProjectId);
@@ -195,15 +195,7 @@ function App() {
       setSessionId(sessionId);
       setCurrentSessionId(sessionId);
       setIsNewChat(false);
-      // Update project to match the session's project
-      if (projectId) {
-        setSelectedProjectId(projectId);
-        setCurrentProjectName(projectName || '');
-        localStorage.setItem('selectedProjectId', projectId);
-        if (projectName) {
-          localStorage.setItem('selectedProjectName', projectName);
-        }
-      }
+      // Project stays the same since all sessions are filtered by current project
     }
     setIsChatsPanelOpen(false);
   };
@@ -283,6 +275,8 @@ function App() {
           onSelectSession={handleSwitchSession}
           currentSessionId={currentSessionId}
           isNewChat={isNewChat}
+          selectedProjectId={selectedProjectId}
+          currentProjectName={currentProjectName}
         />
         <div className="main-content" ref={mainContentRef}>
           <div 

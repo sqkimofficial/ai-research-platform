@@ -45,26 +45,18 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const [selectedSections, setSelectedSections] = useState([]);
   const [showDocumentList, setShowDocumentList] = useState(false);
   const [availableDocuments, setAvailableDocuments] = useState([]);
-  const [allDocumentsByProject, setAllDocumentsByProject] = useState({}); // { projectId: { projectName, documents: [] } }
-  const [viewAllMode, setViewAllMode] = useState(false);
-  const [expandedProjects, setExpandedProjects] = useState({}); // { projectId: true/false }
-  const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(propSelectedProjectId);
   const [currentProjectName, setCurrentProjectName] = useState(null);
   const [newDocumentTitle, setNewDocumentTitle] = useState('');
   const [activeTabId, setActiveTabId] = useState(null); // Can be document_id, highlights_tab_id, or pdf_tab_id
   const [activeTabType, setActiveTabType] = useState('document'); // 'document', 'highlights', or 'pdf'
   const [highlightsTabs, setHighlightsTabs] = useState([]); // Array of { id, selectedUrlData }
-  const [highlightsProjects, setHighlightsProjects] = useState([]);
-  const [highlightsData, setHighlightsData] = useState({});
-  const [expandedHighlightsProjects, setExpandedHighlightsProjects] = useState({});
+  const [highlightsUrls, setHighlightsUrls] = useState([]); // URLs for current project
   const [highlightsLoading, setHighlightsLoading] = useState(false);
   
   // PDF-related state
   const [pdfTabs, setPdfTabs] = useState([]); // Array of { id, selectedPdfData }
-  const [pdfProjects, setPdfProjects] = useState([]);
-  const [pdfData, setPdfData] = useState({}); // { projectId: [pdfs] }
-  const [expandedPdfProjects, setExpandedPdfProjects] = useState({});
+  const [pdfs, setPdfs] = useState([]); // PDFs for current project
   const [pdfLoading, setPdfLoading] = useState(false);
   const [uploadingPdf, setUploadingPdf] = useState(false);
   const fileInputRef = useRef(null);
@@ -77,25 +69,13 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   // Auto-poll for PDF extraction status updates
   useEffect(() => {
     const pollForUpdates = async () => {
-      // Check if any expanded project has PDFs in processing state
-      for (const projectId of Object.keys(expandedPdfProjects)) {
-        if (expandedPdfProjects[projectId] && pdfData[projectId]) {
-          const hasProcessing = pdfData[projectId].some(
-            pdf => pdf.extraction_status === 'processing'
-          );
-          if (hasProcessing) {
-            // Reload PDFs for this project
-            try {
-              const response = await pdfAPI.getPDFs(projectId);
-              const projectPdfs = response.data.pdfs || [];
-              setPdfData(prev => ({
-                ...prev,
-                [projectId]: projectPdfs
-              }));
-            } catch (err) {
-              console.error('Failed to poll PDF status:', err);
-            }
-          }
+      // Check if any PDFs in current project are still processing
+      if (selectedProjectId && pdfs.some(pdf => pdf.extraction_status === 'processing')) {
+        try {
+          const response = await pdfAPI.getPDFs(selectedProjectId);
+          setPdfs(response.data.pdfs || []);
+        } catch (err) {
+          console.error('Failed to poll PDF status:', err);
         }
       }
 
@@ -131,15 +111,13 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
         clearInterval(pollingIntervalRef.current);
       }
     };
-  }, [activeTabType, activeTabId, expandedPdfProjects, pdfData, pdfTabs]);
+  }, [activeTabType, activeTabId, selectedProjectId, pdfs, pdfTabs]);
 
   // Sync with prop selectedProjectId - this is the primary source of truth
   useEffect(() => {
     if (propSelectedProjectId) {
       setSelectedProjectId(propSelectedProjectId);
       loadAvailableDocuments(propSelectedProjectId);
-      // Reset view mode when project changes
-      setViewAllMode(false);
     }
   }, [propSelectedProjectId]);
 
@@ -163,103 +141,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     }
   };
 
-  // Load all documents from all projects
-  const loadAllDocuments = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      
-      // Ensure projects are loaded first
-      if (projects.length === 0) {
-        const projectsResponse = await projectAPI.getAllProjects();
-        const projectsList = projectsResponse.data.projects || [];
-        setProjects(projectsList);
-      }
-      
-      // Fetch all documents (no project filter)
-      const response = await documentAPI.getAllResearchDocuments();
-      const allDocs = response.data.documents || [];
-      
-      // Group documents by project
-      const grouped = {};
-      const projectMap = {}; // Map project_id to project_name
-      
-      // Use current projects state or fetch if needed
-      const projectsToUse = projects.length > 0 ? projects : (await projectAPI.getAllProjects()).data.projects || [];
-      
-      // Create project map from projects list
-      projectsToUse.forEach(project => {
-        projectMap[project.project_id] = project.project_name;
-      });
-      
-      // Group documents
-      allDocs.forEach(doc => {
-        const projectId = doc.project_id;
-        if (!grouped[projectId]) {
-          grouped[projectId] = {
-            projectName: projectMap[projectId] || 'Unknown Project',
-            documents: []
-          };
-        }
-        grouped[projectId].documents.push(doc);
-      });
-      
-      // Sort documents within each project by updated_at (newest first)
-      Object.keys(grouped).forEach(projectId => {
-        grouped[projectId].documents.sort((a, b) => {
-          const dateA = new Date(a.updated_at || a.created_at || 0);
-          const dateB = new Date(b.updated_at || b.created_at || 0);
-          return dateB - dateA;
-        });
-      });
-      
-      setAllDocumentsByProject(grouped);
-      
-      // Expand current project by default
-      if (selectedProjectId && grouped[selectedProjectId]) {
-        setExpandedProjects({ [selectedProjectId]: true });
-      } else if (Object.keys(grouped).length > 0) {
-        // Expand first project if current project has no documents
-        const firstProjectId = Object.keys(grouped)[0];
-        setExpandedProjects({ [firstProjectId]: true });
-      }
-    } catch (err) {
-      console.error('Failed to load all documents:', err);
-      const errorMessage = err.response?.data?.error || err.message || 'Failed to load documents';
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleViewAll = async () => {
-    setViewAllMode(true);
-    await loadAllDocuments();
-  };
-
-  const handleViewCurrentProject = () => {
-    setViewAllMode(false);
-  };
-
-  const toggleProject = (projectId) => {
-    setExpandedProjects(prev => ({
-      ...prev,
-      [projectId]: !prev[projectId]
-    }));
-  };
-
-  // Load projects for document creation
-  useEffect(() => {
-    const loadProjects = async () => {
-      try {
-        const response = await projectAPI.getAllProjects();
-        setProjects(response.data.projects || []);
-      } catch (err) {
-        console.error('Failed to load projects:', err);
-      }
-    };
-    loadProjects();
-  }, []);
 
   // Create new highlights tab when trigger changes
   useEffect(() => {
@@ -269,7 +150,9 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       setHighlightsTabs(prev => [...prev, newTab]);
       setActiveTabId(newTabId);
       setActiveTabType('highlights');
-      loadHighlightsProjects();
+      if (selectedProjectId) {
+        loadHighlightsForProject(selectedProjectId);
+      }
     }
   }, [highlightsTabTrigger]);
 
@@ -281,100 +164,46 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       setPdfTabs(prev => [...prev, newTab]);
       setActiveTabId(newTabId);
       setActiveTabType('pdf');
-      loadPdfProjects();
+      if (selectedProjectId) {
+        loadPdfsForProject(selectedProjectId);
+      }
     }
   }, [pdfTabTrigger]);
 
-  // Load projects for highlights
-  const loadHighlightsProjects = async () => {
+  // Load highlights (URLs) for current project
+  const loadHighlightsForProject = async (projectId) => {
     try {
       setHighlightsLoading(true);
-      const response = await projectAPI.getAllProjects();
-      setHighlightsProjects(response.data.projects || []);
+      const response = await highlightsAPI.getHighlights(projectId);
+      setHighlightsUrls(response.data.highlights || []);
     } catch (err) {
-      console.error('Failed to load projects for highlights:', err);
-      setError('Failed to load projects for highlights.');
+      console.error('Failed to load highlights:', err);
+      setError('Failed to load highlights.');
     } finally {
       setHighlightsLoading(false);
     }
   };
 
-  // Load highlights for a project
-  const loadHighlightsForProject = async (projectId) => {
-    try {
-      const response = await highlightsAPI.getHighlights(projectId);
-      const projectHighlights = response.data.highlights || [];
-      setHighlightsData(prev => ({
-        ...prev,
-        [projectId]: projectHighlights
-      }));
-    } catch (err) {
-      console.error('Failed to load highlights:', err);
-      setError('Failed to load highlights for this project.');
-    }
-  };
-
-  const toggleHighlightsProject = async (projectId) => {
-    const isExpanded = expandedHighlightsProjects[projectId];
-    
-    if (!isExpanded && !highlightsData[projectId]) {
-      await loadHighlightsForProject(projectId);
-    }
-    
-    setExpandedHighlightsProjects(prev => ({
-      ...prev,
-      [projectId]: !isExpanded
-    }));
-  };
-
-  // Load projects for PDFs
-  const loadPdfProjects = async () => {
+  // Load PDFs for current project
+  const loadPdfsForProject = async (projectId) => {
     try {
       setPdfLoading(true);
-      const response = await projectAPI.getAllProjects();
-      setPdfProjects(response.data.projects || []);
+      const response = await pdfAPI.getPDFs(projectId);
+      setPdfs(response.data.pdfs || []);
     } catch (err) {
-      console.error('Failed to load projects for PDFs:', err);
-      setError('Failed to load projects for PDFs.');
+      console.error('Failed to load PDFs:', err);
+      setError('Failed to load PDFs.');
     } finally {
       setPdfLoading(false);
     }
   };
 
-  // Load PDFs for a project
-  const loadPdfsForProject = async (projectId) => {
-    try {
-      const response = await pdfAPI.getPDFs(projectId);
-      const projectPdfs = response.data.pdfs || [];
-      setPdfData(prev => ({
-        ...prev,
-        [projectId]: projectPdfs
-      }));
-    } catch (err) {
-      console.error('Failed to load PDFs:', err);
-      setError('Failed to load PDFs for this project.');
-    }
-  };
-
-  const togglePdfProject = async (projectId) => {
-    const isExpanded = expandedPdfProjects[projectId];
-    
-    if (!isExpanded && !pdfData[projectId]) {
-      await loadPdfsForProject(projectId);
-    }
-    
-    setExpandedPdfProjects(prev => ({
-      ...prev,
-      [projectId]: !isExpanded
-    }));
-  };
-
-  const handlePdfClick = async (projectId, pdf) => {
+  const handlePdfClick = async (pdf) => {
     try {
       // Fetch highlights for the PDF
       const highlightsResponse = await pdfAPI.getHighlights(pdf.pdf_id);
       const selectedData = {
-        projectId,
+        projectId: selectedProjectId,
         pdf,
         highlights: highlightsResponse.data.highlights || [],
         extractionStatus: highlightsResponse.data.extraction_status,
@@ -422,10 +251,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       return;
     }
 
-    // Find the expanded project for upload
-    const expandedProjectId = Object.keys(expandedPdfProjects).find(id => expandedPdfProjects[id]);
-    if (!expandedProjectId) {
-      setError('Please expand a project first to upload a document');
+    if (!selectedProjectId) {
+      setError('No project selected');
       return;
     }
 
@@ -433,10 +260,10 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       setUploadingPdf(true);
       setError('');
       
-      await pdfAPI.uploadPDF(expandedProjectId, file);
+      await pdfAPI.uploadPDF(selectedProjectId, file);
       
       // Reload PDFs for the project
-      await loadPdfsForProject(expandedProjectId);
+      await loadPdfsForProject(selectedProjectId);
       
       // Clear file input
       if (fileInputRef.current) {
@@ -451,14 +278,16 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   };
 
   // Handle PDF delete
-  const handleDeletePdf = async (pdfId, projectId) => {
+  const handleDeletePdf = async (pdfId) => {
     if (!window.confirm('Are you sure you want to delete this PDF?')) {
       return;
     }
 
     try {
       await pdfAPI.deletePDF(pdfId);
-      await loadPdfsForProject(projectId);
+      if (selectedProjectId) {
+        await loadPdfsForProject(selectedProjectId);
+      }
     } catch (err) {
       console.error('Failed to delete PDF:', err);
       setError('Failed to delete PDF');
@@ -645,9 +474,9 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     setEditingNoteText('');
   };
 
-  const handleUrlClick = (projectId, urlDoc) => {
+  const handleUrlClick = (urlDoc) => {
     const selectedData = {
-      projectId,
+      projectId: selectedProjectId,
       urlDoc,
       highlights: urlDoc.highlights || []
     };
@@ -695,19 +524,20 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     return text.substring(0, maxLength) + '...';
   };
 
-  const handleDeleteHighlight = async (projectId, sourceUrl, highlightId) => {
+  const handleDeleteHighlight = async (sourceUrl, highlightId) => {
     if (!window.confirm('Are you sure you want to delete this highlight?')) {
       return;
     }
     
     try {
-      await highlightsAPI.deleteHighlight(projectId, sourceUrl, highlightId);
-      await loadHighlightsForProject(projectId);
+      await highlightsAPI.deleteHighlight(selectedProjectId, sourceUrl, highlightId);
+      if (selectedProjectId) {
+        await loadHighlightsForProject(selectedProjectId);
+      }
       
       // Update selected URL data in any highlights tabs that are viewing this URL
       setHighlightsTabs(prev => prev.map(tab => {
         if (tab.selectedUrlData && 
-            tab.selectedUrlData.projectId === projectId && 
             tab.selectedUrlData.urlDoc.source_url === sourceUrl) {
           const updatedHighlights = tab.selectedUrlData.highlights.filter(h => h.highlight_id !== highlightId);
           return {
@@ -889,11 +719,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       
       // Reload available documents
       await loadAvailableDocuments(selectedProjectId);
-      
-      // If in view all mode, reload all documents too
-      if (viewAllMode) {
-        await loadAllDocuments();
-      }
     } catch (err) {
       const errorMessage = err.response?.data?.error || err.message || 'Failed to create document';
       setError(errorMessage);
@@ -992,16 +817,16 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const handleHighlightsTabClick = (tabId) => {
     setActiveTabId(tabId);
     setActiveTabType('highlights');
-    if (highlightsProjects.length === 0) {
-      loadHighlightsProjects();
+    if (highlightsUrls.length === 0 && selectedProjectId) {
+      loadHighlightsForProject(selectedProjectId);
     }
   };
 
   const handlePdfTabClick = (tabId) => {
     setActiveTabId(tabId);
     setActiveTabType('pdf');
-    if (pdfProjects.length === 0) {
-      loadPdfProjects();
+    if (pdfs.length === 0 && selectedProjectId) {
+      loadPdfsForProject(selectedProjectId);
     }
   };
 
@@ -1138,7 +963,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                               </button>
                               <button 
                                 className="delete-highlight-btn-item"
-                                onClick={() => handleDeleteHighlight(getSelectedUrlData().projectId, getSelectedUrlData().urlDoc.source_url, highlight.highlight_id)}
+                                onClick={() => handleDeleteHighlight(getSelectedUrlData().urlDoc.source_url, highlight.highlight_id)}
                                 title="Delete highlight"
                               >
                                 🗑️
@@ -1166,81 +991,53 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                   </div>
                 </div>
               ) : (
-              /* Table View: Projects and URLs */
+              /* Table View: URLs for current project */
               highlightsLoading ? (
                 <div className="loading-message">Loading highlights...</div>
-              ) : highlightsProjects.length === 0 ? (
+              ) : !selectedProjectId ? (
                 <div className="empty-state">
-                  <p>No projects yet. Create a project to start saving highlights!</p>
+                  <p>No project selected.</p>
+                </div>
+              ) : highlightsUrls.length === 0 ? (
+                <div className="empty-state">
+                  <p>No highlights saved for this project yet.</p>
+                  <p className="empty-hint">Use the browser extension to highlight text on web pages.</p>
                 </div>
               ) : (
                 <div className="highlights-table-container">
+                  <div className="highlights-table-header">
+                    <h3>
+                      <span className="project-icon">📁</span>
+                      {propCurrentProjectName || 'Current Project'}
+                    </h3>
+                  </div>
                   <table className="highlights-table">
                     <thead>
                       <tr>
-                        <th></th>
-                        <th>Project / URL</th>
-                        <th>Highlights Count</th>
+                        <th>URL</th>
+                        <th>Highlights</th>
                         <th>Date</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {highlightsProjects.map((project) => (
-                        <React.Fragment key={project.project_id}>
-                          {/* Project Row */}
-                          <tr 
-                            className={`project-row ${expandedHighlightsProjects[project.project_id] ? 'expanded' : ''}`}
-                            onClick={() => toggleHighlightsProject(project.project_id)}
-                          >
-                            <td className="expand-cell">
-                              <span className={`expand-icon ${expandedHighlightsProjects[project.project_id] ? 'expanded' : ''}`}>
-                                ▶
-                              </span>
-                            </td>
-                            <td className="project-name">
-                              <span className="project-icon">📁</span>
-                              {project.project_name}
-                            </td>
-                            <td className="project-description">{project.description || '—'}</td>
-                            <td className="project-date">{formatShortDate(project.updated_at)}</td>
-                          </tr>
-
-                          {/* URL Rows (when project is expanded) */}
-                          {expandedHighlightsProjects[project.project_id] && highlightsData[project.project_id] && (
-                            highlightsData[project.project_id].length === 0 ? (
-                              <tr className="url-row no-highlights">
-                                <td></td>
-                                <td colSpan="3" className="no-highlights-message">
-                                  No highlights saved for this project yet
-                                </td>
-                              </tr>
-                            ) : (
-                              highlightsData[project.project_id].map((urlDoc, urlIndex) => (
-                                <tr 
-                                  key={`${project.project_id}-url-${urlIndex}`}
-                                  className="url-row clickable-url-row"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleUrlClick(project.project_id, urlDoc);
-                                  }}
-                                >
-                                  <td className="expand-cell"></td>
-                                  <td className="url-cell">
-                                    <span className="url-icon">🔗</span>
-                                    <div className="url-info">
-                                      <span className="url-title">{urlDoc.page_title || 'Untitled Page'}</span>
-                                      <span className="url-text">{truncateUrl(urlDoc.source_url)}</span>
-                                    </div>
-                                  </td>
-                                  <td className="highlight-count">
-                                    {urlDoc.highlights?.length || 0} highlight{(urlDoc.highlights?.length || 0) !== 1 ? 's' : ''}
-                                  </td>
-                                  <td className="url-date">{formatShortDate(urlDoc.updated_at)}</td>
-                                </tr>
-                              ))
-                            )
-                          )}
-                        </React.Fragment>
+                      {highlightsUrls.map((urlDoc, urlIndex) => (
+                        <tr 
+                          key={`url-${urlIndex}`}
+                          className="url-row clickable-url-row"
+                          onClick={() => handleUrlClick(urlDoc)}
+                        >
+                          <td className="url-cell">
+                            <span className="url-icon">🔗</span>
+                            <div className="url-info">
+                              <span className="url-title">{urlDoc.page_title || 'Untitled Page'}</span>
+                              <span className="url-text">{truncateUrl(urlDoc.source_url)}</span>
+                            </div>
+                          </td>
+                          <td className="highlight-count">
+                            {urlDoc.highlights?.length || 0} highlight{(urlDoc.highlights?.length || 0) !== 1 ? 's' : ''}
+                          </td>
+                          <td className="url-date">{formatShortDate(urlDoc.updated_at)}</td>
+                        </tr>
                       ))}
                     </tbody>
                   </table>
@@ -1387,12 +1184,12 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                 </div>
               </div>
             ) : (
-              /* Table View: Projects and PDFs */
+              /* Table View: PDFs for current project */
               pdfLoading ? (
-                <div className="loading-message">Loading PDFs...</div>
-              ) : pdfProjects.length === 0 ? (
+                <div className="loading-message">Loading documents...</div>
+              ) : !selectedProjectId ? (
                 <div className="empty-state">
-                  <p>No projects yet. Create a project to start uploading highlight documents!</p>
+                  <p>No project selected.</p>
                 </div>
               ) : (
                 <div className="pdf-table-container">
@@ -1405,110 +1202,77 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                     style={{ display: 'none' }}
                   />
                   
-                  <table className="pdf-table">
-                    <thead>
-                      <tr>
-                        <th></th>
-                        <th>Project / Document</th>
-                        <th>Highlights</th>
-                        <th>Status</th>
-                        <th>Date</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pdfProjects.map((project) => (
-                        <React.Fragment key={project.project_id}>
-                          {/* Project Row */}
+                  <div className="pdf-table-header">
+                    <h3>
+                      <span className="project-icon">📁</span>
+                      {propCurrentProjectName || 'Current Project'}
+                    </h3>
+                    <button
+                      className="upload-pdf-button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingPdf}
+                      title="Upload PDF, JPG, or PNG"
+                    >
+                      {uploadingPdf ? '⏳' : '➕'} Upload Document
+                    </button>
+                  </div>
+                  
+                  {pdfs.length === 0 ? (
+                    <div className="empty-state">
+                      <p>No documents uploaded yet.</p>
+                      <p className="empty-hint">Click "Upload Document" to add a PDF, JPG, or PNG.</p>
+                    </div>
+                  ) : (
+                    <table className="pdf-table">
+                      <thead>
+                        <tr>
+                          <th>Document</th>
+                          <th>Highlights</th>
+                          <th>Status</th>
+                          <th>Date</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pdfs.map((pdf, pdfIndex) => (
                           <tr 
-                            className={`project-row ${expandedPdfProjects[project.project_id] ? 'expanded' : ''}`}
-                            onClick={() => togglePdfProject(project.project_id)}
+                            key={`pdf-${pdfIndex}`}
+                            className="pdf-row clickable-pdf-row"
+                            onClick={() => handlePdfClick(pdf)}
                           >
-                            <td className="expand-cell">
-                              <span className={`expand-icon ${expandedPdfProjects[project.project_id] ? 'expanded' : ''}`}>
-                                ▶
-                              </span>
+                            <td className="pdf-cell">
+                              <span className="pdf-icon">{getDocumentIcon(pdf.filename)}</span>
+                              <div className="pdf-info">
+                                <span className="pdf-filename">{pdf.filename}</span>
+                              </div>
                             </td>
-                            <td className="project-name">
-                              <span className="project-icon">📁</span>
-                              {project.project_name}
+                            <td className="pdf-highlight-count">
+                              {pdf.highlights?.length || 0} highlight{(pdf.highlights?.length || 0) !== 1 ? 's' : ''}
                             </td>
-                            <td className="project-description">{project.description || '—'}</td>
-                            <td></td>
-                            <td className="project-date">{formatShortDate(project.updated_at)}</td>
-                            <td className="project-actions">
-                              {expandedPdfProjects[project.project_id] && (
-                                <button
-                                  className="upload-pdf-button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    fileInputRef.current?.click();
-                                  }}
-                                  disabled={uploadingPdf}
-                                  title="Upload PDF, JPG, or PNG"
-                                >
-                                  {uploadingPdf ? '⏳' : '➕'} Upload
-                                </button>
-                              )}
+                            <td className={`pdf-status pdf-status-${pdf.extraction_status}`}>
+                              {pdf.extraction_status === 'completed' ? '✅' : 
+                               pdf.extraction_status === 'processing' ? '⏳' : 
+                               pdf.extraction_status === 'failed' ? '❌' : '⏸️'}
+                              {' '}{pdf.extraction_status}
+                            </td>
+                            <td className="pdf-date">{formatShortDate(pdf.updated_at)}</td>
+                            <td className="pdf-actions">
+                              <button
+                                className="delete-pdf-button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeletePdf(pdf.pdf_id);
+                                }}
+                                title="Delete document"
+                              >
+                                🗑️
+                              </button>
                             </td>
                           </tr>
-
-                          {/* PDF Rows (when project is expanded) */}
-                          {expandedPdfProjects[project.project_id] && pdfData[project.project_id] && (
-                            pdfData[project.project_id].length === 0 ? (
-                              <tr className="pdf-row no-pdfs">
-                                <td></td>
-                                <td colSpan="5" className="no-pdfs-message">
-                                  No documents uploaded yet. Click "Upload" to add a PDF, JPG, or PNG.
-                                </td>
-                              </tr>
-                            ) : (
-                              pdfData[project.project_id].map((pdf, pdfIndex) => (
-                                <tr 
-                                  key={`${project.project_id}-pdf-${pdfIndex}`}
-                                  className="pdf-row clickable-pdf-row"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handlePdfClick(project.project_id, pdf);
-                                  }}
-                                >
-                                  <td className="expand-cell"></td>
-                                  <td className="pdf-cell">
-                                    <span className="pdf-icon">{getDocumentIcon(pdf.filename)}</span>
-                                    <div className="pdf-info">
-                                      <span className="pdf-filename">{pdf.filename}</span>
-                                    </div>
-                                  </td>
-                                  <td className="pdf-highlight-count">
-                                    {pdf.highlights?.length || 0} highlight{(pdf.highlights?.length || 0) !== 1 ? 's' : ''}
-                                  </td>
-                                  <td className={`pdf-status pdf-status-${pdf.extraction_status}`}>
-                                    {pdf.extraction_status === 'completed' ? '✅' : 
-                                     pdf.extraction_status === 'processing' ? '⏳' : 
-                                     pdf.extraction_status === 'failed' ? '❌' : '⏸️'}
-                                    {' '}{pdf.extraction_status}
-                                  </td>
-                                  <td className="pdf-date">{formatShortDate(pdf.updated_at)}</td>
-                                  <td className="pdf-actions">
-                                    <button
-                                      className="delete-pdf-button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDeletePdf(pdf.pdf_id, project.project_id);
-                                      }}
-                                      title="Delete PDF"
-                                    >
-                                      🗑️
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))
-                            )
-                          )}
-                        </React.Fragment>
-                      ))}
-                    </tbody>
-                  </table>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               )
             )}
@@ -1577,88 +1341,27 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
               {/* Existing Documents */}
               <div className="existing-documents-section">
-                <div className="existing-documents-header">
-                  <h4>Existing Documents</h4>
-                  {!viewAllMode && (
-                    <button
-                      className="view-all-button"
-                      onClick={handleViewAll}
-                      disabled={loading}
-                    >
-                      View All
-                    </button>
-                  )}
-                  {viewAllMode && (
-                    <button
-                      className="view-current-button"
-                      onClick={handleViewCurrentProject}
-                    >
-                      View Current Project
-                    </button>
-                  )}
-                </div>
+                <h4>Existing Documents</h4>
                 
-                {!viewAllMode ? (
-                  // Show current project documents
-                  availableDocuments.length === 0 ? (
-                    <div className="no-documents-section">
-                      <p className="no-documents">No documents in this project.</p>
-                    </div>
-                  ) : (
-                    <div className="document-list">
-                      {availableDocuments.map((doc) => (
-                        <div
-                          key={doc.document_id}
-                          className="document-list-item"
-                          onClick={() => handleSelectExistingDocument(doc.document_id)}
-                        >
-                          <div className="document-list-item-title">{doc.title || 'Untitled'}</div>
-                          <div className="document-list-item-date">
-                            {doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : ''}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )
+                {availableDocuments.length === 0 ? (
+                  <div className="no-documents-section">
+                    <p className="no-documents">No documents in this project.</p>
+                  </div>
                 ) : (
-                  // Show all documents grouped by project
-                  Object.keys(allDocumentsByProject).length === 0 ? (
-                    <p className="no-documents">No documents found.</p>
-                  ) : (
-                    <div className="projects-document-list">
-                      {Object.entries(allDocumentsByProject).map(([projectId, projectData]) => (
-                        <div key={projectId} className="project-documents-group">
-                          <div
-                            className="project-header"
-                            onClick={() => toggleProject(projectId)}
-                          >
-                            <span className={`project-expand-icon ${expandedProjects[projectId] ? 'expanded' : ''}`}>
-                              ▶
-                            </span>
-                            <span className="project-name">{projectData.projectName}</span>
-                            <span className="project-doc-count">({projectData.documents.length})</span>
-                          </div>
-                          {expandedProjects[projectId] && (
-                            <div className="project-documents-list">
-                              {projectData.documents.map((doc) => (
-                                <div
-                                  key={doc.document_id}
-                                  className="document-list-item"
-                                  onClick={() => handleSelectExistingDocument(doc.document_id)}
-                                >
-                                  <div className="document-list-item-title">{doc.title || 'Untitled'}</div>
-                          <div className="document-list-item-date">
-                            {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : 
-                             doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : ''}
-                          </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                  <div className="document-list">
+                    {availableDocuments.map((doc) => (
+                      <div
+                        key={doc.document_id}
+                        className="document-list-item"
+                        onClick={() => handleSelectExistingDocument(doc.document_id)}
+                      >
+                        <div className="document-list-item-title">{doc.title || 'Untitled'}</div>
+                        <div className="document-list-item-date">
+                          {doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : ''}
                         </div>
-                      ))}
-                    </div>
-                  )
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
@@ -1735,3 +1438,4 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 };
 
 export default DocumentPanel;
+

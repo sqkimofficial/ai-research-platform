@@ -2,22 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { chatAPI } from '../../services/api';
 import './ChatSessionsPanel.css';
 
-const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId, isNewChat }) => {
+const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId, isNewChat, selectedProjectId, currentProjectName }) => {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && selectedProjectId) {
       loadSessions();
     }
-  }, [isOpen]);
+  }, [isOpen, selectedProjectId]);
 
   const loadSessions = async () => {
     try {
       setLoading(true);
       setError('');
-      const response = await chatAPI.getAllSessions();
+      // Filter sessions by selected project
+      const response = await chatAPI.getAllSessions(selectedProjectId);
       setSessions(response.data.sessions || []);
     } catch (err) {
       console.error('Failed to load sessions:', err);
@@ -51,15 +52,15 @@ const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId,
   };
 
   const handleSessionClick = (session) => {
-    // Pass full session object with project info
-    onSelectSession(session.session_id, session.project_id, session.project_name);
+    // Pass session id - project stays the same since all sessions are filtered by current project
+    onSelectSession(session.session_id);
     onClose();
   };
 
   const handleNewChat = () => {
     // Pass null to indicate new chat - session will be created lazily on first message
     // Project remains the same (selected at login)
-    onSelectSession(null, null, null);
+    onSelectSession(null);
     onClose();
   };
 
@@ -68,7 +69,14 @@ const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId,
   return (
     <div className="chat-sessions-panel">
       <div className="panel-header">
-        <h2>Chats</h2>
+        <div className="panel-header-title">
+          <h2>Chats</h2>
+          {currentProjectName && (
+            <span className="panel-project-badge">
+              📁 {currentProjectName}
+            </span>
+          )}
+        </div>
         <button className="close-panel-button" onClick={onClose}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -120,7 +128,6 @@ const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId,
                     <span className="session-date">{formatDate(session.updated_at)}</span>
                   </div>
                   <div className="session-meta">
-                    <span className="session-project">{session.project_name || 'No project'}</span>
                     <span className="session-messages">{session.message_count} messages</span>
                   </div>
                 </div>

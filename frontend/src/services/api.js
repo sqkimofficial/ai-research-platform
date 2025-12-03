@@ -61,8 +61,12 @@ export const chatAPI = {
   getSession: (sessionId) => {
     return api.get(`/api/chat/session?session_id=${sessionId}`);
   },
-  getAllSessions: () => {
-    return api.get('/api/chat/session');
+  getAllSessions: (projectId = null) => {
+    let url = '/api/chat/session';
+    if (projectId) {
+      url += `?project_id=${projectId}`;
+    }
+    return api.get(url);
   },
   sendMessage: (sessionId, message, attachedSections = []) => {
     return api.post('/api/chat/message', { 
