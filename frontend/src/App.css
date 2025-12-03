@@ -26,6 +26,14 @@
   max-width: 50%;
 }
 
+.right-panel-section {
+  width: 60px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
 .app-header {
   display: flex;
   justify-content: space-between;

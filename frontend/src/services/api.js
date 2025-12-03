@@ -71,9 +71,10 @@ export const chatAPI = {
       attached_sections: attachedSections
     });
   },
-  approveContent: (sessionId, pendingContentId, editedContent = null) => {
+  approveContent: (sessionId, pendingContentId, editedContent = null, documentId = null) => {
     return api.post('/api/chat/approve', {
       session_id: sessionId,
+      document_id: documentId,
       pending_content_id: pendingContentId,
       edited_content: editedContent
     });
@@ -94,16 +95,35 @@ export const chatAPI = {
 
 // Document API
 export const documentAPI = {
-  getDocument: (sessionId) => {
+  getDocument: (sessionId, documentId = null) => {
+    if (documentId) {
+      return api.get(`/api/document?document_id=${documentId}`);
+    }
     return api.get(`/api/document?session_id=${sessionId}`);
   },
-  saveDocument: (sessionId, content, mode = 'replace') => {
+  saveDocument: (sessionId, content, mode = 'replace', documentId = null, structure = null, title = null) => {
+    if (documentId) {
+      return api.post('/api/document', { document_id: documentId, content, mode, structure, title });
+    }
     return api.post('/api/document', { session_id: sessionId, content, mode });
   },
   downloadPDF: (sessionId) => {
     return api.get(`/api/document/pdf?session_id=${sessionId}`, {
       responseType: 'blob'
     });
+  },
+  getAllResearchDocuments: (projectId = null) => {
+    let url = '/api/document/research-documents';
+    if (projectId) {
+      url += `?project_id=${projectId}`;
+    }
+    return api.get(url);
+  },
+  createResearchDocument: (projectId, title = null) => {
+    return api.post('/api/document/research-documents', { project_id: projectId, title });
+  },
+  deleteResearchDocument: (documentId) => {
+    return api.delete(`/api/document/research-documents/${documentId}`);
   },
 };
 

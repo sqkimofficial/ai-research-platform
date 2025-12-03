@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, send_file
 from utils.file_helpers import get_session_dir
-from models.database import ChatSessionModel, DocumentModel
+from models.database import ChatSessionModel, DocumentModel, ResearchDocumentModel, ProjectModel
 from services.vector_service import VectorService
 from services.document_structure_service import DocumentStructureService
 from utils.auth import verify_token
@@ -29,99 +29,156 @@ def get_user_id_from_token():
 
 @document_bp.route('/document', methods=['GET'])
 def get_document():
-    """Get document content for a session"""
+    """Get document content - supports both session_id (legacy) and document_id"""
     try:
         user_id = get_user_id_from_token()
         if not user_id:
             return jsonify({'error': 'Unauthorized'}), 401
         
-        session_id = request.args.get('session_id')
-        if not session_id:
-            return jsonify({'error': 'session_id is required'}), 400
+        document_id = request.args.get('document_id')
+        session_id = request.args.get('session_id')  # Legacy support
         
-        # Verify user owns this session
-        session = ChatSessionModel.get_session(session_id)
-        if not session:
-            return jsonify({'error': 'Session not found'}), 404
+        # New approach: use document_id
+        if document_id:
+            document = ResearchDocumentModel.get_document(document_id)
+            if not document:
+                return jsonify({'error': 'Document not found'}), 404
+            
+            if document['user_id'] != user_id:
+                return jsonify({'error': 'Unauthorized'}), 403
+            
+            return jsonify({
+                'content': document.get('markdown_content', ''),
+                'structure': document.get('structure', []),
+                'title': document.get('title', 'Untitled'),
+                'document_id': document_id
+            }), 200
         
-        if session['user_id'] != user_id:
-            return jsonify({'error': 'Unauthorized'}), 403
+        # Legacy approach: use session_id
+        if session_id:
+            # Verify user owns this session
+            session = ChatSessionModel.get_session(session_id)
+            if not session:
+                return jsonify({'error': 'Session not found'}), 404
+            
+            if session['user_id'] != user_id:
+                return jsonify({'error': 'Unauthorized'}), 403
+            
+            # Get document file path
+            session_dir = get_session_dir(session_id)
+            doc_path = session_dir / 'doc.md'
+            
+            # Read document content
+            if os.path.exists(doc_path):
+                with open(doc_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            else:
+                content = ''
+            
+            # Get document structure
+            structure = DocumentModel.get_document_structure(session_id)
+            
+            return jsonify({
+                'content': content,
+                'structure': structure
+            }), 200
         
-        # Get document file path
-        session_dir = get_session_dir(session_id)
-        doc_path = session_dir / 'doc.md'
-        
-        # Read document content
-        if os.path.exists(doc_path):
-            with open(doc_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        else:
-            content = ''
-        
-        # Get document structure
-        structure = DocumentModel.get_document_structure(session_id)
-        
-        return jsonify({
-            'content': content,
-            'structure': structure
-        }), 200
+        return jsonify({'error': 'document_id or session_id is required'}), 400
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document', methods=['POST'])
 def save_document():
-    """Save document content for a session"""
+    """Save document content - supports both session_id (legacy) and document_id"""
     try:
         user_id = get_user_id_from_token()
         if not user_id:
             return jsonify({'error': 'Unauthorized'}), 401
         
         data = request.get_json()
-        session_id = data.get('session_id')
+        document_id = data.get('document_id')
+        session_id = data.get('session_id')  # Legacy support
         content = data.get('content', '')
         mode = data.get('mode', 'replace')  # 'append' or 'replace'
+        structure = data.get('structure')
+        title = data.get('title')
         
-        if not session_id:
-            return jsonify({'error': 'session_id is required'}), 400
+        # New approach: use document_id
+        if document_id:
+            document = ResearchDocumentModel.get_document(document_id)
+            if not document:
+                return jsonify({'error': 'Document not found'}), 404
+            
+            if document['user_id'] != user_id:
+                return jsonify({'error': 'Unauthorized'}), 403
+            
+            # Get current content
+            current_content = document.get('markdown_content', '')
+            
+            # Apply mode
+            if mode == 'append':
+                new_content = current_content + content
+            else:
+                new_content = content
+            
+            # Update document
+            ResearchDocumentModel.update_document(
+                document_id,
+                markdown_content=new_content,
+                structure=structure,
+                title=title
+            )
+            
+            # Index document for semantic search
+            try:
+                vector_service.index_document(document_id, new_content)
+            except Exception as index_error:
+                print(f"Warning: Failed to index document: {index_error}")
+            
+            return jsonify({'status': 'ok'}), 200
         
-        # Verify user owns this session
-        session = ChatSessionModel.get_session(session_id)
-        if not session:
-            return jsonify({'error': 'Session not found'}), 404
+        # Legacy approach: use session_id
+        if session_id:
+            # Verify user owns this session
+            session = ChatSessionModel.get_session(session_id)
+            if not session:
+                return jsonify({'error': 'Session not found'}), 404
+            
+            if session['user_id'] != user_id:
+                return jsonify({'error': 'Unauthorized'}), 403
+            
+            # Get document file path
+            session_dir = get_session_dir(session_id)
+            doc_path = session_dir / 'doc.md'
+            
+            # Ensure directory exists
+            os.makedirs(session_dir, exist_ok=True)
+            
+            # Write document content
+            if mode == 'append':
+                # Append mode: add content to existing file
+                with open(doc_path, 'a', encoding='utf-8') as f:
+                    f.write(content)
+                # Read full document for indexing
+                with open(doc_path, 'r', encoding='utf-8') as f:
+                    full_content = f.read()
+            else:
+                # Replace mode: overwrite file
+                with open(doc_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                full_content = content
+            
+            # Index document for semantic search
+            try:
+                vector_service.index_document(session_id, full_content)
+            except Exception as index_error:
+                # Log but don't fail if indexing fails
+                print(f"Warning: Failed to index document: {index_error}")
+            
+            return jsonify({'status': 'ok'}), 200
         
-        if session['user_id'] != user_id:
-            return jsonify({'error': 'Unauthorized'}), 403
-        
-        # Get document file path
-        session_dir = get_session_dir(session_id)
-        doc_path = session_dir / 'doc.md'
-        
-        # Ensure directory exists
-        os.makedirs(session_dir, exist_ok=True)
-        
-        # Write document content
-        if mode == 'append':
-            # Append mode: add content to existing file
-            with open(doc_path, 'a', encoding='utf-8') as f:
-                f.write(content)
-            # Read full document for indexing
-            with open(doc_path, 'r', encoding='utf-8') as f:
-                full_content = f.read()
-        else:
-            # Replace mode: overwrite file
-            with open(doc_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            full_content = content
-        
-        # Index document for semantic search
-        try:
-            vector_service.index_document(session_id, full_content)
-        except Exception as index_error:
-            # Log but don't fail if indexing fails
-            print(f"Warning: Failed to index document: {index_error}")
-        
-        return jsonify({'status': 'ok'}), 200
+        return jsonify({'error': 'document_id or session_id is required'}), 400
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -201,6 +258,91 @@ def download_pdf():
             as_attachment=True,
             download_name=f'research-document-{session_id}.pdf'
         )
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@document_bp.route('/document/research-documents', methods=['GET'])
+def get_all_research_documents():
+    """Get all research documents for the user, optionally filtered by project_id"""
+    try:
+        user_id = get_user_id_from_token()
+        if not user_id:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        project_id = request.args.get('project_id')
+        documents = ResearchDocumentModel.get_all_documents(user_id, project_id)
+        
+        # Serialize documents
+        serialized_docs = []
+        for doc in documents:
+            serialized_docs.append({
+                'document_id': doc['document_id'],
+                'title': doc.get('title', 'Untitled'),
+                'project_id': doc.get('project_id'),
+                'created_at': doc.get('created_at').isoformat() if doc.get('created_at') else None,
+                'updated_at': doc.get('updated_at').isoformat() if doc.get('updated_at') else None
+            })
+        
+        return jsonify({'documents': serialized_docs}), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@document_bp.route('/document/research-documents', methods=['POST'])
+def create_research_document():
+    """Create a new research document"""
+    try:
+        user_id = get_user_id_from_token()
+        if not user_id:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        data = request.get_json()
+        project_id = data.get('project_id')
+        title = data.get('title')
+        
+        if not project_id:
+            return jsonify({'error': 'project_id is required'}), 400
+        
+        # Verify user owns this project
+        project = ProjectModel.get_project(project_id)
+        if not project:
+            return jsonify({'error': 'Project not found'}), 404
+        
+        if project['user_id'] != user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        document_id = ResearchDocumentModel.create_document(user_id, project_id, title)
+        
+        return jsonify({
+            'document_id': document_id,
+            'status': 'created'
+        }), 201
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@document_bp.route('/document/research-documents/<document_id>', methods=['DELETE'])
+def delete_research_document(document_id):
+    """Delete a research document"""
+    try:
+        user_id = get_user_id_from_token()
+        if not user_id:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        document = ResearchDocumentModel.get_document(document_id)
+        if not document:
+            return jsonify({'error': 'Document not found'}), 404
+        
+        if document['user_id'] != user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        success = ResearchDocumentModel.delete_document(document_id)
+        
+        if success:
+            return jsonify({'status': 'deleted'}), 200
+        else:
+            return jsonify({'error': 'Failed to delete document'}), 500
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500

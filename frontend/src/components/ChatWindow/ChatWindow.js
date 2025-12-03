@@ -4,12 +4,11 @@ import { getSessionId, setSessionId } from '../../utils/auth';
 import MessageBubble from './MessageBubble';
 import './ChatWindow.css';
 
-const ChatWindow = ({ sessionId: propSessionId, onAIMessage, attachedSections = [] }) => {
+const ChatWindow = ({ sessionId: propSessionId, activeDocumentId, onAIMessage, attachedSections = [] }) => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionIdState] = useState(null);
-  const [projectName, setProjectName] = useState(null);
   const [currentAttachedSections, setCurrentAttachedSections] = useState([]);
   const [editingContent, setEditingContent] = useState({}); // { pendingContentId: editedContent }
   const [showRewritePrompt, setShowRewritePrompt] = useState(false);
@@ -41,7 +40,6 @@ const ChatWindow = ({ sessionId: propSessionId, onAIMessage, attachedSections = 
         // Load existing session
         const response = await chatAPI.getSession(sessionIdToUse);
         setMessages(response.data.messages || []);
-        setProjectName(response.data.project_name);
         setSessionIdState(sessionIdToUse);
         if (!propSessionId) {
           setSessionId(sessionIdToUse);
@@ -141,7 +139,7 @@ const ChatWindow = ({ sessionId: propSessionId, onAIMessage, attachedSections = 
     
     setLoading(true);
     try {
-      const response = await chatAPI.approveContent(sessionId, pendingContentId, editedContent);
+      const response = await chatAPI.approveContent(sessionId, pendingContentId, editedContent, activeDocumentId);
       
       // Update message status
       setMessages((prev) => prev.map(msg => 
@@ -255,12 +253,6 @@ const ChatWindow = ({ sessionId: propSessionId, onAIMessage, attachedSections = 
 
   return (
     <div className="chat-window">
-      {projectName && (
-        <div className="project-badge">
-          <span className="badge-label">Project:</span>
-          <span className="badge-name">{projectName}</span>
-        </div>
-      )}
       <div className="chat-messages">
         {messages.length === 0 && (
           <div className="empty-state">

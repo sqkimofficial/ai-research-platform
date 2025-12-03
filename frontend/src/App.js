@@ -4,6 +4,7 @@ import { getToken, setToken, removeToken, setSessionId, removeSessionId } from '
 import HomePage from './components/HomePage/HomePage';
 import ChatWindow from './components/ChatWindow/ChatWindow';
 import DocumentPanel from './components/DocumentPanel/DocumentPanel';
+import RightPanel from './components/RightPanel/RightPanel';
 import './App.css';
 
 function App() {
@@ -15,6 +16,8 @@ function App() {
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [documentRefreshTrigger, setDocumentRefreshTrigger] = useState(0);
   const [attachedSections, setAttachedSections] = useState([]);
+  const [activeDocumentId, setActiveDocumentId] = useState(null);
+  const [highlightsTabTrigger, setHighlightsTabTrigger] = useState(0);
 
   useEffect(() => {
     // Check if user is already logged in
@@ -156,6 +159,7 @@ function App() {
         <div className="chat-section">
           <ChatWindow 
             sessionId={currentSessionId}
+            activeDocumentId={activeDocumentId}
             onAIMessage={(message) => {
               setDocumentRefreshTrigger(prev => prev + 1);
             }}
@@ -168,8 +172,15 @@ function App() {
             onAttachSections={(sections) => {
               setAttachedSections(sections);
             }}
+            onActiveDocumentChange={(documentId) => {
+              setActiveDocumentId(documentId);
+            }}
+            highlightsTabTrigger={highlightsTabTrigger}
           />
         </div>
+        <RightPanel 
+          onHighlightsClick={() => setHighlightsTabTrigger(prev => prev + 1)}
+        />
       </div>
     </div>
   );

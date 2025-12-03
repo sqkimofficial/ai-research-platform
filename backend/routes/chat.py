@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from models.database import ChatSessionModel, DocumentTypeModel, Database, DocumentModel, ProjectModel
+from models.database import ChatSessionModel, DocumentTypeModel, Database, DocumentModel, ProjectModel, ResearchDocumentModel
 from services.openai_service import OpenAIService
 from services.vector_service import VectorService
 from services.document_structure_service import DocumentStructureService
@@ -1323,6 +1323,7 @@ def approve_content():
         
         data = request.get_json()
         session_id = data.get('session_id')
+        document_id = data.get('document_id')  # New: document_id for research documents
         pending_content_id = data.get('pending_content_id')
         edited_content = data.get('edited_content')  # Optional edited content
         
@@ -1433,19 +1434,40 @@ def approve_content():
             return jsonify({'error': 'No content to place'}), 400
         
         # Get full document content and structure
-        session_dir = get_session_dir(session_id)
-        doc_path = session_dir / 'doc.md'
+        # New approach: use document_id if provided, otherwise fall back to session_id (legacy)
         document_content = ''
-        document_structure_flat = DocumentModel.get_document_structure(session_id)
+        document_structure_flat = []
+        
+        if document_id:
+            # Use research document model
+            document = ResearchDocumentModel.get_document(document_id)
+            if not document:
+                return jsonify({'error': 'Document not found'}), 404
+            
+            if document['user_id'] != user_id:
+                return jsonify({'error': 'Unauthorized'}), 403
+            
+            document_content = document.get('markdown_content', '')
+            document_structure_flat = document.get('structure', [])
+        else:
+            # Legacy approach: use session-based file storage
+            session_dir = get_session_dir(session_id)
+            doc_path = session_dir / 'doc.md'
+            document_structure_flat = DocumentModel.get_document_structure(session_id)
+            
+            # Ensure document_structure_flat is a list
+            if document_structure_flat and not isinstance(document_structure_flat, list):
+                print(f"WARNING: document_structure_flat is not a list, got {type(document_structure_flat)}")
+                document_structure_flat = []
+            
+            if os.path.exists(doc_path):
+                with open(doc_path, 'r', encoding='utf-8') as f:
+                    document_content = f.read()
         
         # Ensure document_structure_flat is a list
         if document_structure_flat and not isinstance(document_structure_flat, list):
             print(f"WARNING: document_structure_flat is not a list, got {type(document_structure_flat)}")
             document_structure_flat = []
-        
-        if os.path.exists(doc_path):
-            with open(doc_path, 'r', encoding='utf-8') as f:
-                document_content = f.read()
         
         # Check if document is empty - if so, skip Stage 2 AI and just append content directly
         is_document_empty = (
@@ -1587,21 +1609,38 @@ REMINDER: If user provided placement instructions above, you MUST follow them ex
                 traceback.print_exc()
                 return jsonify({'error': f'Failed to place content: {str(e)}'}), 500
         
-        # Update document file
+        # Update document
         try:
-            os.makedirs(session_dir, exist_ok=True)
-            with open(doc_path, 'w', encoding='utf-8') as f:
-                f.write(updated_document_content)
-            
-            # Update document structure in database
-            if updated_document_structure:
-                DocumentModel.update_document_structure(session_id, updated_document_structure, user_id)
-            
-            # Re-index document for semantic search
-            try:
-                vector_service.index_document(session_id, updated_document_content)
-            except Exception as index_error:
-                print(f"Warning: Failed to re-index document: {index_error}")
+            if document_id:
+                # Update research document in database
+                ResearchDocumentModel.update_document(
+                    document_id,
+                    markdown_content=updated_document_content,
+                    structure=updated_document_structure
+                )
+                
+                # Re-index document for semantic search
+                try:
+                    vector_service.index_document(document_id, updated_document_content)
+                except Exception as index_error:
+                    print(f"Warning: Failed to re-index document: {index_error}")
+            else:
+                # Legacy approach: update file-based document
+                session_dir = get_session_dir(session_id)
+                doc_path = session_dir / 'doc.md'
+                os.makedirs(session_dir, exist_ok=True)
+                with open(doc_path, 'w', encoding='utf-8') as f:
+                    f.write(updated_document_content)
+                
+                # Update document structure in database
+                if updated_document_structure:
+                    DocumentModel.update_document_structure(session_id, updated_document_structure, user_id)
+                
+                # Re-index document for semantic search
+                try:
+                    vector_service.index_document(session_id, updated_document_content)
+                except Exception as index_error:
+                    print(f"Warning: Failed to re-index document: {index_error}")
             
         except Exception as e:
             print(f"Error updating document: {e}")

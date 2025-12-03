@@ -250,10 +250,80 @@ class ChatSessionModel:
             }
         )
 
+class ResearchDocumentModel:
+    """Model for managing research documents (separate from sessions)"""
+    
+    @staticmethod
+    def create_document(user_id, project_id, title=None):
+        """Create a new research document"""
+        db = Database.get_db()
+        document_id = str(uuid.uuid4())
+        document = {
+            'user_id': user_id,
+            'project_id': project_id,
+            'document_id': document_id,
+            'title': title or f'Research Document {datetime.utcnow().strftime("%Y-%m-%d %H:%M")}',
+            'markdown_content': '',
+            'structure': [],  # Document structure tree (flat list)
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
+        }
+        db.research_documents.insert_one(document)
+        return document_id
+    
+    @staticmethod
+    def get_document(document_id):
+        """Get document by document_id"""
+        db = Database.get_db()
+        return db.research_documents.find_one({'document_id': document_id})
+    
+    @staticmethod
+    def get_all_documents(user_id, project_id=None):
+        """Get all research documents for a user, optionally filtered by project_id"""
+        db = Database.get_db()
+        query = {'user_id': user_id}
+        if project_id:
+            query['project_id'] = project_id
+        documents = list(db.research_documents.find(query).sort('updated_at', -1))
+        return documents
+    
+    @staticmethod
+    def update_document(document_id, markdown_content=None, structure=None, title=None):
+        """Update document content, structure, and/or title"""
+        db = Database.get_db()
+        update_data = {'updated_at': datetime.utcnow()}
+        
+        if markdown_content is not None:
+            update_data['markdown_content'] = markdown_content
+        if structure is not None:
+            update_data['structure'] = structure
+        if title is not None:
+            update_data['title'] = title
+        
+        db.research_documents.update_one(
+            {'document_id': document_id},
+            {'$set': update_data}
+        )
+    
+    @staticmethod
+    def get_document_structure(document_id):
+        """Get document structure for a document"""
+        doc = ResearchDocumentModel.get_document(document_id)
+        if doc:
+            return doc.get('structure', [])
+        return []
+    
+    @staticmethod
+    def delete_document(document_id):
+        """Delete a research document"""
+        db = Database.get_db()
+        result = db.research_documents.delete_one({'document_id': document_id})
+        return result.deleted_count > 0
+
 class DocumentModel:
     @staticmethod
     def create_document(user_id, session_id):
-        """Create a new document"""
+        """Create a new document (DEPRECATED - use ResearchDocumentModel instead)"""
         db = Database.get_db()
         document_id = str(uuid.uuid4())
         document = {
