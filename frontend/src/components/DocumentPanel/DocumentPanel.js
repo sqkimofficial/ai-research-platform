@@ -20,6 +20,63 @@ const CloseIcon = ({ color = "rgba(0, 50, 98, 1)" }) => (
   </svg>
 );
 
+// Browser Navigation Icons from Figma
+const ArrowLeftIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path 
+      d="M10 4L6 8L10 12" 
+      stroke="rgba(0, 50, 98, 1)" 
+      strokeWidth="1.5" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const ArrowRightIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path 
+      d="M6 4L10 8L6 12" 
+      stroke="rgba(0, 50, 98, 1)" 
+      strokeWidth="1.5" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const RefreshIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path 
+      d="M13.65 8C13.65 11.12 11.12 13.65 8 13.65C4.88 13.65 2.35 11.12 2.35 8C2.35 4.88 4.88 2.35 8 2.35C10.19 2.35 12.09 3.56 13.02 5.33" 
+      stroke="rgba(0, 50, 98, 1)" 
+      strokeWidth="1.5" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    />
+    <path 
+      d="M10 5.5H13.5V2" 
+      stroke="rgba(0, 50, 98, 1)" 
+      strokeWidth="1.5" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+// Paperclip/Attach icon from Figma
+const AttachIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path 
+      d="M10.7767 5.49996L6.29601 9.98063C6.02854 10.2481 5.66466 10.3982 5.28563 10.3982C4.9066 10.3982 4.54272 10.2481 4.27525 9.98063C4.00778 9.71316 3.85767 9.34928 3.85767 8.97025C3.85767 8.59122 4.00778 8.22734 4.27525 7.95987L8.75592 3.47921C9.15712 3.078 9.70294 2.85284 10.2715 2.85284C10.84 2.85284 11.3859 3.078 11.7871 3.47921C12.1883 3.88041 12.4134 4.42623 12.4134 4.99479C12.4134 5.56335 12.1883 6.10917 11.7871 6.51037L7.30048 10.991C7.09988 11.1916 6.82697 11.3042 6.54269 11.3042C6.25841 11.3042 5.9855 11.1916 5.7849 10.991C5.5843 10.7904 5.47172 10.5175 5.47172 10.2332C5.47172 9.94895 5.5843 9.67604 5.7849 9.47544L9.76201 5.50421" 
+      stroke="rgba(0, 50, 98, 0.5)" 
+      strokeWidth="1.2" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 // Plus icon (rotated close icon) from Figma
 const PlusIcon = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1417,19 +1474,59 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                 /* Split View: Web View (70%) + Highlights List (30%) */
                 <div className="highlights-split-view">
                   <div className="highlights-web-view-section">
-                    <div className="highlights-web-view-header">
+                    {/* Browser Toolbar */}
+                    <div className="browser-toolbar">
                       <button 
-                        className="back-to-table-button"
+                        className="back-to-list-btn"
                         onClick={handleBackToTable}
-                        title="Back to table"
+                        title="Back to URL list"
                       >
-                        ← Back
+                        <ArrowLeftIcon />
+                        <span>Back to URLs</span>
                       </button>
-                      <div className="url-info-header">
-                        <span className="url-title-header">{getSelectedUrlData().urlDoc.page_title || 'Untitled Page'}</span>
-                        <span className="url-text-header">{getSelectedUrlData().urlDoc.source_url}</span>
+                      <div className="browser-nav-buttons">
+                        <button 
+                          className="browser-nav-btn"
+                          onClick={() => {
+                            const iframe = document.querySelector('.highlights-iframe');
+                            if (iframe && iframe.contentWindow) {
+                              try { iframe.contentWindow.history.back(); } catch(e) {}
+                            }
+                          }}
+                          title="Go back"
+                        >
+                          <ArrowLeftIcon />
+                        </button>
+                        <button 
+                          className="browser-nav-btn"
+                          onClick={() => {
+                            const iframe = document.querySelector('.highlights-iframe');
+                            if (iframe && iframe.contentWindow) {
+                              try { iframe.contentWindow.history.forward(); } catch(e) {}
+                            }
+                          }}
+                          title="Go forward"
+                        >
+                          <ArrowRightIcon />
+                        </button>
+                        <button 
+                          className="browser-nav-btn"
+                          onClick={() => {
+                            const iframe = document.querySelector('.highlights-iframe');
+                            if (iframe) {
+                              iframe.src = iframe.src;
+                            }
+                          }}
+                          title="Refresh"
+                        >
+                          <RefreshIcon />
+                        </button>
+                      </div>
+                      <div className="browser-url-bar">
+                        <span className="browser-url-text">{getSelectedUrlData().urlDoc.source_url}</span>
                       </div>
                     </div>
+                    {/* Iframe Content */}
                     <iframe
                       src={getSelectedUrlData().urlDoc.source_url}
                       className="highlights-iframe"
@@ -1438,9 +1535,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                     />
                   </div>
                   <div className="highlights-list-section">
-                    <div className="highlights-list-header">
-                      <h3>Highlights ({getSelectedUrlData().highlights.length})</h3>
-                    </div>
                     <div className="highlights-list-content">
                       {getSelectedUrlData().highlights.length === 0 ? (
                         <div className="no-highlights-message-list">
@@ -1448,39 +1542,39 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                         </div>
                       ) : (
                         getSelectedUrlData().highlights.map((highlight, hIndex) => (
-                          <div key={hIndex} className="highlight-item">
-                            <div className="highlight-item-header">
-                              <span className="highlight-item-icon">✨</span>
-                              <span className="highlight-item-date">{formatShortDate(highlight.timestamp)}</span>
+                          <div key={hIndex} className="url-highlight-card-item">
+                            <div className="url-highlight-card-content">
+                              <div className="url-highlight-text-box">
+                                <p className="url-highlight-text">{highlight.text}</p>
+                              </div>
+                              <div className="url-highlight-timestamp">
+                                <span>Saved <strong>{formatHighlightDate(highlight.timestamp)}</strong></span>
+                              </div>
+                            </div>
+                            {highlight.note && (
+                              <div className="url-highlight-notes-section">
+                                <div className="url-highlight-notes-label">Notes</div>
+                                <p className="url-highlight-notes-text">{highlight.note}</p>
+                              </div>
+                            )}
+                            <div className="url-highlight-actions-row">
+                              {!highlight.note && (
+                                <button 
+                                  className="url-highlight-add-note-btn"
+                                  onClick={() => {/* TODO: Add note functionality for URL highlights */}}
+                                  title="Add note"
+                                >
+                                  <span>+ Add Note</span>
+                                </button>
+                              )}
                               <button 
-                                className="attach-highlight-btn"
+                                className="url-highlight-attach-btn"
                                 onClick={() => handleAttachWebHighlight(highlight, getSelectedUrlData().urlDoc)}
                                 title="Attach to chat"
                               >
-                                📎 Attach
+                                <AttachIcon />
+                                <span>Attach</span>
                               </button>
-                              <button 
-                                className="delete-highlight-btn-item"
-                                onClick={() => handleDeleteHighlight(getSelectedUrlData().urlDoc.source_url, highlight.highlight_id)}
-                                title="Delete highlight"
-                              >
-                                🗑️
-                              </button>
-                            </div>
-                            <div className="highlight-item-content">
-                              <p className="highlight-item-text">"{highlight.text}"</p>
-                              {highlight.note && (
-                                <div className="highlight-item-note">
-                                  <span className="note-label">Note:</span> {highlight.note}
-                                </div>
-                              )}
-                              {highlight.tags && highlight.tags.length > 0 && (
-                                <div className="highlight-item-tags">
-                                  {highlight.tags.map((tag, tIndex) => (
-                                    <span key={tIndex} className="tag">{tag}</span>
-                                  ))}
-                                </div>
-                              )}
                             </div>
                           </div>
                         ))
@@ -1687,29 +1781,21 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
               /* Split View: PDF Viewer (70%) + Highlights List (30%) */
               <div className="pdf-split-view">
                 <div className="pdf-viewer-section">
-                  <div className="pdf-viewer-header">
+                  {/* PDF Toolbar - simple style with back button */}
+                  <div className="doc-viewer-toolbar">
                     <button 
-                      className="back-to-table-button"
+                      className="back-to-list-btn"
                       onClick={handleBackToPdfTable}
-                      title="Back to table"
+                      title="Back to documents"
                     >
-                      ← Back
+                      <ArrowLeftIcon />
+                      <span>Back to Documents</span>
                     </button>
-                    <div className="pdf-info-header">
-                      <span className="pdf-filename-header">{getSelectedPdfData().pdf.filename}</span>
-                      <span className="pdf-status-header">
-                        Status: {getSelectedPdfData().extractionStatus}
-                        {getSelectedPdfData().extractionStatus === 'processing' && ' (AI is extracting highlights...)'}
-                      </span>
+                    <div className="doc-viewer-filename">
+                      <span>{getSelectedPdfData().pdf.filename}</span>
                     </div>
-                    <button
-                      className="refresh-pdf-button"
-                      onClick={handleRefreshPdfHighlights}
-                      title="Refresh highlights"
-                    >
-                      🔄 Refresh
-                    </button>
                   </div>
+                  {/* PDF Iframe Content */}
                   <iframe
                     src={pdfAPI.getPDFFileUrl(getSelectedPdfData().pdf.pdf_id)}
                     className="pdf-iframe"
@@ -1717,21 +1803,18 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                   />
                 </div>
                 <div className="pdf-highlights-section">
-                  <div className="pdf-highlights-header">
-                    <h3>Highlights ({getSelectedPdfData().highlights.length})</h3>
-                    {getSelectedPdfData().extractionStatus === 'failed' && (
-                      <button
-                        className="reextract-button"
-                        onClick={() => handleReextractHighlights(getSelectedPdfData().pdf.pdf_id)}
-                        title="Re-extract highlights"
-                      >
-                        🔄 Re-extract
-                      </button>
-                    )}
-                  </div>
                   {getSelectedPdfData().extractionError && (
                     <div className="extraction-error">
                       Error: {getSelectedPdfData().extractionError}
+                      {getSelectedPdfData().extractionStatus === 'failed' && (
+                        <button
+                          className="reextract-button-inline"
+                          onClick={() => handleReextractHighlights(getSelectedPdfData().pdf.pdf_id)}
+                          title="Re-extract highlights"
+                        >
+                          Re-extract
+                        </button>
+                      )}
                     </div>
                   )}
                   <div className="pdf-highlights-list">
@@ -1747,68 +1830,74 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                       </div>
                     ) : (
                       getSelectedPdfData().highlights.map((highlight, hIndex) => (
-                        <div key={hIndex} className={`pdf-highlight-item ${getColorClass(highlight.color_tag)}`}>
-                          <div className="pdf-highlight-item-header">
-                            <span className={`pdf-highlight-color-tag ${getColorClass(highlight.color_tag)}`}>
-                              {highlight.color_tag}
-                            </span>
-                            {highlight.page_number && (
-                              <span className="pdf-highlight-page">Page {highlight.page_number}</span>
+                        <div key={hIndex} className="doc-highlight-card-item">
+                          <div className="doc-highlight-card-content">
+                            <div className={`doc-highlight-text-box ${getColorClass(highlight.color_tag)}`}>
+                              <p className="doc-highlight-text">{highlight.text}</p>
+                            </div>
+                            <div className="doc-highlight-timestamp">
+                              <span>Saved <strong>{formatHighlightDate(highlight.timestamp || new Date().toISOString())}</strong></span>
+                            </div>
+                          </div>
+                          {editingNoteId === highlight.highlight_id ? (
+                            <div className="doc-highlight-notes-section">
+                              <div className="doc-highlight-notes-label">Notes</div>
+                              <textarea
+                                value={editingNoteText}
+                                onChange={(e) => setEditingNoteText(e.target.value)}
+                                placeholder="Add a note..."
+                                className="doc-note-edit-textarea"
+                              />
+                              <div className="doc-note-edit-actions">
+                                <button 
+                                  className="doc-note-save-btn"
+                                  onClick={() => handleSaveNote(getSelectedPdfData().pdf.pdf_id, highlight.highlight_id)}
+                                >
+                                  Save
+                                </button>
+                                <button 
+                                  className="doc-note-cancel-btn"
+                                  onClick={handleCancelEditNote}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            highlight.note && (
+                              <div className="doc-highlight-notes-section">
+                                <div className="doc-highlight-notes-label">Notes</div>
+                                <p className="doc-highlight-notes-text">{highlight.note}</p>
+                              </div>
+                            )
+                          )}
+                          <div className="doc-highlight-actions-row">
+                            {!highlight.note && editingNoteId !== highlight.highlight_id && (
+                              <button 
+                                className="doc-highlight-add-note-btn"
+                                onClick={() => handleStartEditNote(highlight)}
+                                title="Add note"
+                              >
+                                <span>+ Add Note</span>
+                              </button>
+                            )}
+                            {highlight.note && editingNoteId !== highlight.highlight_id && (
+                              <button 
+                                className="doc-highlight-edit-note-btn"
+                                onClick={() => handleStartEditNote(highlight)}
+                                title="Edit note"
+                              >
+                                <span>Edit Note</span>
+                              </button>
                             )}
                             <button 
-                              className="attach-highlight-btn"
+                              className="doc-highlight-attach-btn"
                               onClick={() => handleAttachPdfHighlight(highlight, getSelectedPdfData().pdf)}
                               title="Attach to chat"
                             >
-                              📎 Attach
+                              <AttachIcon />
+                              <span>Attach</span>
                             </button>
-                            <button 
-                              className="edit-note-btn-pdf"
-                              onClick={() => handleStartEditNote(highlight)}
-                              title="Add/Edit note"
-                            >
-                              📝
-                            </button>
-                            <button 
-                              className="delete-highlight-btn-pdf"
-                              onClick={() => handleDeletePdfHighlight(getSelectedPdfData().pdf.pdf_id, highlight.highlight_id)}
-                              title="Delete highlight"
-                            >
-                              🗑️
-                            </button>
-                          </div>
-                          <div className="pdf-highlight-item-content">
-                            <p className="pdf-highlight-text">"{highlight.text}"</p>
-                            {editingNoteId === highlight.highlight_id ? (
-                              <div className="pdf-highlight-note-edit">
-                                <textarea
-                                  value={editingNoteText}
-                                  onChange={(e) => setEditingNoteText(e.target.value)}
-                                  placeholder="Add a note..."
-                                  className="note-edit-textarea"
-                                />
-                                <div className="note-edit-actions">
-                                  <button 
-                                    className="note-save-btn"
-                                    onClick={() => handleSaveNote(getSelectedPdfData().pdf.pdf_id, highlight.highlight_id)}
-                                  >
-                                    Save
-                                  </button>
-                                  <button 
-                                    className="note-cancel-btn"
-                                    onClick={handleCancelEditNote}
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              highlight.note && (
-                                <div className="pdf-highlight-note">
-                                  <span className="note-label">Note:</span> {highlight.note}
-                                </div>
-                              )
-                            )}
                           </div>
                         </div>
                       ))
