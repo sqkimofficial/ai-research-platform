@@ -3679,3 +3679,206 @@
   color: rgba(0, 25, 49, 0.4);
 }
 
+/* ============================================
+   Add New Tab View (Figma Design)
+   ============================================ */
+
+.add-new-tab-view {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  padding: 48px 24px 0 24px;
+  height: 100%;
+  overflow-y: auto;
+  background-color: white;
+}
+
+/* Top Action Buttons */
+.add-tab-action-buttons {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: center;
+  gap: 16px;
+  padding: 0;
+  width: 100%;
+  flex-wrap: nowrap;
+}
+
+.add-tab-action-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 100px;
+  max-width: 180px;
+  height: 100px;
+  padding: 10px;
+  border: 1px solid rgba(0, 50, 98, 0.2);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.add-tab-action-button:hover:not(.disabled) {
+  background-color: rgba(0, 50, 98, 0.03);
+  border-color: rgba(0, 50, 98, 0.3);
+}
+
+.add-tab-action-button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.add-tab-button-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 10px;
+  background-color: #e0e0e0;
+  border-radius: 8px;
+}
+
+.add-tab-button-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.add-tab-button-label {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #000000;
+  text-align: center;
+  width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Search Bar */
+.add-tab-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  margin: 0;
+  background-color: rgba(0, 50, 98, 0.05);
+  border: 1px solid rgba(0, 50, 98, 0.2);
+  border-radius: 7px;
+}
+
+.add-tab-search-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.add-tab-search-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.add-tab-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #323232;
+  outline: none;
+}
+
+.add-tab-search-input::placeholder {
+  color: #a8a8a8;
+}
+
+/* Content Grid */
+.add-tab-content-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 32px;
+}
+
+.add-tab-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Empty State */
+.add-tab-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  color: rgba(0, 25, 49, 0.6);
+}
+
+.add-tab-empty-state p {
+  margin: 0;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.add-tab-empty-state .empty-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(0, 25, 49, 0.4);
+}
+
+/* Add new tab view uses the same responsive grid as other pages */
+/* No overrides needed - uses .highlights-cards-grid from existing styles */
+
+/* Adjust the time section label */
+.add-new-tab-view .highlights-section-label {
+  padding-left: 0;
+  margin-bottom: 8px;
+}
+
+/* Adjust the document group header for better alignment */
+.add-new-tab-view .highlights-group-header {
+  margin-bottom: 8px;
+}
+
+.add-new-tab-view .highlights-document-group {
+  margin-bottom: 20px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+  .add-new-tab-view {
+    padding: 48px 24px 0 24px;
+  }
+  
+  .add-tab-action-buttons {
+    padding: 0;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  
+  .add-tab-action-button {
+    width: 180px;
+    height: 110px;
+  }
+  
+  .add-tab-search-bar {
+    margin: 0;
+  }
+  
+  /* Grid will use the same responsive behavior as other pages */
+}
+

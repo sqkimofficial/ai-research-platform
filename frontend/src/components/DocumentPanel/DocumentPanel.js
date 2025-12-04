@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import SectionSelector from './SectionSelector';
+import AddNewTabView from './AddNewTabView';
 import './DocumentPanel.css';
 
 // Close icon SVG (X) from Figma
@@ -381,6 +382,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     if (propSelectedProjectId) {
       setSelectedProjectId(propSelectedProjectId);
       loadAvailableDocuments(propSelectedProjectId);
+      loadHighlightsForProject(propSelectedProjectId);
+      loadPdfsForProject(propSelectedProjectId);
     }
   }, [propSelectedProjectId]);
 
@@ -1153,12 +1156,16 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       setShowDocumentList(true);
       if (selectedProjectId) {
         loadAvailableDocuments(selectedProjectId);
+        loadHighlightsForProject(selectedProjectId);
+        loadPdfsForProject(selectedProjectId);
       }
     } else {
       // If already on document tab, toggle the document list
       setShowDocumentList(!showDocumentList);
       if (!showDocumentList && selectedProjectId) {
         loadAvailableDocuments(selectedProjectId);
+        loadHighlightsForProject(selectedProjectId);
+        loadPdfsForProject(selectedProjectId);
       }
     }
   };
@@ -2260,86 +2267,61 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
               <div className="loading-message">Loading document...</div>
             )}
             
-            {/* Show document list/create UI when no document is active or when showDocumentList is true */}
+            {/* Show Add New Tab UI when no document is active or when showDocumentList is true */}
             {(!activeDocumentId || showDocumentList) && (
-              <div className="document-list-view">
-            <div className="document-list-header-inline">
-              <div className="document-list-title-section">
-                <h3>Select or Create Document</h3>
-                {propCurrentProjectName && (
-                  <span className="current-project-badge">
-                    <span className="project-badge-icon">📁</span>
-                    {propCurrentProjectName}
-                  </span>
-                )}
-              </div>
-              {activeDocumentId && (
-                <button
-                  className="close-list-button"
-                  onClick={() => setShowDocumentList(false)}
-                >
-                  × Close
-                </button>
-              )}
-            </div>
-            
-            <div className="document-list-content-inline">
-              {/* Create New Document */}
-              <div className="create-document-section">
-                <h4>Create New Document</h4>
-                <div className="create-document-form">
-                  <input
-                    type="text"
-                    placeholder="Document title (optional)"
-                    value={newDocumentTitle}
-                    onChange={(e) => setNewDocumentTitle(e.target.value)}
-                    className="document-title-input"
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter' && selectedProjectId) {
-                        handleCreateNewDocument();
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={handleCreateNewDocument}
-                    className="create-document-button"
-                    disabled={!selectedProjectId}
-                  >
-                    Create New
-                  </button>
-                </div>
-                {!selectedProjectId && (
-                  <p className="project-warning">Please wait for project to load...</p>
-                )}
-              </div>
-
-              {/* Existing Documents */}
-              <div className="existing-documents-section">
-                <h4>Existing Documents</h4>
-                
-                {availableDocuments.length === 0 ? (
-                  <div className="no-documents-section">
-                    <p className="no-documents">No documents in this project.</p>
-                  </div>
-                ) : (
-                  <div className="document-list">
-                    {availableDocuments.map((doc) => (
-                      <div
-                        key={doc.document_id}
-                        className="document-list-item"
-                        onClick={() => handleSelectExistingDocument(doc.document_id)}
-                      >
-                        <div className="document-list-item-title">{doc.title || 'Untitled'}</div>
-                        <div className="document-list-item-date">
-                          {doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : ''}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+              <AddNewTabView
+                researchDocuments={availableDocuments}
+                urlHighlights={highlightsUrls}
+                pdfDocuments={pdfs}
+                documentWordCounts={documentWordCounts}
+                onCreateNewDocument={() => {
+                  // Create a new research document and open it
+                  handleCreateNewDocument();
+                }}
+                onOpenDocument={(doc) => {
+                  // Open existing research document in a new tab
+                  handleSelectExistingDocument(doc.document_id);
+                }}
+                onOpenUrlHighlight={(urlDoc) => {
+                  // Create a new highlights tab and open this URL
+                  const newTabId = `highlights-${Date.now()}`;
+                  const newTab = { id: newTabId, selectedUrlData: null };
+                  setHighlightsTabs(prev => [...prev, newTab]);
+                  setActiveTabId(newTabId);
+                  setActiveTabType('highlights');
+                  setShowDocumentList(false);
+                  // After tab is created, select the URL
+                  setTimeout(() => {
+                    handleUrlClick(urlDoc);
+                  }, 50);
+                }}
+                onOpenPdfDocument={(pdf) => {
+                  // Create a new PDF tab and open this PDF
+                  const newTabId = `pdf-${Date.now()}`;
+                  const newTab = { id: newTabId, selectedPdfData: null };
+                  setPdfTabs(prev => [...prev, newTab]);
+                  setActiveTabId(newTabId);
+                  setActiveTabType('pdf');
+                  setShowDocumentList(false);
+                  // After tab is created, select the PDF
+                  setTimeout(() => {
+                    handlePdfClick(pdf);
+                  }, 50);
+                }}
+                onUploadPdf={() => {
+                  // Create a PDF tab and trigger file upload
+                  const newTabId = `pdf-${Date.now()}`;
+                  const newTab = { id: newTabId, selectedPdfData: null };
+                  setPdfTabs(prev => [...prev, newTab]);
+                  setActiveTabId(newTabId);
+                  setActiveTabType('pdf');
+                  setShowDocumentList(false);
+                  // Trigger file input after switching tabs
+                  setTimeout(() => {
+                    fileInputRef.current?.click();
+                  }, 100);
+                }}
+              />
             )}
             {!loading && !error && activeDocumentId && !showDocumentList && (
           <>
