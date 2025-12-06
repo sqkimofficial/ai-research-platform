@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from models.database import ChatSessionModel, DocumentTypeModel, Database, DocumentModel, ProjectModel, ResearchDocumentModel
 from services.openai_service import OpenAIService
+from services.perplexity_service import PerplexityService
 from services.vector_service import VectorService
 from services.document_structure_service import DocumentStructureService
 from utils.auth import verify_token
@@ -10,7 +11,8 @@ import os
 import json
 
 chat_bp = Blueprint('chat', __name__)
-openai_service = OpenAIService()
+openai_service = OpenAIService()  # Used for Stage 2 AI (placement)
+perplexity_service = PerplexityService()  # Used for Stage 1 AI (content generation)
 vector_service = VectorService()
 
 # Initialize document types on module load
@@ -473,8 +475,22 @@ def send_message():
                 # Send full document (fallback mode)
                 document_context = document_content
             
-            # Stage 1 AI System Prompt - Content Generation Only (No Placement)
-            system_message = f"""You are a research assistant helping users write research papers. Your role is to GENERATE CONTENT ONLY - you do NOT decide where content should be placed in the document.
+            # Build document context section conditionally
+            document_context_section = f"""The user has been building a research document. Here are the most relevant sections (retrieved using semantic search):
+
+{document_context}
+
+NOTE: Only relevant document sections are shown above based on semantic similarity to the user's query. If you need information from other parts of the document, ask the user or indicate what additional context might be needed."""
+        else:
+            # No existing document content
+            document_context_section = "The document is currently empty - the user is starting a new research paper."
+            # Prepare attached sections markdown for context (if any)
+            if not attached_markdown and attached_sections:
+                attached_contents = [section.get('content', '') for section in attached_sections if section.get('content')]
+                attached_markdown = '\n\n'.join(attached_contents)
+        
+        # Single unified Stage 1 AI System Prompt - Content Generation Only (No Placement)
+        system_message = f"""You are a research assistant helping users write research papers. Your role is to GENERATE CONTENT ONLY - you do NOT decide where content should be placed in the document.
 
 CRITICAL: UNDERSTANDING CURRENT VS HISTORICAL CONTEXT
 - You will receive conversation history for context, but you MUST ONLY respond to the CURRENT USER MESSAGE (the last message)
@@ -493,11 +509,7 @@ You have two distinct responsibilities:
 
 4. SOURCES: Always include any research papers, articles, websites, or other sources you reference or review. Include URLs, DOIs, or citations in the sources array.
 
-The user has been building a research document. Here are the most relevant sections from their document (retrieved using semantic search, not the full document):
-
-{document_context}
-
-NOTE: Only relevant document sections are shown above based on semantic similarity to the user's query. If you need information from other parts of the document, ask the user or indicate what additional context might be needed.
+{document_context_section}
 
 {structure_summary}
 
@@ -512,34 +524,26 @@ When the user asks to add content to an existing section (e.g., "add paragraphs 
 7. DO NOT create a new section element if the user is adding content to an existing one
 
 ATTACHED SECTIONS:
-If the user has attached specific sections from the document to this message, they will appear below. Use these attached sections as the primary context for your response, rather than the entire document:
+If the user has attached specific sections from the document to this message, they will appear below. Use these attached sections as the primary context for your response:
 
-{attached_markdown if attached_markdown else "No sections attached - use the full document context above."}
+{attached_markdown if attached_markdown else "No sections attached."}
 
 AVAILABLE DOCUMENT TYPES:
 {types_list}
 
-CREATING NEW TYPES:
-If you need a document element type that doesn't exist in the list above, use the create_document_type function to create it. For example:
-- If you need to represent mathematical equations: create type "equation"
-- If you need to represent diagrams: create type "diagram"  
-- If you need to represent footnotes: create type "footnote"
-- If you need to represent definitions: create type "definition"
+NEW DOCUMENT TYPES:
+If you need a document element type that doesn't exist in the list above, include it in your JSON response under "new_types". For example:
+- If you need to represent mathematical equations: add {{"type_name": "equation", "description": "Mathematical equation or formula", "metadata_schema": {{}}}}
+- If you need to represent diagrams: add {{"type_name": "diagram", "description": "Visual diagram or flowchart", "metadata_schema": {{}}}}
+- If you need to represent footnotes: add {{"type_name": "footnote", "description": "Footnote or endnote", "metadata_schema": {{}}}}
 
 Only create new types when absolutely necessary - first check if an existing type can be used.
-
-CRITICAL: AFTER FUNCTION CALLS:
-- Function calls (like create_document_type) are just TOOLS to help you complete the task
-- After making a function call, you MUST ALWAYS provide the actual response content
-- Function calls do NOT complete the user's request - you must still generate document_content if the user asked for content
-- If the user asked you to add content to the document, you MUST provide document_content even after making function calls
-- Never return empty content after function calls - always provide the full response the user requested
 
 DOCUMENT STRUCTURE REQUIREMENTS:
 When adding document_content, you MUST provide a "document_structure" array that breaks down the content into granular, selectable elements. Each element should have:
 
 - id: Hierarchical/positional identifier (e.g., "sec-introduction", "para-1", "para-2", "table-1", "code-1"). This reflects position in the document. The backend will automatically assign immutable UUIDs for tracking - you only need to provide the hierarchical ID.
-- type: One of the available types listed above (or a new type you create)
+- type: One of the available types listed above (or a new type you include in new_types)
 - content: The markdown content for this element
 - parent_id: ID of parent element (null for top-level sections, or section ID if adding to existing section)
 - metadata: Object with additional info matching the type's metadata schema:
@@ -566,16 +570,16 @@ MARKDOWN FORMATTING GUIDELINES:
 - Use **bold** for emphasis and *italic* for subtle emphasis
 - Use bullet points (-) or numbered lists (1.) for lists
 - Use code blocks with language tags: ```python for code examples (ALWAYS include language tag)
-- Use tables with Markdown table syntax: | Column 1 | Column 2 |\n|--------|----------|\n| Value 1 | Value 2 |
+- Use tables with Markdown table syntax: | Column 1 | Column 2 |\\n|--------|----------|\\n| Value 1 | Value 2 |
 - Use > for blockquotes when citing sources
 - Use [link text](url) for references
 - Keep paragraphs separated by blank lines
 
 EXAMPLES:
-- For a new section: "## Methodology\n\nThis study employs..."
-- For code: "```python\ndef function():\n    pass\n```"
-- For tables: "| Method | Accuracy |\n|--------|----------|\n| A | 95% |\n| B | 87% |"
-- For lists: "- Item 1\n- Item 2\n- Item 3"
+- For a new section: "## Methodology\\n\\nThis study employs..."
+- For code: "```python\\ndef function():\\n    pass\\n```"
+- For tables: "| Method | Accuracy |\\n|--------|----------|\\n| A | 95% |\\n| B | 87% |"
+- For lists: "- Item 1\\n- Item 2\\n- Item 3"
 
 IMPORTANT RULES:
 - If the user asks a question or wants to discuss something, set document_content to empty string ''
@@ -594,7 +598,7 @@ CRITICAL JSON FORMATTING RULES:
 - ALL backslashes within string values MUST be escaped as \\\\ (double backslash)
 - Do NOT include actual newline characters inside JSON string values
 - The JSON must be on a single line OR properly formatted with escaped newlines
-- Example of CORRECT format: {{"message": "Hello\\nWorld", "document_content": "## Section\\n\\nContent", "sources": ["https://example.com"]}}
+- Example of CORRECT format: {{"message": "Hello\\nWorld", "document_content": "## Section\\n\\nContent", "sources": ["https://example.com"], "new_types": []}}
 - Example of WRONG format: {{"message": "Hello
 World"}} - this will break JSON parsing
 
@@ -610,7 +614,8 @@ Always respond in JSON format with exactly these keys:
   "message": "your conversational response here (always provide this, even if brief). Use \\n for line breaks.",
   "document_content": "structured markdown content to add (empty string '' if no document update needed). Use \\n for line breaks. IMPORTANT: When adding to an existing section, ONLY include the NEW content - do NOT repeat the section header or existing content.",
   "document_structure": [array of structured elements matching document_content. Empty array [] if no document update needed],
-  "sources": ["array of source URLs, DOIs, or citations you referenced or reviewed. Empty array [] if no sources"]
+  "sources": ["array of source URLs, DOIs, or citations you referenced or reviewed. Empty array [] if no sources"],
+  "new_types": [array of new document types to create. Empty array [] if no new types needed. Each type: {{"type_name": "name", "description": "desc", "metadata_schema": {{}}}}]
 }}
 
 CRITICAL: CONTENT SCOPE RULES
@@ -624,184 +629,6 @@ CRITICAL: CONTENT SCOPE RULES
   * The document_structure should have parent_id pointing to the existing Introduction section ID
 
 Remember: The chat message should be conversational and helpful. The document_content should be formal research writing in Markdown format, but ONLY include new content being added. The document_structure should provide granular, selectable elements that match the document_content. Sources should include any papers, articles, or websites you mention or review. You generate content only - placement decisions are made separately."""
-        else:
-            # No existing document content, but structure_summary is already initialized above
-            # Prepare attached sections markdown for context (if any)
-            attached_markdown_for_prompt = ''
-            if attached_sections:
-                attached_contents = [section.get('content', '') for section in attached_sections if section.get('content')]
-                attached_markdown_for_prompt = '\n\n'.join(attached_contents)
-            
-            # Stage 1 AI System Prompt - Content Generation Only (No Placement) - No Existing Document
-            system_message = f"""You are a research assistant helping users write research papers. Your role is to GENERATE CONTENT ONLY - you do NOT decide where content should be placed in the document.
-
-CRITICAL: UNDERSTANDING CURRENT VS HISTORICAL CONTEXT
-- You will receive conversation history for context, but you MUST ONLY respond to the CURRENT USER MESSAGE (the last message)
-- Historical messages are provided so you understand what was discussed previously, but you should NOT act on old instructions
-- Only the CURRENT USER MESSAGE contains the instruction you need to fulfill RIGHT NOW
-- If the conversation history shows previous requests, those have already been completed - do NOT repeat them
-- Focus ONLY on what the current user message is asking for
-
-You have two distinct responsibilities:
-
-1. CHAT MESSAGE: Provide conversational, helpful responses focused on reasoning, answering questions, discussing ideas. Be concise and conversational - this is for the chat interface.
-
-2. DOCUMENT CONTENT GENERATION: When the user's request requires adding or updating the research document, generate well-structured, formal research content in Markdown format. Your ONLY job is to generate high-quality content - you do NOT provide placement instructions or decide where content goes.
-
-3. DOCUMENT STRUCTURE: When providing document_content, you MUST also provide a structured representation in the "document_structure" field. This allows users to select and attach specific sections, paragraphs, tables, or code snippets.
-
-4. SOURCES: Always include any research papers, articles, websites, or other sources you reference or review. Include URLs, DOIs, or citations in the sources array.
-
-{structure_summary}
-
-SEMANTIC SECTION MATCHING FOR CONTENT GENERATION:
-When the user asks to add content to an existing section (e.g., "add paragraphs to Introduction" or "add a table to Methodology"), you should:
-1. Look through the document structure above to understand the context
-2. Match semantically - "Introduction" matches "intro", "Introduction", "INTRODUCTION", etc.
-3. "Methods" matches "Methodology", "Methods", "Experimental Methods", etc.
-4. "Results" matches "Results", "Findings", "Experimental Results", etc.
-5. If adding to an existing section, set parent_id in document_structure elements to that section's ID
-6. DO NOT include the section title/header in document_content when adding to existing sections - only include the NEW content
-7. DO NOT create a new section element if the user is adding content to an existing one
-
-ATTACHED SECTIONS:
-If the user has attached specific sections from the document to this message, they will appear below. Use these attached sections as the primary context for your response, rather than the entire document:
-
-{attached_markdown_for_prompt if attached_markdown_for_prompt else "No sections attached - use the full document context above."}
-
-AVAILABLE DOCUMENT TYPES:
-{types_list}
-
-CREATING NEW TYPES:
-If you need a document element type that doesn't exist in the list above, use the create_document_type function to create it. For example:
-- If you need to represent mathematical equations: create type "equation"
-- If you need to represent diagrams: create type "diagram"  
-- If you need to represent footnotes: create type "footnote"
-- If you need to represent definitions: create type "definition"
-
-Only create new types when absolutely necessary - first check if an existing type can be used.
-
-CRITICAL: AFTER FUNCTION CALLS:
-- Function calls (like create_document_type) are just TOOLS to help you complete the task
-- After making a function call, you MUST ALWAYS provide the actual response content
-- Function calls do NOT complete the user's request - you must still generate document_content if the user asked for content
-- If the user asked you to add content to the document, you MUST provide document_content even after making function calls
-- Never return empty content after function calls - always provide the full response the user requested
-
-DOCUMENT STRUCTURE REQUIREMENTS:
-When adding document_content, you MUST provide a "document_structure" array that breaks down the content into granular, selectable elements. Each element should have:
-
-- id: Hierarchical/positional identifier (e.g., "sec-introduction", "para-1", "para-2", "table-1", "code-1"). This reflects position in the document. The backend will automatically assign immutable UUIDs for tracking - you only need to provide the hierarchical ID.
-- type: One of the available types listed above (or a new type you create)
-- content: The markdown content for this element
-- parent_id: ID of parent element (null for top-level sections, or section ID if adding to existing section)
-- metadata: Object with additional info matching the type's metadata schema:
-  - For code_block: {{"language": "python"}}
-  - For image: {{"alt": "description", "url": "image-url"}}
-  - For table: {{"caption": "optional caption"}}
-  - For section/subsection: {{"title": "Section Title", "level": 1-6}}
-
-STRUCTURE HIERARCHY:
-- Sections (##) are top-level (parent_id: null)
-- Subsections (###) have parent_id pointing to their section
-- Paragraphs, tables, code blocks, etc. have parent_id pointing to their section/subsection
-- Maintain logical nesting: sections > subsections > content elements
-
-PARAGRAPH GRANULARITY:
-- EACH paragraph must be a separate element in document_structure
-- Do NOT combine multiple paragraphs into a single element
-- Each paragraph should have its own id, type="paragraph", and parent_id
-- This allows users to select individual paragraphs for attachment
-- Example: If a section has 3 paragraphs, create 3 separate paragraph elements, each with parent_id pointing to the section
-
-MARKDOWN FORMATTING GUIDELINES:
-- Use headers: # for main title, ## for sections, ### for subsections
-- Use **bold** for emphasis and *italic* for subtle emphasis
-- Use bullet points (-) or numbered lists (1.) for lists
-- Use code blocks with language tags: ```python for code examples (ALWAYS include language tag)
-- Use tables with Markdown table syntax: | Column 1 | Column 2 |\n|--------|----------|\n| Value 1 | Value 2 |
-- Use > for blockquotes when citing sources
-- Use [link text](url) for references
-- Keep paragraphs separated by blank lines
-
-EXAMPLES:
-- For a new section: "## Methodology\n\nThis study employs..."
-- For code: "```python\ndef function():\n    pass\n```"
-- For tables: "| Method | Accuracy |\n|--------|----------|\n| A | 95% |\n| B | 87% |"
-- For lists: "- Item 1\n- Item 2\n- Item 3"
-
-IMPORTANT RULES:
-- If the user asks a question or wants to discuss something, set document_content to empty string ''
-- Only include document_content when explicitly asked to add/update/write content to the document
-- For code snippets in document_content, ALWAYS use proper markdown code blocks with language tags
-- For tables in document_content, ALWAYS include header separator row (|--------|)
-- Chat message should NEVER contain full document content - only brief snippets if relevant to answer
-- ALWAYS include sources you reference, review, or cite in the sources array (NOT in document_content)
-- Sources should ONLY appear in the "sources" JSON field - NEVER include URLs or citations in document_content
-- The document_content should be clean research writing without source URLs or citations
-
-CRITICAL JSON FORMATTING RULES:
-- You MUST respond with valid JSON only - no extra text before or after
-- ALL newlines within string values MUST be escaped as \\n (backslash followed by n)
-- ALL quotes within string values MUST be escaped as \\" (backslash followed by quote)
-- ALL backslashes within string values MUST be escaped as \\\\ (double backslash)
-- Do NOT include actual newline characters inside JSON string values
-- The JSON must be on a single line OR properly formatted with escaped newlines
-- Example of CORRECT format: {{"message": "Hello\\nWorld", "document_content": "## Section\\n\\nContent", "sources": ["https://example.com"]}}
-- Example of WRONG format: {{"message": "Hello
-World"}} - this will break JSON parsing
-
-CRITICAL: CONTENT GENERATION ONLY - NO PLACEMENT
-- Your ONLY job is to generate high-quality research content
-- Do NOT provide placement instructions or decide where content should go
-- Do NOT include a "placement" field in your response
-- Focus on generating well-structured, accurate, properly formatted content
-- When adding to an existing section, ONLY include the NEW content (no section headers, no existing content)
-
-Always respond in JSON format with exactly these keys:
-{{
-  "message": "your conversational response here (always provide this, even if brief). Use \\n for line breaks.",
-  "document_content": "structured markdown content to add (empty string '' if no document update needed). Use \\n for line breaks. IMPORTANT: When adding to an existing section, ONLY include the NEW content - do NOT repeat the section header or existing content.",
-  "document_structure": [array of structured elements matching document_content. Empty array [] if no document update needed],
-  "sources": ["array of source URLs, DOIs, or citations you referenced or reviewed. Empty array [] if no sources"]
-}}
-
-CRITICAL: CONTENT SCOPE RULES
-- When adding content to an EXISTING section: document_content should ONLY contain the new paragraphs/tables/content you are adding
-- DO NOT include section headers (## Section Name) when adding to existing sections
-- DO NOT repeat existing paragraphs or content that's already in the document
-- Only include what is NEW and being added in this response
-- Example: If user says "Add a paragraph to Introduction" and Introduction already exists:
-  * WRONG: "## Introduction\\n\\nExisting paragraph text...\\n\\nNew paragraph text..."
-  * CORRECT: "New paragraph text about recent innovations..."
-  * The document_structure should have parent_id pointing to the existing Introduction section ID
-
-Remember: The chat message should be conversational and helpful. The document_content should be formal research writing in Markdown format, but ONLY include new content being added. The document_structure should provide granular, selectable elements that match the document_content. Sources should include any papers, articles, or websites you mention or review. You generate content only - placement decisions are made separately."""
-        
-        # Define function for creating new document types
-        create_type_function = {
-            "name": "create_document_type",
-            "description": "Create a new document element type when no existing type matches the content structure needed. Use this when you need a type that doesn't exist in the available types list.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "type_name": {
-                        "type": "string",
-                        "description": "Unique name for the new type (lowercase, underscore-separated, e.g., 'equation', 'diagram', 'footnote')"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Human-readable description of what this type represents and when to use it"
-                    },
-                    "metadata_schema": {
-                        "type": "object",
-                        "description": "JSON schema defining expected metadata fields for this type (e.g., {'language': 'string'} for code, {'caption': 'string'} for images)",
-                        "additionalProperties": True
-                    }
-                },
-                "required": ["type_name", "description"]
-            }
-        }
         
         # Check for pending content (for revisions)
         pending_content_data = ChatSessionModel.get_pending_content(session_id)
@@ -876,183 +703,63 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 'content': content
             })
         
-        # Get AI response with function calling support
-        functions = [create_type_function]
+        # Perplexity requires strict alternation between user/assistant messages
+        # Merge consecutive messages of the same role to ensure alternation
+        alternated_messages = []
+        for msg in openai_messages:
+            if msg['role'] == 'system':
+                # System messages go first, as-is
+                alternated_messages.append(msg)
+            elif not alternated_messages or alternated_messages[-1]['role'] == 'system':
+                # First non-system message
+                alternated_messages.append(msg)
+            elif alternated_messages[-1]['role'] == msg['role']:
+                # Same role as previous - merge content
+                alternated_messages[-1]['content'] += '\n\n' + msg['content']
+            else:
+                # Different role - add normally
+                alternated_messages.append(msg)
+        
+        # Stage 1 AI - Perplexity (content generation with web search)
         try:
-            ai_response = openai_service.chat_completion(
-                openai_messages, 
-                functions=functions,
-                function_call="auto"
-            )
+            ai_response = perplexity_service.chat_completion(alternated_messages)
         except Exception as e:
-            print(f"Error calling OpenAI API: {e}")
+            print(f"Error calling Perplexity API: {e}")
             import traceback
             traceback.print_exc()
             raise
         
-        # Ensure ai_response is a dict
-        if not isinstance(ai_response, dict):
-            print(f"Unexpected ai_response type: {type(ai_response)}")
-            ai_response = {'content': str(ai_response) if ai_response else '', 'function_call': None}
-        
-        # Handle function calls
-        function_calls_made = []
-        max_iterations = 5  # Prevent infinite loops
-        iteration = 0
-        
-        function_call = ai_response.get('function_call')
-        while function_call and iteration < max_iterations:
-            iteration += 1
-            
-            # Handle function_call object (OpenAI API format)
-            # OpenAI returns a FunctionCall object with .name and .arguments attributes
-            # .arguments is a JSON string that needs to be parsed
-            func_name = None
-            func_args = '{}'
-            try:
-                if hasattr(function_call, 'name'):
-                    func_name = function_call.name
-                    func_args = function_call.arguments if hasattr(function_call, 'arguments') else '{}'
-                elif isinstance(function_call, dict):
-                    func_name = function_call.get('name')
-                    func_args = function_call.get('arguments', '{}')
-                else:
-                    print(f"Unknown function_call format: {type(function_call)}")
-                    break
-            except Exception as e:
-                print(f"Error parsing function_call: {e}")
-                import traceback
-                traceback.print_exc()
-                break
-            
-            if not func_name:
-                print("No function name found in function_call")
-                break
-            
-            if func_name == 'create_document_type':
-                # Parse function arguments
-                try:
-                    args = json.loads(func_args) if isinstance(func_args, str) else func_args
-                    type_name = args.get('type_name')
-                    description = args.get('description')
-                    metadata_schema = args.get('metadata_schema', {})
-                    
-                    # Create the new type
-                    type_id = DocumentTypeModel.create_type(
-                        type_name=type_name,
-                        description=description,
-                        metadata_schema=metadata_schema,
-                        is_system=False
-                    )
-                    
-                    if type_id:
-                        function_result = {
-                            "success": True,
-                            "message": f"Successfully created new document type '{type_name}'",
-                            "type_id": type_id
-                        }
-                        # Update available types
-                        available_types = DocumentTypeModel.get_all_types()
-                        type_names = [t['type_name'] for t in available_types]
-                        type_descriptions[type_name] = description
-                    else:
-                        function_result = {
-                            "success": False,
-                            "message": f"Type '{type_name}' already exists"
-                        }
-                    
-                    function_calls_made.append({
-                        "function": "create_document_type",
-                        "arguments": args,
-                        "result": function_result
-                    })
-                    
-                    # Add function call and result to conversation
-                    openai_messages.append({
-                        'role': 'assistant',
-                        'content': None,
-                        'function_call': {
-                            'name': func_name,
-                            'arguments': json.dumps(args) if isinstance(args, dict) else func_args
-                        }
-                    })
-                    openai_messages.append({
-                        'role': 'function',
-                        'name': func_name,
-                        'content': json.dumps(function_result)
-                    })
-                    
-                    # Add a reminder that the AI must still provide the actual response
-                    # This helps ensure content is generated after function calls
-                    reminder_message = {
-                        'role': 'user',
-                        'content': 'Remember: The function call was just a tool. You must still provide the actual response content that the user requested. If the user asked for document content, you must generate document_content with document_structure and placement information.'
-                    }
-                    openai_messages.append(reminder_message)
-                    
-                    # Get next response
-                    try:
-                        ai_response = openai_service.chat_completion(
-                            openai_messages,
-                            functions=functions,
-                            function_call="auto"
-                        )
-                        # Ensure ai_response is a dict
-                        if not isinstance(ai_response, dict):
-                            ai_response = {'content': str(ai_response) if ai_response else '', 'function_call': None}
-                        function_call = ai_response.get('function_call')
-                    except Exception as e:
-                        print(f"Error calling OpenAI API in function loop: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        break
-                except Exception as e:
-                    print(f"Error handling function call: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    # Break on error
-                    break
-            else:
-                # Unknown function
-                print(f"Unknown function: {func_name}")
-                break
-        
-        # Parse JSON response from final content
+        # Get response content
         ai_response_content = ai_response.get('content') or ''
         
-        # If no content after function calls, make another API call without function calling
-        # to force the AI to generate the actual response content
-        if not ai_response_content and function_calls_made:
-            print("DEBUG: Function calls made but no content returned. Making follow-up call without function calling.")
-            try:
-                # Make one more call without function calling to get actual content
-                follow_up_response = openai_service.chat_completion(
-                    openai_messages,
-                    functions=None,  # Disable function calling
-                    function_call="none"
-                )
-                ai_response_content = follow_up_response.get('content') or ''
-                if ai_response_content:
-                    print(f"DEBUG: Got content from follow-up call: {len(ai_response_content)} chars")
-                else:
-                    print("DEBUG: Follow-up call also returned no content")
-            except Exception as e:
-                print(f"DEBUG: Error in follow-up API call: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        # If still no content, create a fallback response
+        # If no content, create a fallback response
         if not ai_response_content:
-            # No content - this shouldn't happen, but handle it
             ai_response_content = json.dumps({
                 "message": "I apologize, but I didn't receive a proper response. Please try again.",
                 "document_content": "",
                 "document_structure": [],
-                "placement": None,
-                "sources": []
+                "sources": [],
+                "new_types": []
             })
         
-        parsed_response = openai_service.parse_json_response(ai_response_content)
+        # Parse JSON response
+        parsed_response = perplexity_service.parse_json_response(ai_response_content)
+        
+        # Handle new document types from AI response
+        new_types = parsed_response.get('new_types', [])
+        for new_type in new_types:
+            if isinstance(new_type, dict) and new_type.get('type_name'):
+                try:
+                    type_id = DocumentTypeModel.create_type(
+                        type_name=new_type.get('type_name'),
+                        description=new_type.get('description', ''),
+                        metadata_schema=new_type.get('metadata_schema', {}),
+                        is_system=False
+                    )
+                    if type_id:
+                        print(f"DEBUG: Created new document type: {new_type.get('type_name')}")
+                except Exception as e:
+                    print(f"DEBUG: Failed to create document type {new_type.get('type_name')}: {e}")
         
         # Log parsed response (without raw content)
         print("DEBUG: Parsed Response:")
@@ -1295,8 +1002,7 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
             'document_content': document_content_to_add,
             'document_structure': document_structure,
             'sources': sources,
-            'session_id': session_id,
-            'function_calls': function_calls_made if function_calls_made else None
+            'session_id': session_id
         }
         
         # Add pending approval fields if content was generated
@@ -1824,6 +1530,9 @@ The user has been building a research document. Here are the most relevant secti
 AVAILABLE DOCUMENT TYPES:
 {types_list}
 
+NEW DOCUMENT TYPES:
+If you need a document element type that doesn't exist in the list above, include it in your JSON response under "new_types".
+
 CRITICAL: CONTENT GENERATION ONLY - NO PLACEMENT
 - Your ONLY job is to generate high-quality research content
 - Do NOT provide placement instructions or decide where content should go
@@ -1835,7 +1544,8 @@ Always respond in JSON format with exactly these keys:
   "message": "your conversational response here (always provide this, even if brief). Use \\n for line breaks.",
   "document_content": "structured markdown content to add (empty string '' if no document update needed). Use \\n for line breaks.",
   "document_structure": [array of structured elements matching document_content. Empty array [] if no document update needed],
-  "sources": ["array of source URLs, DOIs, or citations you referenced or reviewed. Empty array [] if no sources"]
+  "sources": ["array of source URLs, DOIs, or citations you referenced or reviewed. Empty array [] if no sources"],
+  "new_types": [array of new document types to create. Empty array [] if no new types needed]
 }}"""
         
         # Call Stage 1 AI for rewrite
@@ -1845,18 +1555,34 @@ Always respond in JSON format with exactly these keys:
         ]
         
         try:
-            rewrite_response = openai_service.chat_completion(rewrite_messages, functions=None, function_call="none")
+            rewrite_response = perplexity_service.chat_completion(rewrite_messages)
             rewrite_content = rewrite_response.get('content', '')
             
             if not rewrite_content:
                 raise Exception("Rewrite AI returned empty response")
             
             # Parse rewrite response
-            rewrite_parsed = openai_service.parse_json_response(rewrite_content)
+            rewrite_parsed = perplexity_service.parse_json_response(rewrite_content)
             chat_message = rewrite_parsed.get('message', '')
             document_content_to_add = rewrite_parsed.get('document_content', '')
             document_structure = rewrite_parsed.get('document_structure', [])
             sources = rewrite_parsed.get('sources', [])
+            
+            # Handle new document types from AI response
+            new_types = rewrite_parsed.get('new_types', [])
+            for new_type in new_types:
+                if isinstance(new_type, dict) and new_type.get('type_name'):
+                    try:
+                        type_id = DocumentTypeModel.create_type(
+                            type_name=new_type.get('type_name'),
+                            description=new_type.get('description', ''),
+                            metadata_schema=new_type.get('metadata_schema', {}),
+                            is_system=False
+                        )
+                        if type_id:
+                            print(f"DEBUG: Created new document type in rewrite: {new_type.get('type_name')}")
+                    except Exception as type_error:
+                        print(f"DEBUG: Failed to create document type {new_type.get('type_name')}: {type_error}")
             
         except Exception as e:
             print(f"Error in rewrite AI call: {e}")

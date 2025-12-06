@@ -5,6 +5,7 @@ load_dotenv()
 
 class Config:
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    PERPLEXITY_API_KEY = os.getenv('PERPLEXITY_API')  # For Stage 1 AI (content generation)
     MONGODB_URI = os.getenv('MONGODB_URI')
     JWT_SECRET = os.getenv('JWT_SECRET', 'default-secret-change-in-production')
     FLASK_ENV = os.getenv('FLASK_ENV', 'development')

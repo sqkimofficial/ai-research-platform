@@ -2,6 +2,7 @@ flask==3.0.0
 flask-cors==4.0.0
 pymongo==4.6.0
 openai==1.3.0
+perplexityai>=0.22.0
 bcrypt==4.1.1
 PyJWT==2.8.0
 numpy==1.26.2
