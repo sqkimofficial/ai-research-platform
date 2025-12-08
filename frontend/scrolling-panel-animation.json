@@ -1,0 +1,496 @@
+{
+  "meta": {
+    "name": "Scrolling Text Panel Animation",
+    "description": "Animation configuration for the right-hand side login page scrolling text panel",
+    "totalHeight": 2000,
+    "duplicateOffset": 1000
+  },
+  "animationSpeeds": {
+    "slow": {
+      "duration": "120s",
+      "appliesTo": ["heading", "xl"],
+      "description": "Large text moves slowest for visual depth"
+    },
+    "medium": {
+      "duration": "35s",
+      "appliesTo": ["lg"],
+      "description": "Medium text moves fastest"
+    },
+    "fast": {
+      "duration": "55s",
+      "appliesTo": ["sm"],
+      "description": "Small text moves at medium speed"
+    }
+  },
+  "directionRules": {
+    "default": "up",
+    "conditions": [
+      { "rule": "size === 'heading' || size === 'xl'", "direction": "down" },
+      { "rule": "opacity < 0.15", "direction": "down" },
+      { "rule": "explicit direction property", "direction": "as specified" }
+    ]
+  },
+  "textSizes": {
+    "heading": {
+      "classes": "text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-semibold tracking-tight whitespace-nowrap",
+      "width": "auto"
+    },
+    "xl": {
+      "classes": "text-2xl md:text-3xl lg:text-4xl xl:text-5xl font-medium whitespace-nowrap",
+      "width": "auto"
+    },
+    "lg": {
+      "classes": "text-xl md:text-2xl lg:text-3xl font-medium",
+      "width": "50%"
+    },
+    "sm": {
+      "classes": "text-[10px] md:text-xs lg:text-sm leading-relaxed",
+      "width": "35%"
+    }
+  },
+  "content": [
+    {
+      "text": "Research Method & Scope",
+      "size": "heading",
+      "opacity": 0.92,
+      "x": 52,
+      "y": 0,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "Conclusion",
+      "size": "heading",
+      "opacity": 0.72,
+      "x": -12,
+      "y": 250,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "Reference Sources",
+      "size": "heading",
+      "opacity": 0.78,
+      "x": 48,
+      "y": 500,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "esearch Background",
+      "size": "heading",
+      "opacity": 0.88,
+      "x": -18,
+      "y": 750,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "& Objectives",
+      "size": "heading",
+      "opacity": 0.88,
+      "x": -18,
+      "y": 815,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "ground and constructing data storage facilities maintaining",
+      "size": "xl",
+      "opacity": 0.11,
+      "x": -8,
+      "y": 55,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "of data storage infrastructure development systems and warehouse",
+      "size": "xl",
+      "opacity": 0.09,
+      "x": 5,
+      "y": 260,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "contemporary architectural solutions for",
+      "size": "xl",
+      "opacity": 0.08,
+      "x": 2,
+      "y": 535,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "background and infrastructure development with emerging technologies",
+      "size": "xl",
+      "opacity": 0.1,
+      "x": -5,
+      "y": 715,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "The 1970s marked the birth of modern computing infrastructure",
+      "size": "xl",
+      "opacity": 0.11,
+      "x": 48,
+      "y": 5,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "constructing facilities to house and maintain critical infrastructure systems",
+      "size": "xl",
+      "opacity": 0.09,
+      "x": 55,
+      "y": 150,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "maintaining operational efficiency across distributed",
+      "size": "xl",
+      "opacity": 0.07,
+      "x": 68,
+      "y": 15,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "introduction to methodology and analytical framework development",
+      "size": "xl",
+      "opacity": 0.06,
+      "x": 72,
+      "y": 195,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "with data centers and storage facilities expanding",
+      "size": "xl",
+      "opacity": 0.08,
+      "x": 12,
+      "y": 1285,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "leading technological innovations in sustainable infrastructure",
+      "size": "xl",
+      "opacity": 0.07,
+      "x": 72,
+      "y": 940,
+      "computedDirection": "down",
+      "computedSpeed": "slow"
+    },
+    {
+      "text": "approach that addresses the fundamental challenges",
+      "size": "lg",
+      "opacity": 0.14,
+      "x": -15,
+      "y": 465,
+      "computedDirection": "down",
+      "computedSpeed": "medium"
+    },
+    {
+      "text": "cultural preservation. As global data centers expand their operational",
+      "size": "lg",
+      "opacity": 0.13,
+      "x": -20,
+      "y": 780,
+      "computedDirection": "down",
+      "computedSpeed": "medium"
+    },
+    {
+      "text": "data consumption continues to accelerate with unprecedented growth rates",
+      "size": "lg",
+      "opacity": 0.11,
+      "x": 32,
+      "y": 855,
+      "computedDirection": "down",
+      "computedSpeed": "medium"
+    },
+    {
+      "text": "surge—with data centers, facilities and infrastructure",
+      "size": "lg",
+      "opacity": 0.09,
+      "x": -12,
+      "y": 920,
+      "computedDirection": "down",
+      "computedSpeed": "medium"
+    },
+    {
+      "text": "collections while improving accessibility and preservation standards",
+      "size": "lg",
+      "opacity": 0.12,
+      "x": -10,
+      "y": 1225,
+      "computedDirection": "down",
+      "computedSpeed": "medium"
+    },
+    {
+      "text": "public access and community engagement through innovative design",
+      "size": "lg",
+      "opacity": 0.1,
+      "x": 5,
+      "y": 1465,
+      "computedDirection": "down",
+      "computedSpeed": "medium"
+    },
+    {
+      "text": "consumption and distribution networks spanning continental regions",
+      "size": "lg",
+      "opacity": 0.1,
+      "x": 62,
+      "y": 510,
+      "computedDirection": "down",
+      "computedSpeed": "medium"
+    },
+    {
+      "text": "power distribution systems and renewable energy integration solutions",
+      "size": "lg",
+      "opacity": 0.08,
+      "x": 48,
+      "y": 570,
+      "computedDirection": "down",
+      "computedSpeed": "medium"
+    },
+    {
+      "text": "computers are transforming how organizations manage",
+      "size": "lg",
+      "opacity": 0.09,
+      "x": 65,
+      "y": 885,
+      "computedDirection": "down",
+      "computedSpeed": "medium"
+    },
+    {
+      "text": "environmental conditions for collection preservation. This research investigates how these complementary needs can create mutually beneficial architectural solutions, particularly within the context of urban regeneration projects like Yongsan Park in Seoul, where historical military sites are being transformed into public spaces.",
+      "size": "sm",
+      "opacity": 0.5,
+      "x": -8,
+      "y": 30,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "The primary objectives of this research include examining the technical and spatial requirements, analyzing sustainable energy integration possibilities, waste heat recovery systems, and proposing design frameworks for complex archives and data center technologies including cooling systems, energy management, preservation needs while contributing to sustainable museum storage principles encompassing environmental control requirements.",
+      "size": "sm",
+      "opacity": 0.4,
+      "x": 35,
+      "y": 95,
+      "direction": "down",
+      "computedDirection": "down",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "museum storage requirements, analyzing sustainable energy integration possibilities, waste heat recovery systems, and proposing design examines three primary frameworks for complex archives, data center technologies including that serve both digital and physical cooling systems, energy management, preservation needs while contributing to heat recovery capabilities; ecological systems,",
+      "size": "sm",
+      "opacity": 0.48,
+      "x": 5,
+      "y": 310,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "museum storage principles encompassing environmental control requirements, collection preservation standards, and emerging open storage models; and contemporary architectural integration strategies for creating hybrid facilities that optimize both digital infrastructure efficiency, circulation patterns, and sustainable operations.",
+      "size": "sm",
+      "opacity": 0.32,
+      "x": 45,
+      "y": 395,
+      "direction": "down",
+      "computedDirection": "down",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "challenges in both digital infrastructure and cultural preservation. As global data consumption continues to surge—with data centers, museum storage facilities representing an innovative architectural approach and data consumption continues to surge with increasing demand",
+      "size": "sm",
+      "opacity": 0.52,
+      "x": 28,
+      "y": 605,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "of US annual electricity generation by 2030—and infrastructure and cultural museums face increasing infrastructure and cultural preservation pressure to preserve expanding collections while maintaining sustainable operations and reducing environmental impact across all facility types",
+      "size": "sm",
+      "opacity": 0.42,
+      "x": 40,
+      "y": 1135,
+      "direction": "down",
+      "computedDirection": "down",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "Digital Realty, DCI, and STACK Infrastructure are expanding operations in South Korea, with new facilities like a 40 MW data center planned with Koramco marking the country's position as a leading technology hub in Asia Pacific. The Seoul market maintains a relatively low vacancy rate of less than 10%, indicating healthy demand despite substantial development pipeline.",
+      "size": "sm",
+      "opacity": 0.5,
+      "x": -3,
+      "y": 1345,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "innovative thermal management systems that reduce energy consumption while maintaining optimal operating temperatures for sensitive electronic equipment across diverse climate conditions",
+      "size": "sm",
+      "opacity": 0.45,
+      "x": 30,
+      "y": 50,
+      "direction": "down",
+      "computedDirection": "down",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "sustainable practices in data management and storage optimization techniques that minimize environmental impact while maximizing operational efficiency",
+      "size": "sm",
+      "opacity": 0.35,
+      "x": 38,
+      "y": 175,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "integrated cooling solutions combining liquid and air-based systems to achieve unprecedented levels of energy efficiency in modern data centers",
+      "size": "sm",
+      "opacity": 0.42,
+      "x": 25,
+      "y": 485,
+      "direction": "down",
+      "computedDirection": "down",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "renewable energy integration strategies that enable carbon-neutral operations while maintaining 99.99% uptime requirements for mission-critical applications",
+      "size": "sm",
+      "opacity": 0.38,
+      "x": 42,
+      "y": 680,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "advanced monitoring and analytics platforms that provide real-time visibility into infrastructure performance and predictive maintenance capabilities",
+      "size": "sm",
+      "opacity": 0.33,
+      "x": 32,
+      "y": 870,
+      "direction": "down",
+      "computedDirection": "down",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "modular construction approaches that accelerate deployment timelines while maintaining flexibility for future expansion and technology upgrades",
+      "size": "sm",
+      "opacity": 0.4,
+      "x": 28,
+      "y": 1050,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "A data center is a physical facility housing IT infrastructure for building, running, and delivering applications and services while storing and managing associated data. These facilities range from small server rooms to massive complexes spanning hundreds of thousands",
+      "size": "sm",
+      "opacity": 0.55,
+      "x": 55,
+      "y": 235,
+      "direction": "down",
+      "computedDirection": "down",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "Microsoft's recent data center initiatives complexes spanning have achieved 60% less electricity square feet, containing consumption compared to networking systems, storage including power distribution systems and physical security emission control systems, environmental, and physical security infrastructure.",
+      "size": "sm",
+      "opacity": 0.38,
+      "x": 68,
+      "y": 345,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "computing equipment, networking systems, storage solutions, and physical security infrastructure supporting critical business operations worldwide.",
+      "size": "sm",
+      "opacity": 0.33,
+      "x": 38,
+      "y": 445,
+      "direction": "down",
+      "computedDirection": "down",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "Amazon's Virginia data center uses renewable energy sources and water cooling systems instead of air-conditioning, with AWS developing technologies to reduce power consumption by 40% and costs by 50% through innovative engineering approaches.",
+      "size": "sm",
+      "opacity": 0.52,
+      "x": 58,
+      "y": 625,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "emission control systems, environmental, and physical security facilities designed to minimize impact.",
+      "size": "sm",
+      "opacity": 0.3,
+      "x": 45,
+      "y": 735,
+      "direction": "down",
+      "computedDirection": "down",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "The adaptive reuse of existing structures for data centers offers numerous sustainability benefits by reusing construction materials, avoiding demolition waste, and preserving embodied energy from original construction while reducing carbon footprint.",
+      "size": "sm",
+      "opacity": 0.44,
+      "x": 72,
+      "y": 790,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "The transformation of the former Sears headquarters into a data center exemplifies this Stockholm. 10,000 apartment development converting high data center waste to usable heat energy for residential applications",
+      "size": "sm",
+      "opacity": 0.38,
+      "x": 35,
+      "y": 985,
+      "direction": "down",
+      "computedDirection": "down",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "Data Center as a Service (DCaaS) models Data Parks initiative, are redefining flexibility allowing organizations to scale in 2010. The project exemplified without capital-intensive buildouts and integrate into urban Pacific, particularly South Korea, transforming waste heat into community resources",
+      "size": "sm",
+      "opacity": 0.32,
+      "x": 65,
+      "y": 1175,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "and emerging markets like Vietnam, similarly cap Melbourne, is becoming a global hub to provide low-carbon with significant investments alongside homes and business AI zones and high-density compute smaller-scale applications deployment across regional data centers",
+      "size": "sm",
+      "opacity": 0.28,
+      "x": 42,
+      "y": 1285,
+      "direction": "down",
+      "computedDirection": "down",
+      "computedSpeed": "fast"
+    },
+    {
+      "text": "into a trout farm powered by energy from Green Mountain Tech centers, and a UK leisure center where Deep Green provides data that heat swimming pools. In Pa Germany, WindCORES places servers inside wind turbines utilizing renewable",
+      "size": "sm",
+      "opacity": 0.4,
+      "x": 75,
+      "y": 1385,
+      "computedDirection": "up",
+      "computedSpeed": "fast"
+    }
+  ],
+  "styling": {
+    "backgroundColor": "hsl(var(--panel-dark))",
+    "textColor": "hsl(var(--panel-dark-text))",
+    "fontFamily": "serif (Times New Roman)",
+    "gradientOverlays": {
+      "top": "h-20 bg-gradient-to-b from-panel-dark to-transparent",
+      "bottom": "h-20 bg-gradient-to-t from-panel-dark to-transparent"
+    }
+  }
+}
