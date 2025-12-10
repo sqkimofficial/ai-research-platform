@@ -12,7 +12,7 @@ from config import Config
 class OpenAIService:
     def __init__(self):
         self.client = OpenAI(api_key=Config.OPENAI_API_KEY)
-        self.model = "gpt-4o-mini"
+        self.model = "gpt-4.1-nano"
     
     def chat_completion(self, messages, temperature=0.7, functions=None, function_call="auto"):
         """
@@ -31,7 +31,6 @@ class OpenAIService:
             params = {
                 'model': self.model,
                 'messages': messages,
-                'temperature': temperature
             }
             
             if functions:

@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import appleIcon from './assets/apple-icon.svg';
+import googleIcon from './assets/google-icon.svg';
+import stitchLogo from './assets/stitch-logo.svg';
 import { authAPI } from './services/api';
 import { getToken, setToken, removeToken, setSessionId, removeSessionId } from './utils/auth';
 import ChatWindow from './components/ChatWindow/ChatWindow';
@@ -38,6 +41,8 @@ function App() {
   
   // Left sidebar state
   const [isChatsPanelOpen, setIsChatsPanelOpen] = useState(false);
+  const [isChatsButtonHover, setIsChatsButtonHover] = useState(false);
+  const [isChatsPanelHover, setIsChatsPanelHover] = useState(false);
 
   // Handle resize drag
   const handleMouseMove = useCallback((e) => {
@@ -194,13 +199,37 @@ function App() {
     setIsNewChat(false);
   };
 
-  const handleChatsClick = () => {
-    setIsChatsPanelOpen(true);
+  const handleChatsHoverStart = () => {
+    setIsChatsButtonHover(true);
+  };
+
+  const handleChatsHoverEnd = () => {
+    setIsChatsButtonHover(false);
+  };
+
+  const handleChatsPanelHoverStart = () => {
+    setIsChatsPanelHover(true);
+  };
+
+  const handleChatsPanelHoverEnd = () => {
+    setIsChatsPanelHover(false);
   };
 
   const handleCloseChatPanel = () => {
     setIsChatsPanelOpen(false);
+    setIsChatsButtonHover(false);
+    setIsChatsPanelHover(false);
   };
+
+  // Keep panel open while either hover is active; close shortly after both end
+  useEffect(() => {
+    if (isChatsButtonHover || isChatsPanelHover) {
+      setIsChatsPanelOpen(true);
+      return undefined;
+    }
+    const timeoutId = setTimeout(() => setIsChatsPanelOpen(false), 120);
+    return () => clearTimeout(timeoutId);
+  }, [isChatsButtonHover, isChatsPanelHover]);
 
   const handleSwitchSession = (sessionId) => {
     if (sessionId === null) {
@@ -212,15 +241,20 @@ function App() {
       setIsNewChat(false);
       // Project stays the same since all sessions are filtered by current project
     }
-    setIsChatsPanelOpen(false);
+    handleCloseChatPanel();
   };
 
   if (!isAuthenticated) {
     return (
       <div className="auth-container">
         <div className="auth-content">
-          <h1>Welcome to Stitch</h1>
-          <p className="auth-subtitle">Sign In to access your dashboard</p>
+          <div className="auth-header">
+            <img src={stitchLogo} alt="Stitch" className="stitch-logo" />
+            <div className="auth-header-text">
+              <h1>Welcome to Stitch</h1>
+              <p className="auth-subtitle">Sign In to access your dashboard</p>
+            </div>
+          </div>
           
           <div className="auth-social-buttons">
             <button 
@@ -228,12 +262,7 @@ function App() {
               className="social-button google-button"
               onClick={handleGoogleSignIn}
             >
-              <svg className="social-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M17.64 9.20454C17.64 8.56636 17.5827 7.95272 17.4764 7.36363H9V10.845H13.8436C13.635 11.97 13.0009 12.9232 12.0477 13.5614V15.8195H15.9564C17.1886 14.6545 17.64 12.9909 17.64 9.20454Z" fill="#4285F4"/>
-                <path d="M9 18C11.43 18 13.467 17.1941 14.9564 15.8195L11.0477 13.5614C10.2418 14.1014 9.21091 14.4204 9 14.4204C6.65455 14.4204 4.67182 12.8373 3.96409 10.71H0.957275V13.0418C2.43818 15.9832 5.48182 18 9 18Z" fill="#34A853"/>
-                <path d="M3.96409 10.71C3.78409 10.17 3.68182 9.59318 3.68182 9C3.68182 8.40682 3.78409 7.83 3.96409 7.29V4.95818H0.957273C0.347727 6.17318 0 7.54773 0 9C0 10.4523 0.347727 11.8268 0.957273 13.0418L3.96409 10.71Z" fill="#FBBC05"/>
-                <path d="M9 3.57955C10.3214 3.57955 11.5077 4.03364 12.4405 4.92545L15.0218 2.34409C13.4632 0.891818 11.4259 0 9 0C5.48182 0 2.43818 2.01682 0.957275 4.95818L3.96409 7.29C4.67182 5.16273 6.65455 3.57955 9 3.57955Z" fill="#EA4335"/>
-              </svg>
+              <img src={googleIcon} alt="" className="social-icon" />
               <span>Continue with Google</span>
             </button>
             <button 
@@ -241,10 +270,7 @@ function App() {
               className="social-button apple-button"
               onClick={handleAppleSignIn}
             >
-              <svg className="social-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M13.5625 5.625C13.375 5.8125 12.9375 6.0625 12.5 6.125C12.0625 5.6875 11.375 5.4375 10.6875 5.4375C9.9375 5.4375 9.25 5.75 8.75 6.25C8.25 6.75 8 7.4375 8 8.1875C8 8.9375 8.25 9.625 8.75 10.125C9.25 10.625 9.9375 10.875 10.6875 10.875C11.375 10.875 12.0625 10.625 12.5 10.1875C12.5625 10.1875 12.625 10.25 12.6875 10.25C13.0625 10.25 13.4375 10.0625 13.625 9.75C13.8125 9.4375 13.875 9.0625 13.75 8.75C13.625 8.4375 13.375 8.1875 13.0625 8.0625C12.75 7.9375 12.4375 7.9375 12.125 8.0625C12.0625 8.0625 12 8 11.9375 8C11.5 7.9375 11.0625 7.6875 10.875 7.25C10.6875 6.8125 10.75 6.3125 11.0625 5.9375C11.375 5.5625 11.875 5.4375 12.3125 5.5C12.75 5.5625 13.1875 5.8125 13.5625 5.625Z" fill="#000000"/>
-                <path d="M12.5 3.5C12.5 3.5 11.5 2.5 10 2.5C8.5 2.5 7.5 3.5 7.5 3.5C7.5 3.5 6.5 2.5 5 2.5C3.5 2.5 2.5 3.5 2.5 3.5C2.5 3.5 1.5 4.5 1.5 6C1.5 7.5 2.5 8.5 2.5 8.5C2.5 8.5 3.5 9.5 5 9.5C6.5 9.5 7.5 8.5 7.5 8.5C7.5 8.5 8.5 9.5 10 9.5C11.5 9.5 12.5 8.5 12.5 8.5C12.5 8.5 13.5 7.5 13.5 6C13.5 4.5 12.5 3.5 12.5 3.5Z" fill="#000000"/>
-              </svg>
+              <img src={appleIcon} alt="" className="social-icon" />
               <span>Continue with Apple ID</span>
             </button>
           </div>
@@ -289,11 +315,11 @@ function App() {
                 >
                   {showPassword ? (
                     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M10 3.75C5.83333 3.75 2.275 6.34167 0.833333 10C2.275 13.6583 5.83333 16.25 10 16.25C14.1667 16.25 17.725 13.6583 19.1667 10C17.725 6.34167 14.1667 3.75 10 3.75ZM10 14.1667C7.7 14.1667 5.83333 12.3 5.83333 10C5.83333 7.7 7.7 5.83333 10 5.83333C12.3 5.83333 14.1667 7.7 14.1667 10C14.1667 12.3 12.3 14.1667 10 14.1667ZM10 7.5C8.61667 7.5 7.5 8.61667 7.5 10C7.5 11.3833 8.61667 12.5 10 12.5C11.3833 12.5 12.5 11.3833 12.5 10C12.5 8.61667 11.3833 7.5 10 7.5Z" fill="#6B7280"/>
+                      <path d="M10 3.75C5.83333 3.75 2.275 6.34167 0.833333 10C2.275 13.6583 5.83333 16.25 10 16.25C14.1667 16.25 17.725 13.6583 19.1667 10C17.725 6.34167 14.1667 3.75 10 3.75ZM10 14.1667C7.7 14.1667 5.83333 12.3 5.83333 10C5.83333 7.7 7.7 5.83333 10 5.83333C12.3 5.83333 14.1667 7.7 14.1667 10C14.1667 12.3 12.3 14.1667 10 14.1667ZM10 7.5C8.61667 7.5 7.5 8.61667 7.5 10C7.5 11.3833 8.61667 12.5 10 12.5C11.3833 12.5 12.5 11.3833 12.5 10C12.5 8.61667 11.3833 7.5 10 7.5Z" fill="var(--color-text-sec)"/>
                     </svg>
                   ) : (
                     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M2.5 2.5L17.5 17.5M8.33333 8.33333C7.89167 8.775 7.5 9.375 7.5 10C7.5 11.3833 8.61667 12.5 10 12.5C10.625 12.5 11.225 12.1083 11.6667 11.6667M5.83333 5.83333C4.25 7.08333 3.125 8.45833 2.5 10C3.94167 13.6583 7.5 16.25 11.6667 16.25C12.9167 16.25 14.0833 15.9167 15.0833 15.4167L11.6667 12M2.5 10C3.94167 6.34167 7.5 3.75 11.6667 3.75C13.0833 3.75 14.375 4.16667 15.4167 4.75L12.5 7.66667" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M2.5 2.5L17.5 17.5M8.33333 8.33333C7.89167 8.775 7.5 9.375 7.5 10C7.5 11.3833 8.61667 12.5 10 12.5C10.625 12.5 11.225 12.1083 11.6667 11.6667M5.83333 5.83333C4.25 7.08333 3.125 8.45833 2.5 10C3.94167 13.6583 7.5 16.25 11.6667 16.25C12.9167 16.25 14.0833 15.9167 15.0833 15.4167L11.6667 12M2.5 10C3.94167 6.34167 7.5 3.75 11.6667 3.75C13.0833 3.75 14.375 4.16667 15.4167 4.75L12.5 7.66667" stroke="var(--color-text-sec)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   )}
                 </button>
@@ -339,10 +365,13 @@ function App() {
     <div className="app">
       <div className="app-body">
         <LeftSidebar 
-          onChatsClick={handleChatsClick}
+          onChatsHoverStart={handleChatsHoverStart}
+          onChatsHoverEnd={handleChatsHoverEnd}
+          onChatsClick={handleChatsHoverStart}
           onLogout={handleLogout}
           currentProjectName={currentProjectName}
           onChangeProject={handleChangeProject}
+          isChatActive={isChatsPanelOpen}
         />
         <ChatSessionsPanel
           isOpen={isChatsPanelOpen}
@@ -352,6 +381,8 @@ function App() {
           isNewChat={isNewChat}
           selectedProjectId={selectedProjectId}
           currentProjectName={currentProjectName}
+          onHoverStart={handleChatsPanelHoverStart}
+          onHoverEnd={handleChatsPanelHoverEnd}
         />
         <div className="main-content" ref={mainContentRef}>
           <div 
@@ -370,6 +401,9 @@ function App() {
               attachedSections={attachedSections}
               attachedHighlights={attachedHighlights}
               onClearAttachedHighlights={() => setAttachedHighlights([])}
+              onRemoveAttachedHighlight={(highlightId) => {
+                setAttachedHighlights(prev => prev.filter(h => h.id !== highlightId));
+              }}
             />
           </div>
           <div 

@@ -4,6 +4,16 @@ import { getSessionId, setSessionId } from '../../utils/auth';
 import MessageBubble from './MessageBubble';
 import ProjectSelector from '../ProjectSelector/ProjectSelector';
 import './ChatWindow.css';
+import { ReactComponent as WriteIcon } from '../../assets/write-icon.svg';
+import { ReactComponent as ResearchIcon } from '../../assets/research-icon.svg';
+import { ReactComponent as CheckIcon } from '../../assets/check-icon.svg';
+import { ReactComponent as FilterIcon } from '../../assets/filter-icon.svg';
+import { ReactComponent as DropdownIcon } from '../../assets/dropdown-icon.svg';
+import { ReactComponent as ChatIconSvg } from '../../assets/chat-icon.svg';
+import { ReactComponent as SendIcon } from '../../assets/send-icon.svg';
+import { ReactComponent as WebIcon } from '../../assets/web-icon.svg';
+import { ReactComponent as PdfIcon } from '../../assets/pdf-icon.svg';
+import { ReactComponent as DeleteIcon } from '../../assets/delete-icon.svg';
 
 const ChatWindow = ({ 
   sessionId: propSessionId, 
@@ -14,7 +24,8 @@ const ChatWindow = ({
   onAIMessage, 
   attachedSections = [], 
   attachedHighlights = [], 
-  onClearAttachedHighlights 
+  onClearAttachedHighlights,
+  onRemoveAttachedHighlight
 }) => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -28,6 +39,18 @@ const ChatWindow = ({
   const [originalUserMessage, setOriginalUserMessage] = useState('');
   const [showProjectSelector, setShowProjectSelector] = useState(false);
   const [pendingMessage, setPendingMessage] = useState(null); // Store message while selecting project
+  const [chatMode, setChatMode] = useState('write'); // 'write' | 'research'
+  const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
+  const [isFilterActive, setIsFilterActive] = useState(false);
+  const [filterQuery, setFilterQuery] = useState('');
+  const [commandsFilter, setCommandsFilter] = useState('all'); // commands | answers | all
+  const [isCommandsMenuOpen, setIsCommandsMenuOpen] = useState(false);
+  const [sortOrder, setSortOrder] = useState('oldest'); // oldest | newest
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
+  const [isSendingMessage, setIsSendingMessage] = useState(false); // Track if we're currently sending a message
+  const modeMenuRef = useRef(null);
+  const commandsMenuRef = useRef(null);
+  const sortMenuRef = useRef(null);
   const messagesEndRef = useRef(null);
   
   // Update attached sections when prop changes
@@ -54,12 +77,33 @@ const ChatWindow = ({
   }, [attachedHighlights]);
 
   useEffect(() => {
-    initializeSession();
-  }, [propSessionId, isNewChat]);
+    // Don't initialize if we're currently sending a message - this prevents
+    // overwriting the local message state when session is created mid-send
+    if (!isSendingMessage) {
+      initializeSession();
+    }
+  }, [propSessionId, isNewChat, isSendingMessage]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Close menus when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (modeMenuRef.current && !modeMenuRef.current.contains(event.target)) {
+        setIsModeMenuOpen(false);
+      }
+      if (commandsMenuRef.current && !commandsMenuRef.current.contains(event.target)) {
+        setIsCommandsMenuOpen(false);
+      }
+      if (sortMenuRef.current && !sortMenuRef.current.contains(event.target)) {
+        setIsSortMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const initializeSession = async () => {
     // If it's a new chat, don't create session yet - wait for first message
@@ -125,6 +169,7 @@ const ChatWindow = ({
   const createSessionAndSendMessage = async (projectId, userMessage) => {
     setInputMessage('');
     setLoading(true);
+    setIsSendingMessage(true); // Mark that we're sending a message
     
     try {
       // Create the session first
@@ -144,6 +189,7 @@ const ChatWindow = ({
     } catch (error) {
       console.error('Failed to create session:', error);
       setLoading(false);
+      setIsSendingMessage(false);
       alert('Failed to create chat session. Please try again.');
     }
   };
@@ -199,6 +245,7 @@ const ChatWindow = ({
     
     setInputMessage('');
     setLoading(true);
+    setIsSendingMessage(true); // Mark that we're sending a message
     setCurrentAttachedSections([]); // Clear attached sections after sending
     setCurrentAttachedHighlights([]); // Clear attached highlights after sending
     if (onClearAttachedHighlights) {
@@ -224,7 +271,7 @@ const ChatWindow = ({
           content: `Highlight: "${h.text}"${h.note ? `\nNote: ${h.note}` : ''}${h.source ? `\nSource: ${h.sourceTitle || h.source}` : ''}`
         }))
       ];
-      const response = await chatAPI.sendMessage(targetSessionId, userMessage, allAttachments);
+      const response = await chatAPI.sendMessage(targetSessionId, userMessage, allAttachments, chatMode);
       // Extract message, document_content, sources, status, and pending_content_id from response
       const chatMessage = response.data.response || '';
       const documentContent = response.data.document_content || '';
@@ -259,6 +306,7 @@ const ChatWindow = ({
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setLoading(false);
+      setIsSendingMessage(false); // Clear the flag when done
     }
   };
   
@@ -379,65 +427,185 @@ const ChatWindow = ({
     }));
   };
 
+  // Build conversation pairs to keep user + assistant responses together
+  const pairs = [];
+  let currentPair = null;
+  messages.forEach((message, index) => {
+    if (message.role === 'user') {
+      if (currentPair) {
+        pairs.push(currentPair);
+      }
+      currentPair = {
+        userMessage: message,
+        userIndex: index,
+        assistantMessages: []
+      };
+    } else if (currentPair) {
+      currentPair.assistantMessages.push({ message, index });
+    } else {
+      // Orphan assistant message (edge case)
+      pairs.push({
+        userMessage: null,
+        userIndex: null,
+        assistantMessages: [{ message, index }]
+      });
+    }
+  });
+  if (currentPair) {
+    pairs.push(currentPair);
+  }
+
+  // Sort pairs by the user message index (or first assistant index for orphans)
+  const sortedPairs = [...pairs].sort((a, b) => {
+    const aIdx = a.userIndex !== null ? a.userIndex : (a.assistantMessages[0]?.index ?? 0);
+    const bIdx = b.userIndex !== null ? b.userIndex : (b.assistantMessages[0]?.index ?? 0);
+    if (sortOrder === 'oldest') return aIdx - bIdx;
+    return bIdx - aIdx;
+  });
+
+  // Count rendered messages for empty-state check
+  const renderedMessageCount = sortedPairs.reduce((count, pair) => {
+    if (commandsFilter !== 'answers' && pair.userMessage) count += 1;
+    if (commandsFilter !== 'commands') count += pair.assistantMessages.length;
+    return count;
+  }, 0);
+
   return (
     <div className="chat-window">
       {/* Chat Header - Shows title only */}
       {messages.length > 0 && (
         <div className="chat-header">
-          <h1 className="chat-title">Research Session</h1>
+          <div className="chat-header-top">
+            <h1 className="chat-title">Research Session</h1>
+            <button
+              type="button"
+              className={`filter-button ${isFilterActive ? 'active' : ''}`}
+              aria-label="Filter questions"
+              aria-pressed={isFilterActive}
+              onClick={() => setIsFilterActive((prev) => !prev)}
+            >
+              <FilterIcon className="filter-icon" />
+            </button>
+            {isFilterActive && (
+              <div className="filter-dropdown">
+                <input
+                  type="text"
+                  value={filterQuery}
+                  onChange={(e) => setFilterQuery(e.target.value)}
+                  placeholder="Search previous commands"
+                  className="filter-search-input"
+                />
+                <div className="filter-actions">
+                  <div className="filter-actions-right">
+                    <div className="sort-menu-wrapper" ref={sortMenuRef}>
+                      <button
+                        type="button"
+                        className="filter-chip with-caret"
+                        onClick={() => setIsSortMenuOpen((prev) => !prev)}
+                        aria-haspopup="true"
+                        aria-expanded={isSortMenuOpen}
+                      >
+                        <span>Sort by : {sortOrder === 'oldest' ? 'Oldest' : 'Newest'}</span>
+                        <DropdownIcon className="caret-icon" />
+                      </button>
+                      {isSortMenuOpen && (
+                        <div className="sort-dropdown">
+                          <button
+                            type="button"
+                            className={`commands-item ${sortOrder === 'oldest' ? 'active' : ''}`}
+                            onClick={() => {
+                              setSortOrder('oldest');
+                              setIsSortMenuOpen(false);
+                            }}
+                          >
+                            <span>Oldest</span>
+                            {sortOrder === 'oldest' && <CheckIcon className="check-icon" />}
+                          </button>
+                          <button
+                            type="button"
+                            className={`commands-item ${sortOrder === 'newest' ? 'active' : ''}`}
+                            onClick={() => {
+                              setSortOrder('newest');
+                              setIsSortMenuOpen(false);
+                            }}
+                          >
+                            <span>Newest</span>
+                            {sortOrder === 'newest' && <CheckIcon className="check-icon" />}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="commands-menu-wrapper" ref={commandsMenuRef}>
+                      <button
+                        type="button"
+                        className="filter-chip with-caret"
+                        onClick={() => setIsCommandsMenuOpen((prev) => !prev)}
+                        aria-haspopup="true"
+                        aria-expanded={isCommandsMenuOpen}
+                      >
+                        <span>Commands</span>
+                        <DropdownIcon className="caret-icon" />
+                      </button>
+                      {isCommandsMenuOpen && (
+                        <div className="commands-dropdown">
+                          <button
+                            type="button"
+                            className={`commands-item ${commandsFilter === 'commands' ? 'active' : ''}`}
+                            onClick={() => {
+                              setCommandsFilter('commands');
+                              setIsCommandsMenuOpen(false);
+                            }}
+                          >
+                            <span>Commands</span>
+                            {commandsFilter === 'commands' && <CheckIcon className="check-icon" />}
+                          </button>
+                          <button
+                            type="button"
+                            className={`commands-item ${commandsFilter === 'answers' ? 'active' : ''}`}
+                            onClick={() => {
+                              setCommandsFilter('answers');
+                              setIsCommandsMenuOpen(false);
+                            }}
+                          >
+                            <span>Answers</span>
+                            {commandsFilter === 'answers' && <CheckIcon className="check-icon" />}
+                          </button>
+                          <button
+                            type="button"
+                            className={`commands-item ${commandsFilter === 'all' ? 'active' : ''}`}
+                            onClick={() => {
+                              setCommandsFilter('all');
+                              setIsCommandsMenuOpen(false);
+                            }}
+                          >
+                            <span>All</span>
+                            {commandsFilter === 'all' && <CheckIcon className="check-icon" />}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
       
       <div className="chat-messages">
-        {messages.length === 0 && (
+        {renderedMessageCount === 0 && (
           <div className="new-chat-empty-state">
             <div className="empty-state-icon">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-              </svg>
+              <ChatIconSvg className="empty-chat-icon" />
             </div>
             <h2>New Chat</h2>
-            <p>Start a conversation with your AI research assistant.</p>
+            <p>What would you like me to write or research?</p>
             <p className="empty-state-hint">Type a message below to begin.</p>
           </div>
         )}
-        {(() => {
-          // Group messages into conversation pairs (user prompt + assistant responses)
-          const pairs = [];
-          let currentPair = null;
-          
-          messages.forEach((message, index) => {
-            if (message.role === 'user') {
-              // Start a new pair with user message
-              if (currentPair) {
-                pairs.push(currentPair);
-              }
-              currentPair = {
-                userMessage: message,
-                userIndex: index,
-                assistantMessages: []
-              };
-            } else if (currentPair) {
-              // Add assistant message to current pair
-              currentPair.assistantMessages.push({ message, index });
-            } else {
-              // Orphan assistant message (shouldn't happen normally)
-              pairs.push({
-                userMessage: null,
-                userIndex: null,
-                assistantMessages: [{ message, index }]
-              });
-            }
-          });
-          
-          // Don't forget the last pair
-          if (currentPair) {
-            pairs.push(currentPair);
-          }
-          
-          return pairs.map((pair, pairIndex) => (
+        {sortedPairs.map((pair, pairIndex) => (
             <div key={pairIndex} className="conversation-pair">
-              {pair.userMessage && (
+              {pair.userMessage && commandsFilter !== 'answers' && (
                 <div className="user-prompt-sticky">
                   <MessageBubble 
                     message={pair.userMessage}
@@ -449,20 +617,20 @@ const ChatWindow = ({
                 </div>
               )}
               <div className="assistant-responses">
-                {pair.assistantMessages.map(({ message, index }) => (
-                  <MessageBubble 
-                    key={index} 
-                    message={message}
-                    onApprove={handleApprove}
-                    onReject={handleReject}
-                    onEdit={handleEdit}
-                    editedContent={editingContent[message.pending_content_id]}
-                  />
-                ))}
+                {commandsFilter !== 'commands' &&
+                  pair.assistantMessages.map(({ message, index }) => (
+                    <MessageBubble 
+                      key={index} 
+                      message={message}
+                      onApprove={handleApprove}
+                      onReject={handleReject}
+                      onEdit={handleEdit}
+                      editedContent={editingContent[message.pending_content_id]}
+                    />
+                  ))}
               </div>
             </div>
-          ));
-        })()}
+          ))}
         {showRewritePrompt && (
           <div className="rewrite-prompt">
             <p>Content was rejected. Would you like to request a rewrite?</p>
@@ -487,57 +655,81 @@ const ChatWindow = ({
         )}
         <div ref={messagesEndRef} />
       </div>
-      {(currentAttachedSections.length > 0 || currentAttachedHighlights.length > 0) && (
-        <div className="attached-items-container">
-          {currentAttachedSections.length > 0 && (
-            <div className="attached-sections-indicator">
-              <span className="attached-icon">📄</span>
-              <span className="attached-count">{currentAttachedSections.length} section{currentAttachedSections.length !== 1 ? 's' : ''}</span>
-              <button
-                className="clear-attached-button"
-                onClick={() => setCurrentAttachedSections([])}
-                title="Clear attached sections"
-              >
-                ×
-              </button>
-            </div>
-          )}
-          {currentAttachedHighlights.length > 0 && (
-            <div className="attached-highlights-indicator">
-              <span className="attached-icon">✨</span>
-              <span className="attached-count">{currentAttachedHighlights.length} highlight{currentAttachedHighlights.length !== 1 ? 's' : ''}</span>
-              <div className="attached-highlights-list">
-                {currentAttachedHighlights.map((h, idx) => (
-                  <div key={h.id} className="attached-highlight-chip">
-                    <span className="highlight-preview">"{h.text.substring(0, 30)}{h.text.length > 30 ? '...' : ''}"</span>
-                    <button
-                      className="remove-highlight-button"
-                      onClick={() => {
-                        setCurrentAttachedHighlights(prev => prev.filter(item => item.id !== h.id));
-                      }}
-                      title="Remove this highlight"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <button
-                className="clear-attached-button"
-                onClick={() => {
-                  setCurrentAttachedHighlights([]);
-                  if (onClearAttachedHighlights) onClearAttachedHighlights();
-                }}
-                title="Clear all highlights"
-              >
-                Clear all
-              </button>
-            </div>
-          )}
-        </div>
-      )}
       <div className="chat-input-area">
         <div className="chat-input-container">
+          {(currentAttachedSections.length > 0 || currentAttachedHighlights.length > 0) && (
+            <div className="attached-items-container">
+              {currentAttachedSections.length > 0 && (
+                <div className="attached-sections-indicator">
+                  <span className="attached-icon">📄</span>
+                  <span className="attached-count">{currentAttachedSections.length} section{currentAttachedSections.length !== 1 ? 's' : ''}</span>
+                  <button
+                    className="clear-attached-button"
+                    onClick={() => setCurrentAttachedSections([])}
+                    title="Clear attached sections"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+              {currentAttachedHighlights.length > 0 && (
+                <div className="attached-highlights-indicator">
+                  <div className="attached-highlights-list">
+                    {currentAttachedHighlights.map((h, idx) => {
+                      const getSourceName = () => {
+                        if (h.type === 'web') {
+                          return h.sourceTitle || 'Web Page';
+                        } else if (h.type === 'pdf') {
+                          return h.source || 'PDF Document';
+                        }
+                        return 'Document';
+                      };
+
+                      const getSourceIcon = () => {
+                        if (h.type === 'web') {
+                          return <WebIcon className="source-type-icon" />;
+                        } else if (h.type === 'pdf') {
+                          return <PdfIcon className="source-type-icon" />;
+                        }
+                        return null;
+                      };
+
+                      const truncateText = (text, maxLength = 30) => {
+                        if (!text) return '';
+                        return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+                      };
+
+                      const truncateFileName = (fileName, maxLength = 25) => {
+                        if (!fileName) return 'Untitled';
+                        return fileName.length > maxLength ? fileName.substring(0, maxLength) + '...' : fileName;
+                      };
+
+                      return (
+                        <div key={h.id || idx} className="attached-highlight-chip">
+                          {getSourceIcon()}
+                          <span className="source-file-name">{truncateFileName(getSourceName())}</span>
+                          <span className="source-separator">|</span>
+                          <span className="highlight-preview">{truncateText(h.text)}</span>
+                          <button
+                            className="remove-highlight-button"
+                            onClick={() => {
+                              setCurrentAttachedHighlights(prev => prev.filter(item => item.id !== h.id));
+                              if (onRemoveAttachedHighlight) {
+                                onRemoveAttachedHighlight(h.id);
+                              }
+                            }}
+                            title="Remove this highlight"
+                          >
+                            <DeleteIcon />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <form className="chat-input-form" onSubmit={handleSendMessage}>
             <input
               type="text"
@@ -548,25 +740,61 @@ const ChatWindow = ({
               disabled={loading}
             />
             <div className="chat-input-actions">
-              <button type="button" className="write-mode-btn">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                </svg>
-                <span>Write</span>
-                <svg className="caret-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
-              </button>
+              <div className="mode-dropdown" ref={modeMenuRef}>
+                <button
+                  type="button"
+                  className={`mode-toggle ${isModeMenuOpen ? 'open' : ''}`}
+                  onClick={() => setIsModeMenuOpen((prev) => !prev)}
+                  aria-expanded={isModeMenuOpen}
+                  aria-haspopup="true"
+                >
+                  {chatMode === 'write' ? (
+                    <WriteIcon className="mode-toggle-icon" />
+                  ) : (
+                    <ResearchIcon className="mode-toggle-icon" />
+                  )}
+                  <span>{chatMode === 'write' ? 'Write' : 'Research'}</span>
+                  <DropdownIcon className="caret-icon" />
+                </button>
+                {isModeMenuOpen && (
+                  <div className="mode-menu">
+                    <button
+                      type="button"
+                      className={`mode-option ${chatMode === 'write' ? 'active' : ''}`}
+                      onClick={() => {
+                        setChatMode('write');
+                        setIsModeMenuOpen(false);
+                      }}
+                    >
+                      <div className="mode-option-left">
+                        <WriteIcon className="mode-option-icon" />
+                        <span className="mode-option-label">Write</span>
+                      </div>
+                      {chatMode === 'write' && <CheckIcon className="mode-check-icon" />}
+                    </button>
+                    <button
+                      type="button"
+                      className={`mode-option ${chatMode === 'research' ? 'active' : ''}`}
+                      onClick={() => {
+                        setChatMode('research');
+                        setIsModeMenuOpen(false);
+                      }}
+                    >
+                      <div className="mode-option-left">
+                        <ResearchIcon className="mode-option-icon" />
+                        <span className="mode-option-label">Research</span>
+                      </div>
+                      {chatMode === 'research' && <CheckIcon className="mode-check-icon" />}
+                    </button>
+                  </div>
+                )}
+              </div>
               <button
                 type="submit"
                 className="send-button"
                 disabled={loading || !inputMessage.trim()}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="22" y1="2" x2="11" y2="13"></line>
-                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                </svg>
+                <SendIcon className="send-icon" />
               </button>
             </div>
           </form>

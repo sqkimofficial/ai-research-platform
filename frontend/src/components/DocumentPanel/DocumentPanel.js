@@ -4,92 +4,36 @@ import { getToken } from '../../utils/auth';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import SectionSelector from './SectionSelector';
 import AddNewTabView from './AddNewTabView';
 import './DocumentPanel.css';
+import { ReactComponent as CancelIconSvg } from '../../assets/cancel-icon.svg';
+import { ReactComponent as BackIconSvg } from '../../assets/back-icon.svg';
+import { ReactComponent as ForwardIconSvg } from '../../assets/forward-icon.svg';
+import { ReactComponent as RefreshIconSvg } from '../../assets/refresh-icon.svg';
+import { ReactComponent as AttachIconSvg } from '../../assets/attach-icon.svg';
+import { ReactComponent as PlusIconSvg } from '../../assets/plus-icon.svg';
+import { ReactComponent as DropdownIconSvg } from '../../assets/dropdown-icon.svg';
+import { ReactComponent as PdfIconSvg } from '../../assets/pdf-icon.svg';
+import { ReactComponent as MenuIconSvg } from '../../assets/menu-icon.svg';
+import { ReactComponent as VersionHistoryIconSvg } from '../../assets/versionhistory-icon.svg';
+import { ReactComponent as DownloadIconSvg } from '../../assets/download-icon.svg';
+import { ReactComponent as NewDocumentIconSvg } from '../../assets/newdocument-icon.svg';
+import { ReactComponent as DocumentIconSvg } from '../../assets/document-icon.svg';
+import { ReactComponent as WebIconSvg } from '../../assets/web-icon.svg';
 
-// Close icon SVG (X) from Figma
-const CloseIcon = ({ color = "rgba(0, 50, 98, 1)" }) => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path 
-      d="M5.33337 5.33337L10.6667 10.6667M10.6667 5.33337L5.33337 10.6667" 
-      stroke={color} 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-  </svg>
-);
-
-// Browser Navigation Icons from Figma
-const ArrowLeftIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path 
-      d="M10 4L6 8L10 12" 
-      stroke="rgba(0, 50, 98, 1)" 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-  </svg>
-);
-
-const ArrowRightIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path 
-      d="M6 4L10 8L6 12" 
-      stroke="rgba(0, 50, 98, 1)" 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-  </svg>
-);
-
-const RefreshIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path 
-      d="M13.65 8C13.65 11.12 11.12 13.65 8 13.65C4.88 13.65 2.35 11.12 2.35 8C2.35 4.88 4.88 2.35 8 2.35C10.19 2.35 12.09 3.56 13.02 5.33" 
-      stroke="rgba(0, 50, 98, 1)" 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-    <path 
-      d="M10 5.5H13.5V2" 
-      stroke="rgba(0, 50, 98, 1)" 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-  </svg>
-);
-
-// Paperclip/Attach icon from Figma
-const AttachIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path 
-      d="M10.7767 5.49996L6.29601 9.98063C6.02854 10.2481 5.66466 10.3982 5.28563 10.3982C4.9066 10.3982 4.54272 10.2481 4.27525 9.98063C4.00778 9.71316 3.85767 9.34928 3.85767 8.97025C3.85767 8.59122 4.00778 8.22734 4.27525 7.95987L8.75592 3.47921C9.15712 3.078 9.70294 2.85284 10.2715 2.85284C10.84 2.85284 11.3859 3.078 11.7871 3.47921C12.1883 3.88041 12.4134 4.42623 12.4134 4.99479C12.4134 5.56335 12.1883 6.10917 11.7871 6.51037L7.30048 10.991C7.09988 11.1916 6.82697 11.3042 6.54269 11.3042C6.25841 11.3042 5.9855 11.1916 5.7849 10.991C5.5843 10.7904 5.47172 10.5175 5.47172 10.2332C5.47172 9.94895 5.5843 9.67604 5.7849 9.47544L9.76201 5.50421" 
-      stroke="rgba(0, 50, 98, 0.5)" 
-      strokeWidth="1.2" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-  </svg>
-);
-
-// Plus icon (rotated close icon) from Figma
-const PlusIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path 
-      d="M5.33337 5.33337L10.6667 10.6667M10.6667 5.33337L5.33337 10.6667" 
-      stroke="rgba(0, 50, 98, 1)" 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-  </svg>
-);
+// Asset-based icon components
+const CloseIcon = () => <CancelIconSvg className="dp-icon" />;
+const ArrowLeftIcon = () => <BackIconSvg className="dp-icon" />;
+const ArrowRightIcon = () => <ForwardIconSvg className="dp-icon" />;
+const RefreshIcon = () => <RefreshIconSvg className="dp-icon" />;
+const AttachIcon = () => <AttachIconSvg className="dp-icon" />;
+const PlusIcon = () => <PlusIconSvg className="dp-icon" />;
+const MenuIcon = () => <MenuIconSvg className="dp-icon" />;
+const VersionHistoryIcon = () => <VersionHistoryIconSvg className="dp-menu-icon" />;
+const DownloadIcon = () => <DownloadIconSvg className="dp-menu-icon" />;
+const NewDocumentIcon = () => <NewDocumentIconSvg className="dp-newdoc-icon" />;
+const DocumentIconEmpty = () => <DocumentIconSvg className="dp-doc-empty-icon" />;
+const WebIcon = () => <WebIconSvg className="dp-web-icon" />;
 
 // Share/Upload icon from Figma (Communication / Share_iOS_Export)
 const ShareUploadIcon = () => (
@@ -104,79 +48,35 @@ const ShareUploadIcon = () => (
   </svg>
 );
 
-// Book Open icon (20px) for document cards from Figma
-const BookOpenIconCard = () => (
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path 
-      d="M10 5.41667C10 4.5272 10 4.08246 9.87639 3.72236C9.67279 3.12709 9.2062 2.66051 8.61094 2.4569C8.25083 2.33333 7.8061 2.33333 6.91663 2.33333C5.58318 2.33333 4.91645 2.33333 4.39476 2.57832C3.93316 2.79598 3.54596 3.18318 3.3283 3.64478C3.08331 4.16647 3.08331 4.8332 3.08331 6.16667V15.4167C3.08331 14.5272 3.08331 14.0825 3.20693 13.7224C3.41054 13.1271 3.87712 12.6605 4.47238 12.4569C4.83248 12.3333 5.27722 12.3333 6.16669 12.3333H8.33331C8.80002 12.3333 9.03338 12.3333 9.21163 12.4242C9.36844 12.5047 9.49527 12.6316 9.57582 12.7884C9.66665 12.9666 9.66665 13.2 9.66665 13.6667V5.41667Z" 
-      stroke="rgba(0, 50, 98, 1)" 
-      strokeWidth="1.25" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-    <path 
-      d="M10 5.41667C10 4.5272 10 4.08246 10.1236 3.72236C10.3272 3.12709 10.7938 2.66051 11.3891 2.4569C11.7492 2.33333 12.1939 2.33333 13.0834 2.33333C14.4168 2.33333 15.0836 2.33333 15.6052 2.57832C16.0668 2.79598 16.454 3.18318 16.6717 3.64478C16.9167 4.16647 16.9167 4.8332 16.9167 6.16667V15.4167C16.9167 14.5272 16.9167 14.0825 16.7931 13.7224C16.5895 13.1271 16.1229 12.6605 15.5276 12.4569C15.1675 12.3333 14.7228 12.3333 13.8333 12.3333H11.6667C11.2 12.3333 10.9666 12.3333 10.7884 12.4242C10.6316 12.5047 10.5047 12.6316 10.4242 12.7884C10.3333 12.9666 10.3333 13.2 10.3333 13.6667V5.41667Z" 
-      stroke="rgba(0, 50, 98, 1)" 
-      strokeWidth="1.25" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-  </svg>
-);
+// PDF icon for document cards
+const BookOpenIconCard = () => <PdfIconSvg className="add-tab-card-img" />;
 
-// Caret Down icon (12px) from Figma
-const CaretDownIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path 
-      d="M4 5L6 7L8 5" 
-      stroke="rgba(0, 25, 49, 1)" 
-      strokeWidth="1.5" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-  </svg>
-);
+// Caret Down icon
+const CaretDownIcon = () => <DropdownIconSvg className="add-tab-caret-img" />;
 
-// Large Book icon for empty state
-const BookIconLarge = () => (
-  <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path 
-      d="M32 17.3333C32 14.4871 32 13.0639 31.6045 11.9116C30.9529 10.0067 29.4599 8.51365 27.555 7.86209C26.4027 7.46667 24.9795 7.46667 22.1333 7.46667C17.8661 7.46667 15.7326 7.46667 14.0632 8.25065C12.5862 8.94714 11.3805 10.1528 10.684 11.6298C9.89999 13.2992 9.89999 15.4326 9.89999 19.7333V49.3333C9.89999 46.4871 9.89999 45.0639 10.2962 43.9116C10.9477 42.0067 12.4408 40.5136 14.3457 39.8621C15.4979 39.4667 16.9211 39.4667 19.7673 39.4667H26.6667C28.1601 39.4667 28.9067 39.4667 29.4773 39.7575C29.9799 40.0149 30.3849 40.4199 30.6425 40.9226C30.9333 41.4932 30.9333 42.2399 30.9333 43.7333V17.3333Z" 
-      stroke="rgba(0, 50, 98, 0.4)" 
-      strokeWidth="4" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-    <path 
-      d="M32 17.3333C32 14.4871 32 13.0639 32.3955 11.9116C33.0471 10.0067 34.5401 8.51365 36.445 7.86209C37.5973 7.46667 39.0205 7.46667 41.8667 7.46667C46.1339 7.46667 48.2674 7.46667 49.9368 8.25065C51.4138 8.94714 52.6195 10.1528 53.316 11.6298C54.1 13.2992 54.1 15.4326 54.1 19.7333V49.3333C54.1 46.4871 54.1 45.0639 53.7038 43.9116C53.0523 42.0067 51.5592 40.5136 49.6543 39.8621C48.5021 39.4667 47.0789 39.4667 44.2327 39.4667H37.3333C35.8399 39.4667 35.0933 39.4667 34.5227 39.7575C34.0201 40.0149 33.6151 40.4199 33.3575 40.9226C33.0667 41.4932 33.0667 42.2399 33.0667 43.7333V17.3333Z" 
-      stroke="rgba(0, 50, 98, 0.4)" 
-      strokeWidth="4" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    />
-  </svg>
-);
+// Large PDF icon for empty state
+const BookIconLarge = () => <PdfIconSvg className="dp-icon-large" />;
 
-// Globe icon (20px) for URL cards from Figma - used with opacity 0.5 in cards
+// Globe icon (20px) for URL cards
 const GlobeIconCard = () => (
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className="globe-icon">
     <path 
       d="M10 18.333C14.6024 18.333 18.333 14.6024 18.333 10C18.333 5.39763 14.6024 1.66699 10 1.66699C5.39763 1.66699 1.66699 5.39763 1.66699 10C1.66699 14.6024 5.39763 18.333 10 18.333Z" 
-      stroke="rgba(0, 50, 98, 1)" 
+      stroke="currentColor" 
       strokeWidth="1.5" 
       strokeLinecap="round" 
       strokeLinejoin="round"
     />
     <path 
       d="M1.66699 10H18.333" 
-      stroke="rgba(0, 50, 98, 1)" 
+      stroke="currentColor" 
       strokeWidth="1.5" 
       strokeLinecap="round" 
       strokeLinejoin="round"
     />
     <path 
       d="M10 1.66699C12.0844 3.94863 13.269 6.91003 13.333 10C13.269 13.09 12.0844 16.0514 10 18.333C7.91562 16.0514 6.73106 13.09 6.66699 10C6.73106 6.91003 7.91562 3.94863 10 1.66699Z" 
-      stroke="rgba(0, 50, 98, 1)" 
+      stroke="currentColor" 
       strokeWidth="1.5" 
       strokeLinecap="round" 
       strokeLinejoin="round"
@@ -186,24 +86,24 @@ const GlobeIconCard = () => (
 
 // Large Globe icon for empty state
 const GlobeIconLarge = () => (
-  <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <svg width="50" height="50" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path 
       d="M32 58.6667C46.7276 58.6667 58.6667 46.7276 58.6667 32C58.6667 17.2724 46.7276 5.33337 32 5.33337C17.2724 5.33337 5.33337 17.2724 5.33337 32C5.33337 46.7276 17.2724 58.6667 32 58.6667Z" 
-      stroke="rgba(0, 50, 98, 0.4)" 
+      stroke="var(--color-icon)" 
       strokeWidth="4" 
       strokeLinecap="round" 
       strokeLinejoin="round"
     />
     <path 
       d="M5.33337 32H58.6667" 
-      stroke="rgba(0, 50, 98, 0.4)" 
+      stroke="var(--color-icon)" 
       strokeWidth="4" 
       strokeLinecap="round" 
       strokeLinejoin="round"
     />
     <path 
       d="M32 5.33337C38.6701 12.6357 42.4608 22.1121 42.6667 32C42.4608 41.888 38.6701 51.3644 32 58.6667C25.3299 51.3644 21.5392 41.888 21.3334 32C21.5392 22.1121 25.3299 12.6357 32 5.33337Z" 
-      stroke="rgba(0, 50, 98, 0.4)" 
+      stroke="var(--color-icon)" 
       strokeWidth="4" 
       strokeLinecap="round" 
       strokeLinejoin="round"
@@ -297,12 +197,9 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const [documents, setDocuments] = useState([]); // All open documents
   const [activeDocumentId, setActiveDocumentId] = useState(null); // Currently active tab
   const [content, setContent] = useState('');
-  const [structure, setStructure] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showSectionSelector, setShowSectionSelector] = useState(false);
-  const [selectedSections, setSelectedSections] = useState([]);
   const [showDocumentList, setShowDocumentList] = useState(false);
   const [availableDocuments, setAvailableDocuments] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(propSelectedProjectId);
@@ -321,6 +218,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const [uploadingPdf, setUploadingPdf] = useState(false);
   const fileInputRef = useRef(null);
   const pollingIntervalRef = useRef(null);
+  const docMenuRef = useRef(null);
+  const [isDocMenuOpen, setIsDocMenuOpen] = useState(false);
   
   // Research Output Documents state
   const [researchDocsTabs, setResearchDocsTabs] = useState([]); // Array of { id }
@@ -393,6 +292,29 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       setShowDocumentList(true);
     }
   }, [documents.length, selectedProjectId]);
+
+  // Close the document options dropdown when clicking outside or pressing Escape
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (docMenuRef.current && !docMenuRef.current.contains(event.target)) {
+        setIsDocMenuOpen(false);
+      }
+    };
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setIsDocMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keyup', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keyup', handleEscape);
+    };
+  }, []);
 
   // Load available documents for the project
   const loadAvailableDocuments = async (projectId) => {
@@ -1038,7 +960,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const fetchDocument = async (documentId) => {
     if (!documentId) {
       setContent('');
-      setStructure([]);
       return;
     }
 
@@ -1047,9 +968,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     try {
       const response = await documentAPI.getDocument(null, documentId);
       const markdownContent = response.data.content || '';
-      const documentStructure = response.data.structure || [];
       setContent(markdownContent);
-      setStructure(documentStructure);
     } catch (err) {
       const errorMessage = err.response?.data?.error || err.message || 'Failed to load document';
       setError(errorMessage);
@@ -1065,7 +984,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       fetchDocument(activeDocumentId);
     } else {
       setContent('');
-      setStructure([]);
     }
   }, [activeDocumentId]);
 
@@ -1084,27 +1002,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     }
   };
 
-  const handleSelectionChange = (selectedIds) => {
-    setSelectedSections(selectedIds);
-  };
-
-  const handleAttachSections = () => {
-    if (selectedSections.length === 0) {
-      setError('Please select at least one section to attach');
-      return;
-    }
-    
-    // Get selected structure elements
-    const selectedElements = structure.filter(elem => 
-      selectedSections.includes(elem.id)
-    );
-    
-    if (onAttachSections) {
-      onAttachSections(selectedElements);
-      setShowSectionSelector(false);
-      setSelectedSections([]);
-    }
-  };
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -1119,7 +1016,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     setLoading(true);
     setError('');
     try {
-      await documentAPI.saveDocument(null, content, 'replace', activeDocumentId, structure);
+      await documentAPI.saveDocument(null, content, 'replace', activeDocumentId);
       setIsEditing(false);
       await fetchDocument(activeDocumentId);
       
@@ -1360,6 +1257,56 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
   const getActiveDocument = () => {
     return documents.find(doc => doc.document_id === activeDocumentId);
+  };
+
+  const toggleDocMenu = () => {
+    setIsDocMenuOpen(prev => !prev);
+  };
+
+  const handleVersionHistory = () => {
+    // Placeholder for a future version history feature
+    setIsDocMenuOpen(false);
+  };
+
+  const handleDownloadDocument = async () => {
+    setIsDocMenuOpen(false);
+
+    if (!activeDocumentId) {
+      setError('No document selected');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError('');
+      
+      // Download PDF from backend
+      const response = await documentAPI.downloadResearchDocumentPDF(activeDocumentId);
+      
+      // Create blob from response
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      
+      // Get document title for filename
+      const activeDoc = getActiveDocument();
+      const safeTitle = (activeDoc?.title || 'document').replace(/[^a-z0-9_\-]+/gi, '_');
+      
+      // Create download link
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${safeTitle || 'document'}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download document:', err);
+      setError(err.response?.data?.error || 'Failed to download document');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Handle selecting a research doc from the list - opens it as a regular editable document tab
@@ -1608,6 +1555,14 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                   {/* Header with Title */}
                   <div className="url-highlights-header">
                     <h2 className="url-highlights-title">URL Highlights</h2>
+                    <button
+                      type="button"
+                      className="url-open-browser-btn"
+                      onClick={() => window.open('https://app.browser', '_blank')}
+                    >
+                      <WebIcon />
+                      <span>Open Browser</span>
+                    </button>
                   </div>
                   
                   <div className="url-highlights-sections">
@@ -2114,6 +2069,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                     disabled={!selectedProjectId}
                     title="Create new research document"
                   >
+                    <NewDocumentIconSvg className="create-new-icon" />
                     Create New
                   </button>
                 </div>
@@ -2325,32 +2281,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
             )}
             {!loading && !error && activeDocumentId && !showDocumentList && (
           <>
-            {showSectionSelector && structure.length > 0 && (
-              <div className="section-selector-container">
-                <SectionSelector
-                  structure={structure}
-                  onSelectionChange={handleSelectionChange}
-                />
-                <div className="attach-actions">
-                  <button
-                    onClick={handleAttachSections}
-                    className="attach-confirm-button"
-                    disabled={selectedSections.length === 0}
-                  >
-                    Attach Selected ({selectedSections.length})
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowSectionSelector(false);
-                      setSelectedSections([]);
-                    }}
-                    className="attach-cancel-button"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
             {isEditing ? (
               <textarea
                 className="document-editor"
@@ -2360,18 +2290,44 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                   minHeight: '400px',
                   width: '100%',
                   padding: '20px',
-                  border: '1px solid #ddd',
+                  border: '1px solid var(--color-outline)',
                   borderRadius: '4px',
                   outline: 'none',
                   fontFamily: 'Monaco, "Courier New", monospace',
                   fontSize: '14px',
                   lineHeight: '1.6',
-                  backgroundColor: '#f8f9fa',
+                  backgroundColor: 'var(--color-chat-bg)',
                   resize: 'vertical'
                 }}
               />
             ) : (
               <div className="document-preview markdown-body">
+                <div className="document-preview-actions">
+                  <button type="button" className="doc-action-btn doc-references-btn">References</button>
+                  <div className="doc-menu-wrapper" ref={docMenuRef}>
+                    <button
+                      type="button"
+                      className={`doc-action-btn doc-menu-btn ${isDocMenuOpen ? 'open' : ''}`}
+                      aria-label="Document options"
+                      aria-expanded={isDocMenuOpen}
+                      onClick={toggleDocMenu}
+                    >
+                      <MenuIcon />
+                    </button>
+                    {isDocMenuOpen && (
+                      <div className="doc-menu-dropdown" role="menu">
+                        <button type="button" className="doc-menu-item" onClick={handleVersionHistory}>
+                          <VersionHistoryIcon />
+                          <span>Version History</span>
+                        </button>
+                        <button type="button" className="doc-menu-item" onClick={handleDownloadDocument}>
+                          <DownloadIcon />
+                          <span>Download</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 {content ? (
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
@@ -2380,7 +2336,14 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                     {content}
                   </ReactMarkdown>
                 ) : (
-                  <p>No content yet. Start a conversation to build your research document.</p>
+                  <div className="document-empty-state">
+                    <div className="document-empty-icon">
+                      <DocumentIconEmpty />
+                    </div>
+                    <h3 className="document-empty-title">New Document</h3>
+                    <p className="document-empty-subtitle">Start writing your research paper here.</p>
+                    <p className="document-empty-hint">No content has been added here yet.</p>
+                  </div>
                 )}
               </div>
             )}

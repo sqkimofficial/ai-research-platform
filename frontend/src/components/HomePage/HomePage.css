@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background-color: #f5f5f5;
+  background-color: var(--color-document-bg);
 }
 
 .homepage-content {
@@ -22,7 +22,7 @@
 
 .homepage-header h1 {
   font-size: 32px;
-  color: #333;
+  color: var(--color-text);
   margin: 0;
 }
 
@@ -30,7 +30,7 @@
 .tabs {
   display: flex;
   gap: 4px;
-  background: #e9ecef;
+  background: var(--color-selected);
   padding: 4px;
   border-radius: 10px;
 }
@@ -38,7 +38,7 @@
 .tab {
   padding: 12px 24px;
   background: transparent;
-  color: #666;
+  color: var(--color-text-sec);
   border: none;
   border-radius: 8px;
   cursor: pointer;
@@ -48,20 +48,20 @@
 }
 
 .tab:hover {
-  color: #333;
+  color: var(--color-text);
   background: rgba(255, 255, 255, 0.5);
 }
 
 .tab.active {
-  background: white;
-  color: #007bff;
+  background: var(--color-white);
+  color: var(--color-base);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .new-chat-button {
   padding: 10px 20px;
-  background-color: #007bff;
-  color: white;
+  background-color: var(--color-base);
+  color: var(--color-white);
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -71,13 +71,13 @@
 }
 
 .new-chat-button:hover {
-  background-color: #0056b3;
+  filter: brightness(0.9);
 }
 
 .new-chat-button-primary {
   padding: 12px 24px;
-  background-color: #007bff;
-  color: white;
+  background-color: var(--color-base);
+  color: var(--color-white);
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -88,27 +88,27 @@
 }
 
 .new-chat-button-primary:hover {
-  background-color: #0056b3;
+  filter: brightness(0.9);
 }
 
 .loading-state {
   text-align: center;
   padding: 40px;
-  color: #666;
+  color: var(--color-text-sec);
   font-size: 18px;
 }
 
 .empty-state {
   text-align: center;
   padding: 60px 20px;
-  background-color: white;
+  background-color: var(--color-white);
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .empty-state p {
   font-size: 18px;
-  color: #666;
+  color: var(--color-text-sec);
   margin: 0;
 }
 
@@ -123,7 +123,7 @@
 
 /* Sessions Table */
 .sessions-table-container {
-  background-color: white;
+  background-color: var(--color-white);
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   overflow: hidden;
@@ -135,28 +135,28 @@
 }
 
 .sessions-table thead {
-  background-color: #f8f9fa;
-  border-bottom: 2px solid #dee2e6;
+  background-color: var(--color-chat-bg);
+  border-bottom: 2px solid var(--color-outline);
 }
 
 .sessions-table th {
   padding: 16px;
   text-align: left;
   font-weight: 600;
-  color: #495057;
+  color: var(--color-text);
   font-size: 14px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .sessions-table tbody tr {
-  border-bottom: 1px solid #e9ecef;
+  border-bottom: 1px solid var(--color-selected);
   cursor: pointer;
   transition: background-color 0.2s;
 }
 
 .sessions-table tbody tr:hover {
-  background-color: #f8f9fa;
+  background-color: var(--color-chat-bg);
 }
 
 .sessions-table tbody tr:last-child {
@@ -165,13 +165,13 @@
 
 .sessions-table td {
   padding: 16px;
-  color: #333;
+  color: var(--color-text);
   font-size: 15px;
 }
 
 .session-title {
   font-weight: 500;
-  color: #007bff;
+  color: var(--color-base);
   max-width: 500px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -179,18 +179,18 @@
 }
 
 .session-date {
-  color: #666;
+  color: var(--color-text-sec);
   font-size: 14px;
 }
 
 .session-count {
-  color: #666;
+  color: var(--color-text-sec);
   text-align: center;
 }
 
 /* Highlights Table */
 .highlights-table-container {
-  background-color: white;
+  background-color: var(--color-white);
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   overflow: hidden;
@@ -202,15 +202,15 @@
 }
 
 .highlights-table thead {
-  background-color: #f8f9fa;
-  border-bottom: 2px solid #dee2e6;
+  background-color: var(--color-chat-bg);
+  border-bottom: 2px solid var(--color-outline);
 }
 
 .highlights-table th {
   padding: 14px 16px;
   text-align: left;
   font-weight: 600;
-  color: #495057;
+  color: var(--color-text);
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -221,13 +221,13 @@
 }
 
 .highlights-table tbody tr {
-  border-bottom: 1px solid #e9ecef;
+  border-bottom: 1px solid var(--color-selected);
   transition: background-color 0.2s;
 }
 
 .highlights-table td {
   padding: 14px 16px;
-  color: #333;
+  color: var(--color-text);
   font-size: 14px;
   vertical-align: middle;
 }
@@ -240,7 +240,7 @@
 
 .expand-icon {
   display: inline-block;
-  color: #999;
+  color: var(--color-text-sec);
   font-size: 10px;
   transition: transform 0.2s ease;
 }
@@ -252,20 +252,20 @@
 /* Project Row */
 .project-row {
   cursor: pointer;
-  background-color: #fafbfc;
+  background-color: var(--color-document-bg);
 }
 
 .project-row:hover {
-  background-color: #f0f4f8;
+  background-color: var(--color-selected);
 }
 
 .project-row.expanded {
-  background-color: #e8f0fe;
+  background-color: var(--color-selected);
 }
 
 .project-name {
   font-weight: 600;
-  color: #333;
+  color: var(--color-text);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -276,27 +276,27 @@
 }
 
 .project-description {
-  color: #666;
+  color: var(--color-text-sec);
   font-size: 13px;
 }
 
 .project-date {
-  color: #888;
+  color: var(--color-text-sec);
   font-size: 13px;
 }
 
 /* URL Row */
 .url-row {
   cursor: pointer;
-  background-color: #fff;
+  background-color: var(--color-white);
 }
 
 .url-row:hover {
-  background-color: #f8f9fa;
+  background-color: var(--color-chat-bg);
 }
 
 .url-row.expanded {
-  background-color: #f0f7ff;
+  background-color: var(--color-selected);
 }
 
 .url-row .expand-cell {
@@ -322,27 +322,27 @@
 
 .url-title {
   font-weight: 500;
-  color: #333;
+  color: var(--color-text);
 }
 
 .url-text {
   font-size: 12px;
-  color: #007bff;
+  color: var(--color-base);
   word-break: break-all;
 }
 
 .highlight-count {
-  color: #666;
+  color: var(--color-text-sec);
   font-size: 13px;
 }
 
 .url-date {
-  color: #888;
+  color: var(--color-text-sec);
   font-size: 13px;
 }
 
 .no-highlights-message {
-  color: #999;
+  color: var(--color-text-sec);
   font-style: italic;
   padding: 20px 16px;
   text-align: center;
@@ -350,11 +350,11 @@
 
 /* Highlight Row */
 .highlight-row {
-  background-color: #fff;
+  background-color: var(--color-white);
 }
 
 .highlight-row:hover {
-  background-color: #fafbfc;
+  background-color: var(--color-document-bg);
 }
 
 .highlight-row .expand-cell {
@@ -379,7 +379,7 @@
 
 .highlight-text {
   margin: 0;
-  color: #333;
+  color: var(--color-text);
   font-size: 14px;
   line-height: 1.5;
   font-style: italic;
@@ -388,16 +388,16 @@
 .highlight-note {
   margin: 8px 0 0 0;
   padding: 8px 12px;
-  background: #f0f7ff;
-  border-left: 3px solid #007bff;
+  background: var(--color-selected);
+  border-left: 3px solid var(--color-base);
   border-radius: 0 4px 4px 0;
   font-size: 13px;
-  color: #444;
+  color: var(--color-text);
 }
 
 .note-label {
   font-weight: 600;
-  color: #007bff;
+  color: var(--color-base);
 }
 
 .highlight-tags {
@@ -413,14 +413,14 @@
 .tag {
   display: inline-block;
   padding: 2px 8px;
-  background: #e9ecef;
-  color: #666;
+  background: var(--color-selected);
+  color: var(--color-text-sec);
   border-radius: 12px;
   font-size: 11px;
 }
 
 .highlight-date {
-  color: #888;
+  color: var(--color-text-sec);
   font-size: 12px;
   white-space: nowrap;
 }

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './LeftSidebar.css';
+import { ReactComponent as ChatIcon } from '../../assets/chat-icon.svg';
 
-const LeftSidebar = ({ onChatsClick, onLogout, currentProjectName, onChangeProject }) => {
+const LeftSidebar = ({ onChatsClick, onChatsHoverStart, onChatsHoverEnd, onLogout, currentProjectName, onChangeProject, isChatActive = false }) => {
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const menuRef = useRef(null);
 
@@ -38,10 +39,14 @@ const LeftSidebar = ({ onChatsClick, onLogout, currentProjectName, onChangeProje
   return (
     <div className="left-sidebar">
       <div className="sidebar-top">
-        <button className="sidebar-button" onClick={onChatsClick} title="Chats">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-          </svg>
+        <button 
+          className={`sidebar-button ${isChatActive ? 'active' : ''}`} 
+          onClick={onChatsClick} 
+          onMouseEnter={onChatsHoverStart}
+          onMouseLeave={onChatsHoverEnd}
+          title="Chats"
+        >
+          <ChatIcon className="sidebar-icon" />
         </button>
       </div>
       <div className="sidebar-bottom" ref={menuRef}>

@@ -68,11 +68,12 @@ export const chatAPI = {
     }
     return api.get(url);
   },
-  sendMessage: (sessionId, message, attachedSections = []) => {
+  sendMessage: (sessionId, message, attachedSections = [], mode = 'write') => {
     return api.post('/api/chat/message', { 
       session_id: sessionId, 
       message,
-      attached_sections: attachedSections
+      attached_sections: attachedSections,
+      mode
     });
   },
   approveContent: (sessionId, pendingContentId, editedContent = null, documentId = null) => {
@@ -113,6 +114,11 @@ export const documentAPI = {
   },
   downloadPDF: (sessionId) => {
     return api.get(`/api/document/pdf?session_id=${sessionId}`, {
+      responseType: 'blob'
+    });
+  },
+  downloadResearchDocumentPDF: (documentId) => {
+    return api.get(`/api/document/research-documents/${documentId}/pdf`, {
       responseType: 'blob'
     });
   },

@@ -4,24 +4,28 @@
   left: 56px;
   width: 320px;
   height: 100%;
-  background: #fff;
-  border-right: 1px solid #e5e7eb;
+  background: var(--color-white);
+  border-right: 1px solid var(--color-outline);
   z-index: 100;
   display: flex;
   flex-direction: column;
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.08);
-  animation: slideIn 0.2s ease-out;
+  transform: translateX(-100%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+.chat-sessions-panel.open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.chat-sessions-panel.closing {
+  transform: translateX(-100%);
+  opacity: 0;
+  pointer-events: none;
 }
 
 .panel-header {
@@ -29,7 +33,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 20px 20px 16px 20px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--color-selected);
 }
 
 .panel-header-title {
@@ -42,7 +46,7 @@
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #1a1d21;
+  color: var(--color-text);
   letter-spacing: -0.3px;
 }
 
@@ -51,8 +55,8 @@
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--color-text-sec);
+  background: var(--color-chat-bg);
   padding: 4px 8px;
   border-radius: 6px;
   max-width: 200px;
@@ -71,13 +75,13 @@
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  color: #6b7280;
+  color: var(--color-text-sec);
   transition: all 0.15s ease;
 }
 
 .close-panel-button:hover {
-  background: #f3f4f6;
-  color: #1f2937;
+  background: var(--color-selected);
+  color: var(--color-text);
 }
 
 .panel-content {
@@ -93,8 +97,8 @@
   gap: 8px;
   width: 100%;
   padding: 12px 16px;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  color: white;
+  background: var(--color-base);
+  color: var(--color-white);
   border: none;
   border-radius: 10px;
   cursor: pointer;
@@ -102,12 +106,12 @@
   font-weight: 600;
   margin-bottom: 16px;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25);
+  box-shadow: 0 2px 8px rgba(0, 50, 98, 0.25);
 }
 
 .new-chat-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
+  box-shadow: 0 4px 12px rgba(0, 50, 98, 0.35);
 }
 
 .new-chat-btn:active {
@@ -115,8 +119,8 @@
 }
 
 .new-chat-btn.active {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.25);
+  background: var(--color-base);
+  box-shadow: 0 2px 8px rgba(0, 50, 98, 0.25);
 }
 
 /* Loading State */
@@ -126,15 +130,15 @@
   align-items: center;
   justify-content: center;
   padding: 40px 20px;
-  color: #9ca3af;
+  color: var(--color-text-sec);
   gap: 12px;
 }
 
 .loading-spinner {
   width: 24px;
   height: 24px;
-  border: 2px solid #e5e7eb;
-  border-top-color: #3b82f6;
+  border: 2px solid var(--color-outline);
+  border-top-color: var(--color-base);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -159,7 +163,7 @@
 .panel-empty {
   text-align: center;
   padding: 40px 20px;
-  color: #6b7280;
+  color: var(--color-text-sec);
 }
 
 .panel-empty p {
@@ -170,7 +174,7 @@
 .panel-empty .empty-hint {
   margin-top: 8px;
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--color-text-sec);
 }
 
 /* Sessions List */
@@ -192,13 +196,13 @@
 }
 
 .session-item:hover {
-  background: #f8fafc;
-  border-color: #e5e7eb;
+  background: var(--color-chat-bg);
+  border-color: var(--color-outline);
 }
 
 .session-item.active {
-  background: #eff6ff;
-  border-color: #bfdbfe;
+  background: var(--color-selected);
+  border-color: var(--color-base);
 }
 
 .session-icon {
@@ -208,14 +212,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f1f5f9;
+  background: var(--color-chat-bg);
   border-radius: 8px;
-  color: #64748b;
+  color: var(--color-text-sec);
 }
 
 .session-item.active .session-icon {
-  background: #dbeafe;
-  color: #3b82f6;
+  background: var(--color-selected);
+  color: var(--color-base);
 }
 
 .session-info {
@@ -236,7 +240,7 @@
 .session-title {
   font-size: 14px;
   font-weight: 500;
-  color: #1e293b;
+  color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -244,12 +248,12 @@
 }
 
 .session-item.active .session-title {
-  color: #1d4ed8;
+  color: var(--color-base);
 }
 
 .session-date {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--color-text-sec);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -259,12 +263,12 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-sec);
 }
 
 .session-project {
   padding: 2px 6px;
-  background: #f1f5f9;
+  background: var(--color-chat-bg);
   border-radius: 4px;
   font-size: 11px;
   max-width: 120px;
@@ -274,16 +278,21 @@
 }
 
 .session-item.active .session-project {
-  background: #dbeafe;
-  color: #2563eb;
+  background: var(--color-selected);
+  color: var(--color-base);
 }
 
 .session-messages {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--color-text-sec);
 }
 
-/* Scrollbar Styling */
+/* Scrollbar Styling - Hide by default, show on hover/scroll */
+.panel-content {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
 .panel-content::-webkit-scrollbar {
   width: 6px;
 }
@@ -293,11 +302,25 @@
 }
 
 .panel-content::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: transparent;
   border-radius: 3px;
 }
 
-.panel-content::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+.panel-content:hover::-webkit-scrollbar-thumb,
+.panel-content:focus::-webkit-scrollbar-thumb {
+  background: rgba(0, 50, 98, 0.3);
+}
+
+.panel-content:hover::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 50, 98, 0.5);
+}
+
+.panel-content:hover {
+  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+}
+
+.panel-icon {
+  width: 16px;
+  height: 16px;
 }
 

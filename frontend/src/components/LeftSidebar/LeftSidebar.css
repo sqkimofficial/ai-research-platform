@@ -1,7 +1,7 @@
 .left-sidebar {
   width: 48px;
   height: 100%;
-  background: #ffffff;
+  background: var(--color-white);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -31,7 +31,7 @@
   border: none;
   border-radius: 5px;
   cursor: pointer;
-  color: rgba(0, 50, 98, 1);
+  color: var(--color-icon);
   transition: all 0.2s ease;
   padding: 0;
 }
@@ -47,7 +47,7 @@
 }
 
 .sidebar-button:hover {
-  background: rgba(0, 50, 98, 0.08);
+  background: var(--color-selected);
 }
 
 .sidebar-button:hover svg {
@@ -65,13 +65,28 @@
   height: 24px;
 }
 
+/* Selected/active state */
+.sidebar-button.active,
+.sidebar-button.selected,
+.sidebar-button.is-active {
+  background: var(--color-selected);
+  color: var(--color-base);
+}
+
+.sidebar-button.active:hover,
+.sidebar-button.selected:hover,
+.sidebar-button.is-active:hover {
+  background: var(--color-selected);
+  color: var(--color-base);
+}
+
 /* Account Dropdown */
 .account-dropdown {
   position: absolute;
   bottom: 32px;
   left: 40px;
   min-width: 180px;
-  background: #ffffff;
+  background: var(--color-white);
   border: 1px solid rgba(0, 50, 98, 0.2);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 50, 98, 0.15);
@@ -100,7 +115,7 @@
 .project-name-display {
   font-size: 13px;
   font-weight: 600;
-  color: #003262;
+  color: var(--color-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -126,7 +141,7 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  color: #323232;
+  color: var(--color-text);
   font-size: 13px;
   font-family: 'DM Sans', sans-serif;
   font-weight: 500;
@@ -144,4 +159,10 @@
 
 .logout-item:hover {
   background: rgba(179, 37, 37, 0.08);
+}
+
+.sidebar-icon {
+  width: 20px;
+  height: 20px;
+  color: inherit;
 }

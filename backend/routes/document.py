@@ -10,6 +10,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.enums import TA_LEFT
 import os
+import re
 from io import BytesIO
 
 vector_service = VectorService()
@@ -49,7 +50,7 @@ def get_document():
             
             return jsonify({
                 'content': document.get('markdown_content', ''),
-                'structure': document.get('structure', []),
+                'structure': [],  # Structure removed - kept for backward compatibility
                 'title': document.get('title', 'Untitled'),
                 'document_id': document_id
             }), 200
@@ -75,12 +76,9 @@ def get_document():
             else:
                 content = ''
             
-            # Get document structure
-            structure = DocumentModel.get_document_structure(session_id)
-            
             return jsonify({
                 'content': content,
-                'structure': structure
+                'structure': []  # Structure removed - kept for backward compatibility
             }), 200
         
         return jsonify({'error': 'document_id or session_id is required'}), 400
@@ -101,7 +99,6 @@ def save_document():
         session_id = data.get('session_id')  # Legacy support
         content = data.get('content', '')
         mode = data.get('mode', 'replace')  # 'append' or 'replace'
-        structure = data.get('structure')
         title = data.get('title')
         
         # New approach: use document_id
@@ -126,7 +123,6 @@ def save_document():
             ResearchDocumentModel.update_document(
                 document_id,
                 markdown_content=new_content,
-                structure=structure,
                 title=title
             )
             
@@ -257,6 +253,143 @@ def download_pdf():
             mimetype='application/pdf',
             as_attachment=True,
             download_name=f'research-document-{session_id}.pdf'
+        )
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def markdown_to_plain_text(markdown_content):
+    """
+    Convert markdown content to plain text by stripping markdown syntax.
+    Preserves paragraph structure and basic formatting.
+    """
+    if not markdown_content:
+        return ""
+    
+    text = markdown_content
+    
+    # Remove code blocks (```...```)
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    
+    # Remove inline code (`...`)
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    
+    # Remove headers (keep the text, remove #)
+    text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
+    
+    # Remove bold (**text** or __text__)
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    text = re.sub(r'__([^_]+)__', r'\1', text)
+    
+    # Remove italic (*text* or _text_)
+    text = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'\1', text)
+    text = re.sub(r'(?<!_)_([^_]+)_(?!_)', r'\1', text)
+    
+    # Remove links [text](url) -> text
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    
+    # Remove images ![alt](url)
+    text = re.sub(r'!\[([^\]]*)\]\([^\)]+\)', r'\1', text)
+    
+    # Remove horizontal rules
+    text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\*\*\*+$', '', text, flags=re.MULTILINE)
+    
+    # Remove list markers (-, *, +, 1.)
+    text = re.sub(r'^[\s]*[-*+]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^[\s]*\d+\.\s+', '', text, flags=re.MULTILINE)
+    
+    # Remove blockquotes (>)
+    text = re.sub(r'^>\s+', '', text, flags=re.MULTILINE)
+    
+    # Clean up extra whitespace
+    text = re.sub(r'\n{3,}', '\n\n', text)  # Max 2 consecutive newlines
+    text = text.strip()
+    
+    return text
+
+@document_bp.route('/document/research-documents/<document_id>/pdf', methods=['GET'])
+def download_research_document_pdf(document_id):
+    """Download research document as PDF (converts markdown to plain text)"""
+    try:
+        user_id = get_user_id_from_token()
+        if not user_id:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        # Get document
+        document = ResearchDocumentModel.get_document(document_id)
+        if not document:
+            return jsonify({'error': 'Document not found'}), 404
+        
+        if document['user_id'] != user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Get markdown content
+        markdown_content = document.get('markdown_content', '')
+        
+        # Convert markdown to plain text
+        plain_text = markdown_to_plain_text(markdown_content)
+        
+        # Get document title for filename
+        doc_title = document.get('title', 'Untitled Document')
+        safe_title = re.sub(r'[^a-z0-9_\-]+', '_', doc_title.lower())
+        
+        # Create PDF in memory
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter,
+                                rightMargin=72, leftMargin=72,
+                                topMargin=72, bottomMargin=18)
+        
+        # Container for the 'Flowable' objects
+        story = []
+        
+        # Define styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            leading=20,
+            alignment=TA_LEFT,
+            spaceAfter=24
+        )
+        normal_style = ParagraphStyle(
+            'CustomNormal',
+            parent=styles['Normal'],
+            fontSize=12,
+            leading=16,
+            alignment=TA_LEFT,
+            spaceAfter=12
+        )
+        
+        # Add document title
+        story.append(Paragraph(doc_title, title_style))
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Split plain text into paragraphs and add to PDF
+        paragraphs = plain_text.split('\n\n')
+        for para in paragraphs:
+            if para.strip():
+                # Escape HTML special characters and preserve line breaks
+                para_text = para.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                para_text = para_text.replace('\n', '<br/>')
+                story.append(Paragraph(para_text, normal_style))
+                story.append(Spacer(1, 0.2*inch))
+        
+        # Build PDF
+        doc.build(story)
+        
+        # Get PDF data
+        buffer.seek(0)
+        pdf_data = buffer.getvalue()
+        buffer.close()
+        
+        # Return PDF as response
+        return send_file(
+            BytesIO(pdf_data),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'{safe_title}.pdf'
         )
     
     except Exception as e:

@@ -9,6 +9,7 @@ from utils.file_helpers import get_session_dir
 from datetime import datetime
 import os
 import json
+import re
 
 chat_bp = Blueprint('chat', __name__)
 openai_service = OpenAIService()  # Used for Stage 2 AI (placement)
@@ -43,6 +44,165 @@ def get_user_id_from_token():
         return verify_token(token)
     except:
         return None
+
+def strip_markdown_to_plain_text(text):
+    """
+    Convert markdown-formatted text to plain text.
+    Removes markdown syntax while preserving structure with line breaks.
+    Ensures bullet points are on separate lines.
+    """
+    import re
+    if not text:
+        return text
+    
+    # Remove markdown headers (# ## ### etc.)
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+    
+    # Preserve bold for subheadings, but remove from regular text
+    # First, identify subheadings (lines that are entirely bold or start with bold)
+    # Convert **subheading** to <strong>subheading</strong> for subheadings only
+    # For regular text, remove bold markers
+    
+    lines = text.split('\n')
+    processed_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        # Check if line is a subheading
+        # Pattern 1: Line that is entirely **text** (most common subheading format)
+        # Pattern 2: Line that starts with **text** (subheading at start of line)
+        # Pattern 3: Line that contains **text** and is relatively short (likely a subheading)
+        is_subheading = (
+            re.match(r'^\*\*[^*]+\*\*$', stripped) or  # Entirely bold
+            re.match(r'^\*\*[^*]+\*\*', stripped) or  # Starts with bold
+            (re.search(r'\*\*[^*]+\*\*', stripped) and len(stripped) < 100)  # Contains bold and is short
+        )
+        
+        if is_subheading:
+            # This looks like a subheading - preserve bold by converting to HTML
+            # Convert **text** to <strong>text</strong>
+            line_with_bold = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', line)
+            processed_lines.append(line_with_bold)
+        else:
+            # Regular text - remove bold markers
+            line_no_bold = re.sub(r'\*\*([^*]+)\*\*', r'\1', line)
+            line_no_bold = re.sub(r'__([^_]+)__', r'\1', line_no_bold)
+            processed_lines.append(line_no_bold)
+    
+    text = '\n'.join(processed_lines)
+    
+    # Remove italic (*text* or _text_)
+    text = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'\1', text)
+    text = re.sub(r'(?<!_)_([^_]+)_(?!_)', r'\1', text)
+    
+    # Remove code blocks (```code```)
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    
+    # Remove inline code (`code`)
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    
+    # Remove links but keep the text [text](url) -> text
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    
+    # Remove images ![alt](url)
+    text = re.sub(r'!\[([^\]]*)\]\([^\)]+\)', r'\1', text)
+    
+    # Remove horizontal rules (--- or ***)
+    text = re.sub(r'^[-*]{3,}$', '', text, flags=re.MULTILINE)
+    
+    # Remove blockquotes (> text)
+    text = re.sub(r'^>\s+', '', text, flags=re.MULTILINE)
+    
+    # CRITICAL: Ensure bullet points are on separate lines
+    # Handle cases where bullet points appear inline in text
+    # Process the entire text first to find all bullet patterns, then split by lines
+    
+    # Before splitting by lines, handle inline bullet points in the entire text
+    # Look for patterns: ". - ", ", - ", " - " (these indicate bullet points)
+    
+    # Pattern 1: ". - " (period, space, dash, space) - bullet after sentence end
+    # Pattern 2: ", - " (comma, space, dash, space) - bullet after comma
+    # Pattern 3: " - " (space, dash, space) - general bullet pattern
+    
+    # Replace these patterns with newline + bullet format
+    # Handle various patterns where bullet points appear inline
+    
+    # Pattern 1: ". - " or ".- " (period, optional space, dash, space) - bullet after sentence
+    text = re.sub(r'\.\s*-\s+(\S)', r'.\n- \1', text)
+    
+    # Pattern 2: ", - " or ",- " (comma, optional space, dash, space) - bullet after comma
+    text = re.sub(r',\s*-\s+(\S)', r',\n- \1', text)
+    
+    # Pattern 3: " - " (space, dash, space) - general bullet pattern
+    # Only match if not at start of line and followed by a word character
+    # This catches remaining inline bullets that appear mid-sentence
+    text = re.sub(r'(?<!\n)(?<!^)\s+-\s+(\S)', r'\n- \1', text, flags=re.MULTILINE)
+    
+    # Now process line by line
+    lines = text.split('\n')
+    processed_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            processed_lines.append('')
+            continue
+        
+        # Skip processing if this is a subheading (contains <strong> tag)
+        if '<strong>' in stripped:
+            # This is a subheading - keep it as is, don't add bullet points
+            processed_lines.append(stripped)
+            continue
+        
+        # Check if line starts with bullet point
+        if stripped.startswith('-'):
+            # Normalize: ensure "- " format
+            normalized = re.sub(r'^-\s*', '- ', stripped)
+            processed_lines.append(normalized)
+        elif re.match(r'^\d+\.\s+', stripped):
+            # Numbered list item - convert to bullet
+            normalized = re.sub(r'^\d+\.\s+', '- ', stripped)
+            processed_lines.append(normalized)
+        else:
+            # Regular text line - check if it contains any remaining " - " patterns
+            if ' - ' in stripped:
+                # Still has bullet pattern - split it
+                segments = stripped.split(' - ')
+                # First segment is regular text
+                if segments[0].strip():
+                    processed_lines.append(segments[0].strip())
+                # Remaining segments are bullet points
+                for seg in segments[1:]:
+                    seg_stripped = seg.strip()
+                    if seg_stripped:
+                        processed_lines.append('- ' + seg_stripped)
+            else:
+                # No bullet patterns - regular text
+                processed_lines.append(stripped)
+    
+    text = '\n'.join(processed_lines)
+    
+    # Clean up: remove extra whitespace but preserve line breaks
+    # Replace multiple spaces/tabs with single space (but not newlines)
+    text = re.sub(r'[ \t]+', ' ', text)
+    
+    # Ensure proper paragraph separation (double newlines between paragraphs)
+    # But keep single newlines between bullet points
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    # Final cleanup: trim each line
+    lines = text.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped:
+            cleaned_lines.append(stripped)
+        elif cleaned_lines and cleaned_lines[-1]:  # Allow one empty line between content
+            cleaned_lines.append('')
+    
+    text = '\n'.join(cleaned_lines)
+    
+    return text.strip()
 
 def extract_placement_instructions(user_message, document_structure_flat):
     """
@@ -383,7 +543,37 @@ def send_message():
         data = request.get_json()
         session_id = data.get('session_id')
         message = data.get('message')
-        attached_sections = data.get('attached_sections', [])  # Array of structure elements
+        mode = data.get('mode', 'write')
+        attached_sections = data.get('attached_sections', [])  # Extract attached sections/highlights
+        if mode not in ['write', 'research']:
+            mode = 'write'
+
+        # Append attached highlights (only) to the user message so Stage 1 sees them
+        highlights_for_prompt = []
+        if attached_sections:
+            for attachment in attached_sections:
+                if isinstance(attachment, dict):
+                    content = attachment.get('content', '')
+                    if attachment.get('type') == 'highlight' or content.startswith('Highlight:'):
+                        # Extract actual highlight text if formatted as Highlight: "text"
+                        text_match = re.search(r'Highlight:\s*"([^"]+)"', content)
+                        highlight_text = text_match.group(1) if text_match else content
+                        # Optionally include note/source if present (keeps it concise)
+                        note_match = re.search(r'Note:\s*(.+)', content)
+                        source_match = re.search(r'Source:\s*(.+)', content)
+                        details = []
+                        if note_match:
+                            details.append(f"Note: {note_match.group(1)}")
+                        if source_match:
+                            details.append(f"Source: {source_match.group(1)}")
+                        if details:
+                            highlight_text = f'{highlight_text} ({"; ".join(details)})'
+                        highlights_for_prompt.append(highlight_text)
+
+        message_with_highlights = message
+        if highlights_for_prompt:
+            highlights_block = "[ATTACHED_HIGHLIGHTS]\n" + "\n".join(f"- {h}" for h in highlights_for_prompt)
+            message_with_highlights = f"{message}\n\n{highlights_block}"
         
         if not session_id or not message:
             return jsonify({'error': 'session_id and message are required'}), 400
@@ -396,21 +586,7 @@ def send_message():
         if session['user_id'] != user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         
-        # Prepare attached sections markdown for context
-        attached_markdown = ''
-        if attached_sections:
-            # Extract content from attached sections and combine
-            attached_contents = [section.get('content', '') for section in attached_sections if section.get('content')]
-            attached_markdown = '\n\n'.join(attached_contents)
-            print(f"DEBUG: Attached {len(attached_sections)} sections to message")
-            print(f"DEBUG: Attached markdown length: {len(attached_markdown)} chars")
-        
-        # Add user message with attached sections info
-        user_message_with_attachments = message
-        if attached_markdown:
-            user_message_with_attachments = f"{message}\n\n[Attached sections from document:]\n\n{attached_markdown}"
-        
-        ChatSessionModel.add_message(session_id, 'user', user_message_with_attachments)
+        ChatSessionModel.add_message(session_id, 'user', message_with_highlights)
         
         # Get document content and structure for context
         session_dir = get_session_dir(session_id)
@@ -456,13 +632,7 @@ def send_message():
         if document_content:
             if use_semantic_search:
                 # Use semantic search to find relevant chunks
-                # Combine user message with any attached sections for better context
-                search_query = message
-                if attached_markdown:
-                    # Include attached sections context in search query
-                    search_query = f"{message}\n\nContext: {attached_markdown[:500]}"
-                
-                relevant_chunks = vector_service.search_relevant_chunks(session_id, search_query, top_k=5)
+                relevant_chunks = vector_service.search_relevant_chunks(session_id, message, top_k=5)
                 if relevant_chunks:
                     context_parts = [chunk['chunk_text'] for chunk in relevant_chunks]
                     document_context = '\n\n'.join(context_parts)
@@ -484,13 +654,9 @@ NOTE: Only relevant document sections are shown above based on semantic similari
         else:
             # No existing document content
             document_context_section = "The document is currently empty - the user is starting a new research paper."
-            # Prepare attached sections markdown for context (if any)
-            if not attached_markdown and attached_sections:
-                attached_contents = [section.get('content', '') for section in attached_sections if section.get('content')]
-                attached_markdown = '\n\n'.join(attached_contents)
         
         # Single unified Stage 1 AI System Prompt - Content Generation Only (No Placement)
-        system_message = f"""You are a research assistant helping users write research papers. Your role is to GENERATE CONTENT ONLY - you do NOT decide where content should be placed in the document.
+        system_message_write = f"""You are a research assistant helping users write research papers. Your role is to GENERATE CONTENT ONLY - you do NOT decide where content should be placed in the document.
 
 CRITICAL: UNDERSTANDING CURRENT VS HISTORICAL CONTEXT
 - You will receive conversation history for context, but you MUST ONLY respond to the CURRENT USER MESSAGE (the last message)
@@ -505,28 +671,17 @@ You have two distinct responsibilities:
 
 2. DOCUMENT CONTENT GENERATION: When the user's request requires adding or updating the research document, generate well-structured, formal research content in Markdown format. Your ONLY job is to generate high-quality content - you do NOT provide placement instructions or decide where content goes.
 
-3. DOCUMENT STRUCTURE: When providing document_content, you MUST also provide a structured representation in the "document_structure" field. This allows users to select and attach specific sections, paragraphs, tables, or code snippets.
-
-4. SOURCES: Always include any research papers, articles, websites, or other sources you reference or review. Include URLs, DOIs, or citations in the sources array.
+3. SOURCES: Always include any research papers, articles, websites, or other sources you reference or review. Include URLs, DOIs, or citations in the sources array.
 
 {document_context_section}
 
-{structure_summary}
-
 SEMANTIC SECTION MATCHING FOR CONTENT GENERATION:
 When the user asks to add content to an existing section (e.g., "add paragraphs to Introduction" or "add a table to Methodology"), you should:
-1. Look through the document structure above to understand the context
+1. Look through the document content above to understand the context
 2. Match semantically - "Introduction" matches "intro", "Introduction", "INTRODUCTION", etc.
 3. "Methods" matches "Methodology", "Methods", "Experimental Methods", etc.
 4. "Results" matches "Results", "Findings", "Experimental Results", etc.
-5. If adding to an existing section, set parent_id in document_structure elements to that section's ID
-6. DO NOT include the section title/header in document_content when adding to existing sections - only include the NEW content
-7. DO NOT create a new section element if the user is adding content to an existing one
-
-ATTACHED SECTIONS:
-If the user has attached specific sections from the document to this message, they will appear below. Use these attached sections as the primary context for your response:
-
-{attached_markdown if attached_markdown else "No sections attached."}
+5. DO NOT include the section title/header in document_content when adding to existing sections - only include the NEW content
 
 AVAILABLE DOCUMENT TYPES:
 {types_list}
@@ -539,31 +694,6 @@ If you need a document element type that doesn't exist in the list above, includ
 
 Only create new types when absolutely necessary - first check if an existing type can be used.
 
-DOCUMENT STRUCTURE REQUIREMENTS:
-When adding document_content, you MUST provide a "document_structure" array that breaks down the content into granular, selectable elements. Each element should have:
-
-- id: Hierarchical/positional identifier (e.g., "sec-introduction", "para-1", "para-2", "table-1", "code-1"). This reflects position in the document. The backend will automatically assign immutable UUIDs for tracking - you only need to provide the hierarchical ID.
-- type: One of the available types listed above (or a new type you include in new_types)
-- content: The markdown content for this element
-- parent_id: ID of parent element (null for top-level sections, or section ID if adding to existing section)
-- metadata: Object with additional info matching the type's metadata schema:
-  - For code_block: {{"language": "python"}}
-  - For image: {{"alt": "description", "url": "image-url"}}
-  - For table: {{"caption": "optional caption"}}
-  - For section/subsection: {{"title": "Section Title", "level": 1-6}}
-
-STRUCTURE HIERARCHY:
-- Sections (##) are top-level (parent_id: null)
-- Subsections (###) have parent_id pointing to their section
-- Paragraphs, tables, code blocks, etc. have parent_id pointing to their section/subsection
-- Maintain logical nesting: sections > subsections > content elements
-
-PARAGRAPH GRANULARITY:
-- EACH paragraph must be a separate element in document_structure
-- Do NOT combine multiple paragraphs into a single element
-- Each paragraph should have its own id, type="paragraph", and parent_id
-- This allows users to select individual paragraphs for attachment
-- Example: If a section has 3 paragraphs, create 3 separate paragraph elements, each with parent_id pointing to the section
 
 MARKDOWN FORMATTING GUIDELINES:
 - Use headers: # for main title, ## for sections, ### for subsections
@@ -613,7 +743,6 @@ Always respond in JSON format with exactly these keys:
 {{
   "message": "your conversational response here (always provide this, even if brief). Use \\n for line breaks.",
   "document_content": "structured markdown content to add (empty string '' if no document update needed). Use \\n for line breaks. IMPORTANT: When adding to an existing section, ONLY include the NEW content - do NOT repeat the section header or existing content.",
-  "document_structure": [array of structured elements matching document_content. Empty array [] if no document update needed],
   "sources": ["array of source URLs, DOIs, or citations you referenced or reviewed. Empty array [] if no sources"],
   "new_types": [array of new document types to create. Empty array [] if no new types needed. Each type: {{"type_name": "name", "description": "desc", "metadata_schema": {{}}}}]
 }}
@@ -628,7 +757,58 @@ CRITICAL: CONTENT SCOPE RULES
   * CORRECT: "New paragraph text about recent innovations..."
   * The document_structure should have parent_id pointing to the existing Introduction section ID
 
-Remember: The chat message should be conversational and helpful. The document_content should be formal research writing in Markdown format, but ONLY include new content being added. The document_structure should provide granular, selectable elements that match the document_content. Sources should include any papers, articles, or websites you mention or review. You generate content only - placement decisions are made separately."""
+Remember: The chat message should be conversational and helpful. The document_content should be formal research writing in Markdown format, but ONLY include new content being added. Sources should include any papers, articles, or websites you mention or review. You generate content only - placement decisions are made separately."""
+
+        system_message_research = f"""You are a research assistant focused on producing concise, well-sourced answers.
+
+MODE: RESEARCH
+- PRIMARY: Deliver the researched answer now. Do NOT say you will research; provide findings directly.
+- Keep answers succinct and structured (short paragraphs or bullets).
+- ALWAYS include sources (URLs/DOIs) in the "sources" array for any claim or fact.
+- Use document_content/document_structure ONLY if the user explicitly asks for prose to be drafted/inserted. Otherwise, keep document_content empty.
+- If drafting content, follow the document structure guidance exactly and include sources.
+
+CRITICAL: PLAIN TEXT FORMATTING REQUIREMENTS
+- Your "message" response MUST be in PLAIN TEXT format - NO markdown formatting whatsoever EXCEPT for subheadings
+- DO NOT use markdown syntax like *italic*, # headers, or other markdown characters
+- For SUBHEADINGS (section titles within paragraphs): Use **bold** markers around subheading text. Subheadings should NOT have bullet points before them. Example: "**Hardware and Device**" or "**AI Integration**"
+- For bullet points: Each bullet point MUST be on its own separate line. Use a dash and space ("- ") at the start of each bullet point, followed by a newline character (\\n) after each bullet point.
+- NEVER put multiple bullet points on the same line. Each "- " must be followed by text and then a newline.
+- For paragraphs: Separate paragraphs with blank lines (double newlines)
+- For lists: Use line breaks between items, with each item on its own line. CRITICAL: Each bullet point must end with a newline character.
+- Example of CORRECT format with subheadings and bullets:
+  "Here are the key findings:\\n\\n**Hardware Developments**\\n- First finding about hardware...\\n- Second finding shows...\\n\\n**AI Integration**\\n- First finding about AI...\\n- Second finding indicates...\\n\\nAdditional context follows in the next paragraph."
+
+- Example of WRONG format (DO NOT use - bullets on same line):
+  "Key findings: - First finding - Second finding - Third finding"
+
+- Example of WRONG format (DO NOT use bullets for subheadings):
+  "- Hardware and Device\\n- First point" (subheadings should use **bold**, not bullets)
+
+Context from the user's document (if any):
+{document_context_section}
+
+Document structure summary:
+{structure_summary}
+
+Attached sections from the user message:
+
+Available document types:
+{types_list}
+
+When drafting content (only if explicitly requested):
+- Follow the DOCUMENT STRUCTURE REQUIREMENTS, including hierarchical ids, type, parent_id, and metadata.
+- Exclude section headers when adding to existing sections.
+- Provide new_types only when necessary.
+- Always include sources for any claims.
+
+If the request is purely research/Q&A:
+- Provide the researched answer directly in "message" as PLAIN TEXT (no markdown).
+- Include specific findings (not just intentions) and cite sources in "sources".
+- Keep document_content empty unless the user asked you to write prose.
+- Remember: Use plain text with line breaks for structure, NOT markdown formatting."""
+
+        system_message = system_message_write if mode == 'write' else system_message_research
         
         # Check for pending content (for revisions)
         pending_content_data = ChatSessionModel.get_pending_content(session_id)
@@ -637,7 +817,6 @@ Remember: The chat message should be conversational and helpful. The document_co
         # If there's pending content, modify system message to include revision context
         if is_revision and pending_content_data:
             previous_content = pending_content_data['pending_content'].get('document_content', '')
-            previous_structure = pending_content_data['pending_content'].get('document_structure', [])
             previous_sources = pending_content_data['pending_content'].get('sources', [])
             revision_context = f"""
 
@@ -645,9 +824,6 @@ CRITICAL: The user has pending content awaiting approval. They are now requestin
 
 PREVIOUS PENDING CONTENT (you MUST keep all of this unless explicitly asked to change it):
 {previous_content}
-
-PREVIOUS PENDING STRUCTURE:
-{json.dumps(previous_structure, indent=2) if previous_structure else "None"}
 
 PREVIOUS PENDING SOURCES:
 {json.dumps(previous_sources, indent=2) if previous_sources else "[]"}
@@ -660,8 +836,7 @@ CRITICAL REVISION RULES - YOU MUST FOLLOW THESE EXACTLY:
 5. If the user asks to change a paragraph, keep all other paragraphs, sections, tables - only modify that paragraph
 6. **MOST IMPORTANT**: You MUST return the COMPLETE content including BOTH unchanged parts AND modified parts
 7. Your document_content MUST include ALL content: unchanged parts + modified parts (in the correct order)
-8. Your document_structure MUST include ALL elements: unchanged elements + modified elements (with correct IDs and parent_ids)
-9. Your sources array MUST include ALL sources: previous sources + any new sources you reference
+8. Your sources array MUST include ALL sources: previous sources + any new sources you reference
 
 Example: If previous content had Introduction section + Background section + Table, and user says "append the table", 
 you should return: Introduction section (unchanged) + Background section (unchanged) + Original Table (unchanged) + New Table (appended).
@@ -721,6 +896,35 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 alternated_messages.append(msg)
         
         # Stage 1 AI - Perplexity (content generation with web search)
+        # Log highlights/attachments before sending to Perplexity API
+        print("=" * 80)
+        print("STAGE ONE PERPLEXITY API CALL - ATTACHMENTS LOG")
+        print("=" * 80)
+        
+        # Extract highlights from attached_sections
+        highlights = []
+        if attached_sections:
+            for attachment in attached_sections:
+                if isinstance(attachment, dict):
+                    # Check if it's a highlight (type='highlight' or content starts with 'Highlight:')
+                    if attachment.get('type') == 'highlight' or (attachment.get('content', '').startswith('Highlight:')):
+                        highlights.append(attachment)
+        
+        if highlights:
+            print(f"Highlights attached: {len(highlights)}")
+            for i, highlight in enumerate(highlights, 1):
+                highlight_content = highlight.get('content', '')
+                # Extract the actual highlight text from the formatted content
+                # Format is: Highlight: "text"\nNote: ...\nSource: ...
+                text_match = re.search(r'Highlight:\s*"([^"]+)"', highlight_content)
+                highlight_text = text_match.group(1) if text_match else highlight_content
+                print(f"  Highlight {i}:")
+                print(f"    Content: {highlight_text}")
+        else:
+            print("Highlights attached: zero")
+        
+        print("=" * 80)
+        
         try:
             ai_response = perplexity_service.chat_completion(alternated_messages)
         except Exception as e:
@@ -765,19 +969,26 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         print("DEBUG: Parsed Response:")
         print(f"  - message length: {len(parsed_response.get('message', ''))}")
         print(f"  - document_content length: {len(parsed_response.get('document_content', ''))}")
-        print(f"  - document_structure count: {len(parsed_response.get('document_structure', []))}")
-        print(f"  - placement: {parsed_response.get('placement')}")
         print(f"  - sources count: {len(parsed_response.get('sources', []))}")
         if parsed_response.get('document_content'):
             print(f"  - document_content preview: {parsed_response.get('document_content', '')[:200]}...")
-        if parsed_response.get('document_structure'):
-            print(f"  - document_structure: {json.dumps(parsed_response.get('document_structure', []), indent=2)}")
         print("=" * 80)
         
         chat_message = parsed_response.get('message', '')
         document_content_to_add = parsed_response.get('document_content', '')
-        document_structure = parsed_response.get('document_structure', [])
         sources = parsed_response.get('sources', [])
+        
+        # Strip markdown from research mode responses to ensure plain text output
+        if mode == 'research' and chat_message:
+            original_length = len(chat_message)
+            original_newlines = chat_message.count('\n')
+            chat_message = strip_markdown_to_plain_text(chat_message)
+            new_length = len(chat_message)
+            new_newlines = chat_message.count('\n')
+            print(f"DEBUG: Stripped markdown from research mode response")
+            print(f"  - Original length: {original_length}, New length: {new_length}")
+            print(f"  - Original newlines: {original_newlines}, New newlines: {new_newlines}")
+            print(f"  - Preview: {chat_message[:200]}...")
         
         # Don't extract placement instructions in backend - let Stage 2 AI figure it out from user messages
         
@@ -793,7 +1004,6 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
             # The revision context in the system prompt explicitly instructs the AI to return complete content
             print(f"DEBUG: Storing pending content from AI response")
             print(f"  - Content length: {len(document_content_to_add)}")
-            print(f"  - Structure count: {len(document_structure)}")
             print(f"  - Sources count: {len(sources)}")
             if is_revision and pending_content_data:
                 previous_pending = pending_content_data['pending_content']
@@ -837,7 +1047,6 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
             
             pending_content_data_to_store = {
                 'document_content': document_content_to_add,
-                'document_structure': document_structure,
                 'sources': merged_sources,
                 'session_start_timestamp': session_start_timestamp,  # Track when this session started
                 'timestamp': datetime.utcnow().isoformat()
@@ -853,7 +1062,6 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 chat_message, 
                 sources=sources,
                 document_content=document_content_to_add,
-                document_structure=document_structure if document_structure else None,
                 placement=None,  # No placement in Stage 1
                 status=status,
                 pending_content_id=pending_content_id
@@ -866,7 +1074,6 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 chat_message, 
                 sources=sources,
                 document_content=None,
-                document_structure=None,
                 placement=None,
                 status=None
             )
@@ -875,7 +1082,6 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         # Content will be inserted when user approves via /chat/approve endpoint
         
         print(f"DEBUG: document_content_to_add exists: {bool(document_content_to_add.strip())}")
-        print(f"DEBUG: document_structure exists: {bool(document_structure)}")
         print(f"DEBUG: status: {status}")
         print(f"DEBUG: pending_content_id: {pending_content_id}")
         
@@ -1000,7 +1206,6 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         response_data = {
             'response': chat_message,
             'document_content': document_content_to_add,
-            'document_structure': document_structure,
             'sources': sources,
             'session_id': session_id
         }
@@ -1052,27 +1257,14 @@ def approve_content():
         pending_content = pending_data['pending_content']
         
         # Use edited content if provided, otherwise use original
-        # If edited_content is provided, we need to merge it with the original structure
         original_content = pending_content.get('document_content', '')
-        original_structure = pending_content.get('document_structure', [])
         
         if edited_content:
-            # User edited specific content - we need to merge edited content with original structure
-            # The edited_content is the markdown text the user edited
-            # We need to update the corresponding elements in document_structure
-            
-            # For now, we'll use the edited content as-is and try to preserve structure
-            # The Stage 2 AI will handle proper placement
+            # User edited specific content
             content_to_place = edited_content
-            
-            # Try to update structure elements that match edited content
-            # This is a simplified approach - ideally we'd parse the edited markdown and match to structure
-            # For now, we'll use the original structure and let Stage 2 AI handle it
-            document_structure = original_structure
-            print(f"DEBUG: Using edited content (length: {len(edited_content)}), preserving original structure")
+            print(f"DEBUG: Using edited content (length: {len(edited_content)})")
         else:
             content_to_place = original_content
-            document_structure = original_structure
         
         # Get session start timestamp to collect all user messages in this session
         session_start_timestamp = pending_content.get('session_start_timestamp')
@@ -1139,10 +1331,9 @@ def approve_content():
         if not content_to_place.strip():
             return jsonify({'error': 'No content to place'}), 400
         
-        # Get full document content and structure
+        # Get full document content
         # New approach: use document_id if provided, otherwise fall back to session_id (legacy)
         document_content = ''
-        document_structure_flat = []
         
         if document_id:
             # Use research document model
@@ -1154,47 +1345,26 @@ def approve_content():
                 return jsonify({'error': 'Unauthorized'}), 403
             
             document_content = document.get('markdown_content', '')
-            document_structure_flat = document.get('structure', [])
         else:
             # Legacy approach: use session-based file storage
             session_dir = get_session_dir(session_id)
             doc_path = session_dir / 'doc.md'
-            document_structure_flat = DocumentModel.get_document_structure(session_id)
-            
-            # Ensure document_structure_flat is a list
-            if document_structure_flat and not isinstance(document_structure_flat, list):
-                print(f"WARNING: document_structure_flat is not a list, got {type(document_structure_flat)}")
-                document_structure_flat = []
             
             if os.path.exists(doc_path):
                 with open(doc_path, 'r', encoding='utf-8') as f:
                     document_content = f.read()
         
-        # Ensure document_structure_flat is a list
-        if document_structure_flat and not isinstance(document_structure_flat, list):
-            print(f"WARNING: document_structure_flat is not a list, got {type(document_structure_flat)}")
-            document_structure_flat = []
-        
         # Check if document is empty - if so, skip Stage 2 AI and just append content directly
-        is_document_empty = (
-            not document_content.strip() and 
-            (not document_structure_flat or len(document_structure_flat) == 0)
-        )
+        is_document_empty = not document_content.strip()
         
         if is_document_empty:
             print("DEBUG: Document is empty - skipping Stage 2 AI and appending content directly")
             # Just use the content as-is since there's nothing to merge with
             updated_document_content = content_to_place
-            updated_document_structure = document_structure if document_structure else []
             placement_applied = "Content added to empty document"
             placement_explanation = "The document was empty, so the content was added as the initial content."
         else:
             # Document has content - use Stage 2 AI for placement
-            # Build structure tree
-            if document_structure_flat and len(document_structure_flat) > 0:
-                document_structure_tree = DocumentStructureService.build_tree(document_structure_flat)
-            else:
-                document_structure_tree = {'elements': {}, 'roots': []}
             
             # Stage 2 AI System Prompt - Placement Specialist
             is_edited = edited_content is not None and edited_content != original_content
@@ -1234,23 +1404,9 @@ Content to place (this is the NEW content to add):
 {content_to_place}
 {edited_note}
 
-PLACEMENT INSTRUCTION INTERPRETATION GUIDE:
-- "insert_into" with position "beginning": Place content at the very start of the target section (right after section header)
-- "insert_into" with position "end": Place content at the very end of the target section (after all existing content in that section)
-- "insert_after": Place content immediately after the target element (as a new section/block)
-- "insert_before": Place content immediately before the target element (as a new section/block)
-- "insert_at_end": Place content at the very end of the entire document
-
-Current document structure:
-{json.dumps(document_structure_flat, indent=2) if document_structure_flat else "No existing structure"}
-
-New content structure (for the content being placed):
-{json.dumps(document_structure, indent=2) if document_structure else "No structure provided"}
-
 You MUST return valid JSON with exactly these fields:
 {{
   "updated_document_content": "full markdown document with ALL existing content preserved exactly + new content placed appropriately",
-  "updated_document_structure": [array of ALL structure elements - existing + new],
   "placement_applied": "brief description of where content was placed (e.g., 'Content placed at the beginning of Introduction section')",
   "placement_explanation": "Two sentences explaining why you chose this placement. If user provided instructions, explain how you followed them exactly. If no instructions, explain why this location is most logical based on document context."
 }}
@@ -1260,7 +1416,7 @@ CRITICAL JSON FORMATTING:
 - ALL newlines within string values MUST be escaped as \\n
 - ALL quotes within string values MUST be escaped as \\"
 - The JSON must be properly formatted
-- Example format: {{"updated_document_content": "## Existing\\n\\nContent\\n\\n## New\\n\\nContent", "updated_document_structure": [...], "placement_applied": "...", "placement_explanation": "..."}}
+- Example format: {{"updated_document_content": "## Existing\\n\\nContent\\n\\n## New\\n\\nContent", "placement_applied": "...", "placement_explanation": "..."}}
 
 CRITICAL: The updated_document_content must include:
 1. ALL existing document content exactly as it was (word-for-word)
@@ -1288,13 +1444,11 @@ REMINDER: If user provided placement instructions above, you MUST follow them ex
                 
                 stage2_parsed = openai_service.parse_json_response(stage2_content)
                 updated_document_content = stage2_parsed.get('updated_document_content', '') or stage2_parsed.get('document_content', '')
-                updated_document_structure = stage2_parsed.get('updated_document_structure', []) or stage2_parsed.get('document_structure', [])
                 placement_applied = stage2_parsed.get('placement_applied', 'Content placed')
                 placement_explanation = stage2_parsed.get('placement_explanation', '')
                 
                 print(f"DEBUG: Parsed Stage 2 response:")
                 print(f"  - updated_document_content length: {len(updated_document_content)}")
-                print(f"  - updated_document_structure count: {len(updated_document_structure)}")
                 print(f"  - placement_applied: {placement_applied}")
                 
                 if not updated_document_content:
@@ -1321,8 +1475,7 @@ REMINDER: If user provided placement instructions above, you MUST follow them ex
                 # Update research document in database
                 ResearchDocumentModel.update_document(
                     document_id,
-                    markdown_content=updated_document_content,
-                    structure=updated_document_structure
+                    markdown_content=updated_document_content
                 )
                 
                 # Re-index document for semantic search
@@ -1337,10 +1490,6 @@ REMINDER: If user provided placement instructions above, you MUST follow them ex
                 os.makedirs(session_dir, exist_ok=True)
                 with open(doc_path, 'w', encoding='utf-8') as f:
                     f.write(updated_document_content)
-                
-                # Update document structure in database
-                if updated_document_structure:
-                    DocumentModel.update_document_structure(session_id, updated_document_structure, user_id)
                 
                 # Re-index document for semantic search
                 try:
@@ -1483,18 +1632,10 @@ def rewrite_content():
         session_dir = get_session_dir(session_id)
         doc_path = session_dir / 'doc.md'
         document_content = ''
-        document_structure_flat = DocumentModel.get_document_structure(session_id)
-        
+
         if os.path.exists(doc_path):
             with open(doc_path, 'r', encoding='utf-8') as f:
                 document_content = f.read()
-        
-        # Build structure summary
-        if document_structure_flat:
-            document_structure_tree = DocumentStructureService.build_tree(document_structure_flat)
-            structure_summary = DocumentStructureService.get_structure_summary(document_structure_tree)
-        else:
-            structure_summary = "No existing document structure."
         
         # Use semantic search for relevant context
         if document_content:
@@ -1525,8 +1666,6 @@ Generate new content addressing the same request. Consider why the previous cont
 The user has been building a research document. Here are the most relevant sections:
 {document_context}
 
-{structure_summary}
-
 AVAILABLE DOCUMENT TYPES:
 {types_list}
 
@@ -1543,7 +1682,6 @@ Always respond in JSON format with exactly these keys:
 {{
   "message": "your conversational response here (always provide this, even if brief). Use \\n for line breaks.",
   "document_content": "structured markdown content to add (empty string '' if no document update needed). Use \\n for line breaks.",
-  "document_structure": [array of structured elements matching document_content. Empty array [] if no document update needed],
   "sources": ["array of source URLs, DOIs, or citations you referenced or reviewed. Empty array [] if no sources"],
   "new_types": [array of new document types to create. Empty array [] if no new types needed]
 }}"""
@@ -1565,7 +1703,6 @@ Always respond in JSON format with exactly these keys:
             rewrite_parsed = perplexity_service.parse_json_response(rewrite_content)
             chat_message = rewrite_parsed.get('message', '')
             document_content_to_add = rewrite_parsed.get('document_content', '')
-            document_structure = rewrite_parsed.get('document_structure', [])
             sources = rewrite_parsed.get('sources', [])
             
             # Handle new document types from AI response
@@ -1614,7 +1751,6 @@ Always respond in JSON format with exactly these keys:
             
             pending_content_data_to_store = {
                 'document_content': document_content_to_add,
-                'document_structure': document_structure,
                 'sources': sources,
                 'session_start_timestamp': session_start_timestamp,
                 'timestamp': datetime.utcnow().isoformat()
@@ -1629,7 +1765,6 @@ Always respond in JSON format with exactly these keys:
                 chat_message,
                 sources=sources,
                 document_content=document_content_to_add,
-                document_structure=document_structure if document_structure else None,
                 placement=None,
                 status=status,
                 pending_content_id=pending_content_id
@@ -1638,7 +1773,6 @@ Always respond in JSON format with exactly these keys:
             return jsonify({
                 'response': chat_message,
                 'document_content': document_content_to_add,
-                'document_structure': document_structure,
                 'sources': sources,
                 'status': status,
                 'pending_content_id': pending_content_id,

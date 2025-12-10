@@ -179,3 +179,4 @@ const ScrollingTextPanel = () => {
 };
 
 export default ScrollingTextPanel;
+

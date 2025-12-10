@@ -1,0 +1,21 @@
+/* Design system color tokens */
+:root {
+  --color-document-bg: #fdfcfb;
+  --color-chat-bg: #f2f5f7;
+  --color-selected: #e4e9ee;
+  --color-outline: #c2ced9;
+  --color-icon: #45698d;
+  --color-base: #003262;
+  --color-text-sec: #999999;
+  --color-text: #323232;
+  --color-white: #ffffff;
+
+  /* Derived tokens using only palette hues */
+  --color-base-weak: rgba(0, 50, 98, 0.12);
+  --color-base-softer: rgba(0, 50, 98, 0.2);
+  --color-base-soft: rgba(0, 50, 98, 0.3);
+  --color-base-strong: rgba(0, 50, 98, 0.5);
+  --color-outline-strong: rgba(194, 206, 217, 0.8);
+}
+
+

@@ -3,6 +3,28 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import './ChatWindow.css';
+import dropdownIcon from '../../assets/dropdown-icon.svg';
+import webIcon from '../../assets/web-icon.svg';
+import { ReactComponent as CopyIconSvg } from '../../assets/copy-icon.svg';
+import { ReactComponent as CheckIconSvg } from '../../assets/check-icon.svg';
+import { ReactComponent as CancelIconSvg } from '../../assets/cancel-icon.svg';
+
+// Helper function to format message content with bold subheadings
+const formatMessageContent = (content) => {
+  if (!content) return content;
+  
+  // Split by <strong> tags and render appropriately
+  const parts = content.split(/(<strong>.*?<\/strong>)/g);
+  
+  return parts.map((part, index) => {
+    if (part.startsWith('<strong>') && part.endsWith('</strong>')) {
+      // Extract text from <strong> tags and render as bold
+      const text = part.replace(/<\/?strong>/g, '');
+      return <strong key={index}>{text}</strong>;
+    }
+    return <span key={index}>{part}</span>;
+  });
+};
 
 const MessageBubble = ({ message, onApprove, onReject, onEdit, editedContent }) => {
   const isUser = message.role === 'user';
@@ -138,21 +160,18 @@ const MessageBubble = ({ message, onApprove, onReject, onEdit, editedContent }) 
               onClick={() => setIsExpanded(!isExpanded)}
               title={isExpanded ? "Collapse" : "Expand"}
             >
-              {isExpanded ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="18 15 12 9 6 15"></polyline>
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
-              )}
+              <img
+                src={dropdownIcon}
+                alt=""
+                className="dropdown-caret-icon"
+                style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+              />
             </button>
           )}
         </>
       ) : (
         <div className="message-content">
-          {message.content}
+          {formatMessageContent(message.content)}
         </div>
       )}
       
@@ -212,11 +231,7 @@ const MessageBubble = ({ message, onApprove, onReject, onEdit, editedContent }) 
                 <li key={index}>
                   <div className="source-item">
                     <span className="source-icon">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="2" y1="12" x2="22" y2="12"></line>
-                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                      </svg>
+                      <img src={webIcon} alt="" className="source-icon-img" />
                     </span>
                     {isUrl || normalizedSource.includes('.') ? (
                       <a 
@@ -242,33 +257,19 @@ const MessageBubble = ({ message, onApprove, onReject, onEdit, editedContent }) 
       {!isUser && (isPendingApproval || sources.length > 0) && (
         <div className="message-actions">
           <div className="action-left">
-            <button className="copy-btn" onClick={handleCopy} title={copied ? "Copied!" : "Copy"}>
-              {copied ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-              )}
-            </button>
+          <button className="copy-btn" onClick={handleCopy} title={copied ? "Copied!" : "Copy"}>
+            {copied ? <CheckIconSvg className="action-icon" /> : <CopyIconSvg className="action-icon" />}
+          </button>
           </div>
           {isPendingApproval && !isEditing && (
             <div className="action-right">
               <button className="edit-content-btn" onClick={handleEdit}>Edit</button>
               <button className="approve-btn" onClick={handleApprove}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
+              <CheckIconSvg className="action-icon" />
                 <span>Approve</span>
               </button>
               <button className="reject-btn" onClick={handleReject}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
+              <CancelIconSvg className="action-icon" />
                 <span>Reject</span>
               </button>
             </div>

@@ -1,17 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { chatAPI } from '../../services/api';
 import './ChatSessionsPanel.css';
+import plusIcon from '../../assets/plus-icon.svg';
 
-const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId, isNewChat, selectedProjectId, currentProjectName }) => {
+const ANIMATION_DURATION = 200; // ms
+
+const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId, isNewChat, selectedProjectId, currentProjectName, onHoverStart, onHoverEnd }) => {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [shouldRender, setShouldRender] = useState(isOpen);
+  const [isClosing, setIsClosing] = useState(false);
 
   useEffect(() => {
     if (isOpen && selectedProjectId) {
       loadSessions();
     }
   }, [isOpen, selectedProjectId]);
+
+  useEffect(() => {
+    let timeoutId;
+    if (isOpen) {
+      setShouldRender(true);
+      setIsClosing(false);
+    } else if (shouldRender) {
+      setIsClosing(true);
+      timeoutId = setTimeout(() => {
+        setShouldRender(false);
+        setIsClosing(false);
+      }, ANIMATION_DURATION);
+    }
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [isOpen, shouldRender]);
 
   const loadSessions = async () => {
     try {
@@ -64,10 +86,14 @@ const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId,
     onClose();
   };
 
-  if (!isOpen) return null;
+  if (!shouldRender) return null;
 
   return (
-    <div className="chat-sessions-panel">
+    <div 
+      className={`chat-sessions-panel ${isOpen ? 'open' : ''} ${isClosing ? 'closing' : ''}`}
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+    >
       <div className="panel-header">
         <div className="panel-header-title">
           <h2>Chats</h2>
@@ -77,12 +103,6 @@ const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId,
             </span>
           )}
         </div>
-        <button className="close-panel-button" onClick={onClose}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
       </div>
 
       <div className="panel-content">
@@ -90,10 +110,7 @@ const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId,
           className={`new-chat-btn ${isNewChat && !currentSessionId ? 'active' : ''}`} 
           onClick={handleNewChat}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
+          <img src={plusIcon} alt="" className="panel-icon" />
           New Chat
         </button>
 
@@ -117,11 +134,6 @@ const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId,
                 className={`session-item ${currentSessionId === session.session_id && !isNewChat ? 'active' : ''}`}
                 onClick={() => handleSessionClick(session)}
               >
-                <div className="session-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                  </svg>
-                </div>
                 <div className="session-info">
                   <div className="session-title-row">
                     <span className="session-title">{session.title || 'Untitled Chat'}</span>
