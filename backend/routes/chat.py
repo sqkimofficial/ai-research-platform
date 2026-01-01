@@ -473,6 +473,13 @@ def get_session():
                 # Include sources if they exist
                 if 'sources' in msg:
                     serialized_msg['sources'] = msg['sources']
+                # Include pending approval fields if they exist (for approve/reject/insert-with-ai buttons)
+                if 'status' in msg:
+                    serialized_msg['status'] = msg['status']
+                if 'document_content' in msg:
+                    serialized_msg['document_content'] = msg['document_content']
+                if 'pending_content_id' in msg:
+                    serialized_msg['pending_content_id'] = msg['pending_content_id']
                 serialized_messages.append(serialized_msg)
             
             # Get project information
@@ -1537,6 +1544,148 @@ REMINDER: If user provided placement instructions above, you MUST follow them ex
         import traceback
         error_traceback = traceback.format_exc()
         print(f"Error in approve_content: {str(e)}")
+        print(f"Traceback: {error_traceback}")
+        return jsonify({'error': str(e), 'traceback': error_traceback}), 500
+
+@chat_bp.route('/direct-insert', methods=['POST'])
+def direct_insert_content():
+    """Directly insert pending content at the end of the document (no AI placement)"""
+    try:
+        user_id = get_user_id_from_token()
+        if not user_id:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        data = request.get_json()
+        session_id = data.get('session_id')
+        document_id = data.get('document_id')  # Optional: document_id for research documents
+        pending_content_id = data.get('pending_content_id')
+        edited_content = data.get('edited_content')  # Optional edited content
+        
+        if not session_id or not pending_content_id:
+            return jsonify({'error': 'session_id and pending_content_id are required'}), 400
+        
+        # Verify session belongs to user
+        session = ChatSessionModel.get_session(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        if session['user_id'] != user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Get pending content
+        pending_data = ChatSessionModel.get_pending_content(session_id)
+        if not pending_data or pending_data['pending_content_id'] != pending_content_id:
+            return jsonify({'error': 'Pending content not found or already processed'}), 404
+        
+        pending_content = pending_data['pending_content']
+        
+        # Use edited content if provided, otherwise use original
+        original_content = pending_content.get('document_content', '')
+        
+        if edited_content:
+            content_to_insert = edited_content
+            print(f"DEBUG: Using edited content for direct insert (length: {len(edited_content)})")
+        else:
+            content_to_insert = original_content
+        
+        if not content_to_insert.strip():
+            return jsonify({'error': 'No content to insert'}), 400
+        
+        # Get current document content
+        document_content = ''
+        
+        if document_id:
+            # Use research document model
+            document = ResearchDocumentModel.get_document(document_id)
+            if not document:
+                return jsonify({'error': 'Document not found'}), 404
+            
+            if document['user_id'] != user_id:
+                return jsonify({'error': 'Unauthorized'}), 403
+            
+            document_content = document.get('markdown_content', '')
+        else:
+            # Legacy approach: use session-based file storage
+            session_dir = get_session_dir(session_id)
+            doc_path = session_dir / 'doc.md'
+            
+            if os.path.exists(doc_path):
+                with open(doc_path, 'r', encoding='utf-8') as f:
+                    document_content = f.read()
+        
+        # Direct insertion: Append content at the end of the document
+        # If document is empty, just use the new content
+        # If document has content, add a separator and append
+        if document_content.strip():
+            # Add new content at the end with proper spacing
+            updated_document_content = document_content.rstrip() + '\n\n' + content_to_insert
+        else:
+            # Empty document - just use the new content
+            updated_document_content = content_to_insert
+        
+        # Update document
+        try:
+            if document_id:
+                # Update research document in database
+                ResearchDocumentModel.update_document(
+                    document_id,
+                    markdown_content=updated_document_content
+                )
+                
+                # Re-index document for semantic search
+                try:
+                    vector_service.index_document(document_id, updated_document_content)
+                except Exception as index_error:
+                    print(f"Warning: Failed to re-index document: {index_error}")
+            else:
+                # Legacy approach: update file-based document
+                session_dir = get_session_dir(session_id)
+                doc_path = session_dir / 'doc.md'
+                os.makedirs(session_dir, exist_ok=True)
+                with open(doc_path, 'w', encoding='utf-8') as f:
+                    f.write(updated_document_content)
+                
+                # Re-index document for semantic search
+                try:
+                    vector_service.index_document(session_id, updated_document_content)
+                except Exception as index_error:
+                    print(f"Warning: Failed to re-index document: {index_error}")
+            
+        except Exception as e:
+            print(f"Error updating document: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': f'Failed to update document: {str(e)}'}), 500
+        
+        # Clear pending content
+        ChatSessionModel.clear_pending_content(session_id)
+        
+        # Build chat message
+        chat_message = 'Content inserted at the end of the document.'
+        
+        # Add approved message to conversation
+        ChatSessionModel.add_message(
+            session_id,
+            'assistant',
+            chat_message,
+            sources=None,
+            document_content=None,
+            document_structure=None,
+            placement=None,
+            status='approved'
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': chat_message,
+            'placement_applied': 'Content appended at the end of document',
+            'updated_document': updated_document_content[:500] + '...' if len(updated_document_content) > 500 else updated_document_content
+        }), 200
+    
+    except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"Error in direct_insert_content: {str(e)}")
         print(f"Traceback: {error_traceback}")
         return jsonify({'error': str(e), 'traceback': error_traceback}), 500
 

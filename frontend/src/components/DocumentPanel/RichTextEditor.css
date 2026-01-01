@@ -1,0 +1,410 @@
+/* Rich Text Editor Container */
+.rich-text-editor-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: white;
+}
+
+/* TipTap Toolbar */
+.tiptap-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 12px;
+  background-color: #fafafa;
+  border-bottom: 1px solid #e0e0e0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.toolbar-group {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+  border-right: 1px solid #e0e0e0;
+}
+
+.toolbar-group:last-child {
+  border-right: none;
+}
+
+.tiptap-toolbar button {
+  width: 32px;
+  height: 32px;
+  padding: 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: #555;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tiptap-toolbar button:hover {
+  background-color: #e8e8e8;
+  color: #003262;
+}
+
+.tiptap-toolbar button.is-active {
+  background-color: #003262;
+  color: white;
+}
+
+.tiptap-toolbar select {
+  height: 32px;
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: white;
+  font-size: 13px;
+  color: #555;
+  cursor: pointer;
+  min-width: 120px;
+}
+
+.tiptap-toolbar select.font-size-select {
+  min-width: 70px;
+}
+
+.tiptap-toolbar select:hover {
+  border-color: #003262;
+}
+
+.tiptap-toolbar select:focus {
+  outline: none;
+  border-color: #003262;
+}
+
+.tiptap-toolbar .color-picker {
+  width: 32px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  background: white;
+}
+
+.tiptap-toolbar .color-picker:hover {
+  border-color: #003262;
+}
+
+.tiptap-toolbar .highlight-picker {
+  background: linear-gradient(135deg, #ffff00 50%, #ffffff 50%);
+}
+
+/* Editor Content Area */
+.tiptap-editor-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+  min-height: 400px;
+}
+
+.tiptap-editor-content .tiptap {
+  outline: none;
+  font-family: Georgia, serif;
+  font-size: 16px;
+  line-height: 1.8;
+  color: #333;
+  min-height: 100%;
+}
+
+/* Placeholder */
+.tiptap-editor-content .tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #999;
+  font-style: italic;
+  pointer-events: none;
+  height: 0;
+}
+
+/* Typography */
+.tiptap-editor-content .tiptap h1 {
+  font-size: 2em;
+  font-weight: 600;
+  margin: 0.67em 0;
+  color: #1a1a1a;
+}
+
+.tiptap-editor-content .tiptap h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin: 0.75em 0;
+  color: #1a1a1a;
+}
+
+.tiptap-editor-content .tiptap h3 {
+  font-size: 1.17em;
+  font-weight: 600;
+  margin: 0.83em 0;
+  color: #1a1a1a;
+}
+
+.tiptap-editor-content .tiptap p {
+  margin: 0 0 1em 0;
+}
+
+.tiptap-editor-content .tiptap ul,
+.tiptap-editor-content .tiptap ol {
+  padding-left: 1.5em;
+  margin: 0 0 1em 0;
+}
+
+.tiptap-editor-content .tiptap li {
+  margin: 0.25em 0;
+}
+
+.tiptap-editor-content .tiptap li p {
+  margin: 0;
+}
+
+/* Blockquote */
+.tiptap-editor-content .tiptap blockquote {
+  border-left: 4px solid #003262;
+  padding-left: 16px;
+  margin: 1em 0;
+  color: #666;
+  font-style: italic;
+}
+
+/* Links */
+.tiptap-editor-content .tiptap a {
+  color: #003262;
+  text-decoration: underline;
+}
+
+.tiptap-editor-content .tiptap a:hover {
+  color: #004080;
+}
+
+/* Horizontal Rule */
+.tiptap-editor-content .tiptap hr {
+  border: none;
+  border-top: 2px solid #e0e0e0;
+  margin: 2em 0;
+}
+
+/* Code Block Styling */
+.tiptap-editor-content .tiptap pre {
+  background-color: #1e1e1e;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 1em 0;
+  overflow-x: auto;
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.tiptap-editor-content .tiptap pre code {
+  color: #d4d4d4;
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+}
+
+/* Syntax highlighting colors (VS Code Dark+ theme inspired) */
+.tiptap-editor-content .tiptap pre .hljs-keyword,
+.tiptap-editor-content .tiptap pre .hljs-selector-tag {
+  color: #569cd6;
+}
+
+.tiptap-editor-content .tiptap pre .hljs-string,
+.tiptap-editor-content .tiptap pre .hljs-attr {
+  color: #ce9178;
+}
+
+.tiptap-editor-content .tiptap pre .hljs-number,
+.tiptap-editor-content .tiptap pre .hljs-literal {
+  color: #b5cea8;
+}
+
+.tiptap-editor-content .tiptap pre .hljs-comment {
+  color: #6a9955;
+  font-style: italic;
+}
+
+.tiptap-editor-content .tiptap pre .hljs-function,
+.tiptap-editor-content .tiptap pre .hljs-title {
+  color: #dcdcaa;
+}
+
+.tiptap-editor-content .tiptap pre .hljs-variable,
+.tiptap-editor-content .tiptap pre .hljs-name {
+  color: #9cdcfe;
+}
+
+.tiptap-editor-content .tiptap pre .hljs-type,
+.tiptap-editor-content .tiptap pre .hljs-class {
+  color: #4ec9b0;
+}
+
+.tiptap-editor-content .tiptap pre .hljs-punctuation {
+  color: #d4d4d4;
+}
+
+/* Inline code */
+.tiptap-editor-content .tiptap code {
+  background-color: #f0f0f0;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
+  font-size: 0.9em;
+  color: #c7254e;
+}
+
+/* Table Styling */
+.tiptap-editor-content .tiptap table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+  table-layout: fixed;
+  overflow: hidden;
+}
+
+.tiptap-editor-content .tiptap table td,
+.tiptap-editor-content .tiptap table th {
+  border: 2px solid #e0e0e0;
+  padding: 12px 16px;
+  vertical-align: top;
+  position: relative;
+  min-width: 100px;
+}
+
+.tiptap-editor-content .tiptap table th {
+  background-color: #f5f5f5;
+  font-weight: 600;
+  text-align: left;
+  color: #1a1a1a;
+}
+
+.tiptap-editor-content .tiptap table tr:hover td {
+  background-color: #fafafa;
+}
+
+/* Selected cell styling */
+.tiptap-editor-content .tiptap table .selectedCell {
+  background-color: #e3f2fd;
+}
+
+.tiptap-editor-content .tiptap table .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 50, 98, 0.1);
+  pointer-events: none;
+}
+
+/* Column resize handle */
+.tiptap-editor-content .tiptap .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background-color: #003262;
+  pointer-events: none;
+}
+
+.tiptap-editor-content .tiptap .tableWrapper {
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+/* Text alignment */
+.tiptap-editor-content .tiptap [style*="text-align: left"] {
+  text-align: left;
+}
+
+.tiptap-editor-content .tiptap [style*="text-align: center"] {
+  text-align: center;
+}
+
+.tiptap-editor-content .tiptap [style*="text-align: right"] {
+  text-align: right;
+}
+
+.tiptap-editor-content .tiptap [style*="text-align: justify"] {
+  text-align: justify;
+}
+
+/* Highlight/Mark */
+.tiptap-editor-content .tiptap mark {
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* Custom scrollbar for editor content */
+.tiptap-editor-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tiptap-editor-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tiptap-editor-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 50, 98, 0.2);
+  border-radius: 4px;
+}
+
+.tiptap-editor-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 50, 98, 0.4);
+}
+
+/* Focus styles */
+.tiptap-editor-content .tiptap:focus-visible {
+  outline: none;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .tiptap-toolbar {
+    padding: 6px 8px;
+  }
+  
+  .toolbar-group {
+    padding: 0 4px;
+  }
+  
+  .tiptap-toolbar button {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+  
+  .tiptap-toolbar select {
+    min-width: 90px;
+    font-size: 12px;
+  }
+  
+  .tiptap-editor-content {
+    padding: 16px 20px;
+  }
+}
+
+/* Selection styling */
+.tiptap-editor-content .tiptap ::selection {
+  background-color: rgba(0, 50, 98, 0.2);
+}
+
+/* Empty node styling */
+.tiptap-editor-content .tiptap .is-empty::before {
+  color: #adb5bd;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+

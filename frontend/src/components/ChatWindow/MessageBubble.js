@@ -26,7 +26,7 @@ const formatMessageContent = (content) => {
   });
 };
 
-const MessageBubble = ({ message, onApprove, onReject, onEdit, editedContent }) => {
+const MessageBubble = ({ message, onApprove, onInsertWithAI, onReject, onEdit, editedContent }) => {
   const isUser = message.role === 'user';
   const sources = message.sources || [];
   const attachedSections = message.attachedSections || [];
@@ -98,9 +98,18 @@ const MessageBubble = ({ message, onApprove, onReject, onEdit, editedContent }) 
   };
   
   const handleApprove = () => {
+    // Direct insertion at cursor or end of document (no AI placement)
     const contentToApprove = isEditing ? localEditedContent : documentContent;
     if (onApprove && pendingContentId) {
       onApprove(pendingContentId, contentToApprove);
+    }
+  };
+
+  const handleInsertWithAI = () => {
+    // Use AI (Stage 2) to intelligently place content in document
+    const contentToApprove = isEditing ? localEditedContent : documentContent;
+    if (onInsertWithAI && pendingContentId) {
+      onInsertWithAI(pendingContentId, contentToApprove);
     }
   };
   
@@ -264,12 +273,15 @@ const MessageBubble = ({ message, onApprove, onReject, onEdit, editedContent }) 
           {isPendingApproval && !isEditing && (
             <div className="action-right">
               <button className="edit-content-btn" onClick={handleEdit}>Edit</button>
-              <button className="approve-btn" onClick={handleApprove}>
-              <CheckIconSvg className="action-icon" />
+              <button className="approve-btn" onClick={handleApprove} title="Insert at cursor position (or end of document)">
+                <CheckIconSvg className="action-icon" />
                 <span>Approve</span>
               </button>
+              <button className="insert-with-ai-btn" onClick={handleInsertWithAI} title="Let AI decide where to place content">
+                <span>Insert with AI</span>
+              </button>
               <button className="reject-btn" onClick={handleReject}>
-              <CancelIconSvg className="action-icon" />
+                <CancelIconSvg className="action-icon" />
                 <span>Reject</span>
               </button>
             </div>

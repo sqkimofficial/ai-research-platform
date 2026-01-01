@@ -84,6 +84,15 @@ export const chatAPI = {
       edited_content: editedContent
     });
   },
+  directInsertContent: (sessionId, pendingContentId, editedContent = null, documentId = null) => {
+    // Direct insertion at cursor or end of document (no AI placement)
+    return api.post('/api/chat/direct-insert', {
+      session_id: sessionId,
+      document_id: documentId,
+      pending_content_id: pendingContentId,
+      edited_content: editedContent
+    });
+  },
   rejectContent: (sessionId, pendingContentId) => {
     return api.post('/api/chat/reject', {
       session_id: sessionId,

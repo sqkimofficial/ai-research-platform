@@ -278,6 +278,103 @@
   margin-bottom: 0;
 }
 
+/* Document Editor Wrapper */
+.document-editor-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: white;
+}
+
+.document-editor-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  background-color: #fafafa;
+  border-bottom: 1px solid #e0e0e0;
+  flex-shrink: 0;
+}
+
+.document-editor-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.document-editor-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Undo/Redo buttons */
+.doc-undo-btn,
+.doc-redo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px !important;
+  background-color: #f5f5f5 !important;
+  border-color: #ddd !important;
+  color: #555 !important;
+}
+
+.doc-undo-btn:hover,
+.doc-redo-btn:hover {
+  background-color: #e8e8e8 !important;
+  color: #333 !important;
+}
+
+.doc-undo-btn svg,
+.doc-redo-btn svg {
+  flex-shrink: 0;
+}
+
+/* Save status indicator */
+.save-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.save-status-indicator.saving {
+  color: #6b7280;
+  background-color: #f3f4f6;
+}
+
+.save-status-indicator.saved {
+  color: #059669;
+  background-color: #d1fae5;
+}
+
+.save-status-indicator.error {
+  color: #dc2626;
+  background-color: #fee2e2;
+}
+
+/* Save spinner animation */
+.save-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #d1d5db;
+  border-top-color: #6b7280;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .document-preview-actions {
   position: absolute;
   top: 16px;

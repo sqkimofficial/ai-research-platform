@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { documentAPI, projectAPI, highlightsAPI, pdfAPI } from '../../services/api';
 import { getToken } from '../../utils/auth';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
+import { markdownToHtml, htmlToMarkdown } from '../../utils/markdownConverter';
+import RichTextEditor from './RichTextEditor';
 import AddNewTabView from './AddNewTabView';
 import './DocumentPanel.css';
 import { ReactComponent as CancelIconSvg } from '../../assets/cancel-icon.svg';
@@ -196,8 +195,16 @@ const FileDocumentIconLarge = () => (
 const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, highlightsTabTrigger, pdfTabTrigger, researchDocsTabTrigger }) => {
   const [documents, setDocuments] = useState([]); // All open documents
   const [activeDocumentId, setActiveDocumentId] = useState(null); // Currently active tab
-  const [content, setContent] = useState('');
-  const [isEditing, setIsEditing] = useState(false);
+  const [content, setContent] = useState(''); // Markdown content (storage format)
+  const [htmlContent, setHtmlContent] = useState(''); // HTML content (for Quill editor)
+  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved', 'saving', 'error'
+  
+  // Refs for auto-save
+  const editorRef = useRef(null);
+  const debounceTimerRef = useRef(null);
+  const maxIntervalTimerRef = useRef(null);
+  const lastSaveTimeRef = useRef(Date.now());
+  const pendingContentRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showDocumentList, setShowDocumentList] = useState(false);
@@ -207,12 +214,12 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const [newDocumentTitle, setNewDocumentTitle] = useState('');
   const [activeTabId, setActiveTabId] = useState(null); // Can be document_id, highlights_tab_id, or pdf_tab_id
   const [activeTabType, setActiveTabType] = useState('document'); // 'document', 'highlights', or 'pdf'
-  const [highlightsTabs, setHighlightsTabs] = useState([]); // Array of { id, selectedUrlData }
+  const [highlightsTabs, setHighlightsTabs] = useState([]); // Array of { id, selectedUrlData, createdAt }
   const [highlightsUrls, setHighlightsUrls] = useState([]); // URLs for current project
   const [highlightsLoading, setHighlightsLoading] = useState(false);
   
   // PDF-related state
-  const [pdfTabs, setPdfTabs] = useState([]); // Array of { id, selectedPdfData }
+  const [pdfTabs, setPdfTabs] = useState([]); // Array of { id, selectedPdfData, createdAt }
   const [pdfs, setPdfs] = useState([]); // PDFs for current project
   const [pdfLoading, setPdfLoading] = useState(false);
   const [uploadingPdf, setUploadingPdf] = useState(false);
@@ -222,8 +229,16 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const [isDocMenuOpen, setIsDocMenuOpen] = useState(false);
   
   // Research Output Documents state
-  const [researchDocsTabs, setResearchDocsTabs] = useState([]); // Array of { id }
+  const [researchDocsTabs, setResearchDocsTabs] = useState([]); // Array of { id, createdAt }
   const [documentWordCounts, setDocumentWordCounts] = useState({}); // { document_id: wordCount }
+  
+  // Pending new tab view state - shows the list view without creating an actual tab
+  // Can be 'highlights', 'pdf', 'researchdocs', or null
+  const [pendingNewTabType, setPendingNewTabType] = useState(null);
+  
+  // Tab order array - stores tab IDs in creation order for proper rendering
+  // Each entry is { id: string, type: 'document' | 'highlights' | 'pdf' | 'researchdocs' }
+  const [tabOrder, setTabOrder] = useState([]);
   
   // PDF highlight note editing state
   const [editingNoteId, setEditingNoteId] = useState(null);
@@ -355,42 +370,42 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   };
 
 
-  // Create new highlights tab when trigger changes
+  // Show pending highlights view when trigger changes (no tab created yet)
   useEffect(() => {
     if (highlightsTabTrigger > 0) {
-      const newTabId = `highlights-${Date.now()}`;
-      const newTab = { id: newTabId, selectedUrlData: null };
-      setHighlightsTabs(prev => [...prev, newTab]);
-      setActiveTabId(newTabId);
+      // Just show the pending view - don't create a tab yet
+      setPendingNewTabType('highlights');
+      setActiveTabId(null);
       setActiveTabType('highlights');
+      
       if (selectedProjectId) {
         loadHighlightsForProject(selectedProjectId);
       }
     }
   }, [highlightsTabTrigger]);
 
-  // Create new PDF tab when trigger changes
+  // Show pending PDF view when trigger changes (no tab created yet)
   useEffect(() => {
     if (pdfTabTrigger > 0) {
-      const newTabId = `pdf-${Date.now()}`;
-      const newTab = { id: newTabId, selectedPdfData: null };
-      setPdfTabs(prev => [...prev, newTab]);
-      setActiveTabId(newTabId);
+      // Just show the pending view - don't create a tab yet
+      setPendingNewTabType('pdf');
+      setActiveTabId(null);
       setActiveTabType('pdf');
+      
       if (selectedProjectId) {
         loadPdfsForProject(selectedProjectId);
       }
     }
   }, [pdfTabTrigger]);
 
-  // Create new Research Docs tab when trigger changes
+  // Show pending Research Docs view when trigger changes (no tab created yet)
   useEffect(() => {
     if (researchDocsTabTrigger > 0) {
-      const newTabId = `researchdocs-${Date.now()}`;
-      const newTab = { id: newTabId };
-      setResearchDocsTabs(prev => [...prev, newTab]);
-      setActiveTabId(newTabId);
+      // Just show the pending view - don't create a tab yet
+      setPendingNewTabType('researchdocs');
+      setActiveTabId(null);
       setActiveTabType('researchdocs');
+      
       if (selectedProjectId) {
         loadAvailableDocuments(selectedProjectId);
       }
@@ -436,10 +451,21 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
         extractionStatus: highlightsResponse.data.extraction_status,
         extractionError: highlightsResponse.data.extraction_error
       };
-      // Update the selectedPdfData for the active PDF tab
-      setPdfTabs(prev => prev.map(tab => 
-        tab.id === activeTabId ? { ...tab, selectedPdfData: selectedData } : tab
-      ));
+      
+      // If we're in pending state (no tab created yet), create a new tab with the selected data
+      if (pendingNewTabType === 'pdf') {
+        const newTabId = `pdf-${Date.now()}`;
+        const newTab = { id: newTabId, selectedPdfData: selectedData, createdAt: Date.now() };
+        setPdfTabs(prev => [...prev, newTab]);
+        setTabOrder(prev => [...prev, { id: newTabId, type: 'pdf' }]);
+        setActiveTabId(newTabId);
+        setPendingNewTabType(null); // Clear pending state
+      } else {
+        // Update the selectedPdfData for the active PDF tab
+        setPdfTabs(prev => prev.map(tab => 
+          tab.id === activeTabId ? { ...tab, selectedPdfData: selectedData } : tab
+        ));
+      }
     } catch (err) {
       console.error('Failed to load PDF highlights:', err);
       setError('Failed to load PDF highlights.');
@@ -707,10 +733,21 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       urlDoc,
       highlights: urlDoc.highlights || []
     };
-    // Update the selectedUrlData for the active highlights tab
-    setHighlightsTabs(prev => prev.map(tab => 
-      tab.id === activeTabId ? { ...tab, selectedUrlData: selectedData } : tab
-    ));
+    
+    // If we're in pending state (no tab created yet), create a new tab with the selected data
+    if (pendingNewTabType === 'highlights') {
+      const newTabId = `highlights-${Date.now()}`;
+      const newTab = { id: newTabId, selectedUrlData: selectedData, createdAt: Date.now() };
+      setHighlightsTabs(prev => [...prev, newTab]);
+      setTabOrder(prev => [...prev, { id: newTabId, type: 'highlights' }]);
+      setActiveTabId(newTabId);
+      setPendingNewTabType(null); // Clear pending state
+    } else {
+      // Update the selectedUrlData for the active highlights tab
+      setHighlightsTabs(prev => prev.map(tab => 
+        tab.id === activeTabId ? { ...tab, selectedUrlData: selectedData } : tab
+      ));
+    }
   };
 
   const handleBackToTable = () => {
@@ -960,7 +997,18 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const fetchDocument = async (documentId) => {
     if (!documentId) {
       setContent('');
+      setHtmlContent('');
       return;
+    }
+
+    // Clear any pending auto-save timers
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    if (maxIntervalTimerRef.current) {
+      clearTimeout(maxIntervalTimerRef.current);
+      maxIntervalTimerRef.current = null;
     }
 
     setLoading(true);
@@ -969,6 +1017,12 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       const response = await documentAPI.getDocument(null, documentId);
       const markdownContent = response.data.content || '';
       setContent(markdownContent);
+      // Convert Markdown to HTML for Quill editor
+      const html = markdownToHtml(markdownContent);
+      setHtmlContent(html);
+      setSaveStatus('saved');
+      lastSaveTimeRef.current = Date.now();
+      pendingContentRef.current = null;
     } catch (err) {
       const errorMessage = err.response?.data?.error || err.message || 'Failed to load document';
       setError(errorMessage);
@@ -984,6 +1038,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       fetchDocument(activeDocumentId);
     } else {
       setContent('');
+      setHtmlContent('');
     }
   }, [activeDocumentId]);
 
@@ -1003,43 +1058,141 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   };
 
 
-  const handleEdit = () => {
-    setIsEditing(true);
-  };
+  // Auto-save constants
+  const DEBOUNCE_DELAY = 2000; // 2 seconds after user stops typing
+  const MAX_SAVE_INTERVAL = 30000; // Force save every 30 seconds
 
-  const handleSave = async () => {
-    if (!activeDocumentId) {
-      setError('No active document');
+  // Perform the actual save operation
+  const performSave = useCallback(async (htmlContentToSave) => {
+    if (!activeDocumentId || !htmlContentToSave) {
       return;
     }
 
-    setLoading(true);
-    setError('');
+    setSaveStatus('saving');
     try {
-      await documentAPI.saveDocument(null, content, 'replace', activeDocumentId);
-      setIsEditing(false);
-      await fetchDocument(activeDocumentId);
+      // Convert HTML from Quill to Markdown for storage
+      const markdownContent = htmlToMarkdown(htmlContentToSave);
+      
+      await documentAPI.saveDocument(null, markdownContent, 'replace', activeDocumentId);
+      setContent(markdownContent);
+      setSaveStatus('saved');
+      lastSaveTimeRef.current = Date.now();
+      pendingContentRef.current = null;
       
       // Update word count for this document
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = htmlContentToSave;
+      const textContent = tempDiv.textContent || tempDiv.innerText || '';
       setDocumentWordCounts(prev => ({
         ...prev,
-        [activeDocumentId]: getWordCount(content)
+        [activeDocumentId]: getWordCount(textContent)
       }));
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to save document');
+      setSaveStatus('error');
       console.error('Failed to save document:', err);
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [activeDocumentId]);
 
-  const handleCancel = () => {
-    setIsEditing(false);
-    // Reload original content
-    if (activeDocumentId) {
-      fetchDocument(activeDocumentId);
+  // Schedule auto-save with debounce
+  const scheduleAutoSave = useCallback((newHtmlContent) => {
+    // Store pending content
+    pendingContentRef.current = newHtmlContent;
+
+    // Clear existing debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
     }
-  };
+
+    // Set new debounce timer (save after 2s of inactivity)
+    debounceTimerRef.current = setTimeout(() => {
+      if (pendingContentRef.current) {
+        performSave(pendingContentRef.current);
+      }
+    }, DEBOUNCE_DELAY);
+
+    // Check if we need to force save (max interval)
+    const timeSinceLastSave = Date.now() - lastSaveTimeRef.current;
+    if (timeSinceLastSave >= MAX_SAVE_INTERVAL) {
+      // Clear debounce and save immediately
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      performSave(newHtmlContent);
+    } else if (!maxIntervalTimerRef.current) {
+      // Set max interval timer if not already set
+      const remainingTime = MAX_SAVE_INTERVAL - timeSinceLastSave;
+      maxIntervalTimerRef.current = setTimeout(() => {
+        if (pendingContentRef.current) {
+          // Clear debounce timer
+          if (debounceTimerRef.current) {
+            clearTimeout(debounceTimerRef.current);
+          }
+          performSave(pendingContentRef.current);
+        }
+        maxIntervalTimerRef.current = null;
+      }, remainingTime);
+    }
+  }, [performSave]);
+
+  // Handle content change from Quill editor
+  const handleEditorChange = useCallback((newHtmlContent) => {
+    setHtmlContent(newHtmlContent);
+    scheduleAutoSave(newHtmlContent);
+  }, [scheduleAutoSave]);
+
+  // Undo handler
+  const handleUndo = useCallback(() => {
+    if (editorRef.current) {
+      editorRef.current.undo();
+    }
+  }, []);
+
+  // Redo handler
+  const handleRedo = useCallback(() => {
+    if (editorRef.current) {
+      editorRef.current.redo();
+    }
+  }, []);
+
+  // Save on page unload/blur
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (pendingContentRef.current && activeDocumentId) {
+        // Try to save synchronously before page unloads
+        const markdownContent = htmlToMarkdown(pendingContentRef.current);
+        navigator.sendBeacon(
+          `/api/document`,
+          JSON.stringify({
+            document_id: activeDocumentId,
+            content: markdownContent,
+            mode: 'replace'
+          })
+        );
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && pendingContentRef.current) {
+        performSave(pendingContentRef.current);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      
+      // Clean up timers on unmount
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      if (maxIntervalTimerRef.current) {
+        clearTimeout(maxIntervalTimerRef.current);
+      }
+    };
+  }, [activeDocumentId, performSave]);
 
   const handleAddDocument = () => {
     // If we're on a different tab type (highlights or PDF), switch to document tab first
@@ -1088,9 +1241,13 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       };
       
       setDocuments([...documents, newDoc]);
+      setTabOrder(prev => [...prev, { id: newDocId, type: 'document' }]);
       setActiveDocumentId(newDocId);
+      setActiveTabId(newDocId);
+      setActiveTabType('document');
       setShowDocumentList(false);
       setNewDocumentTitle('');
+      setPendingNewTabType(null); // Clear any pending state
       
       // Set initial word count for new document (0 words)
       setDocumentWordCounts(prev => ({
@@ -1115,32 +1272,59 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     const existingDoc = documents.find(doc => doc.document_id === documentId);
     if (existingDoc) {
       setActiveDocumentId(documentId);
+      setActiveTabId(documentId);
+      setActiveTabType('document');
     } else {
       // Add to open documents
       const doc = availableDocuments.find(d => d.document_id === documentId);
       if (doc) {
         setDocuments([...documents, doc]);
+        setTabOrder(prev => [...prev, { id: documentId, type: 'document' }]);
         setActiveDocumentId(documentId);
+        setActiveTabId(documentId);
+        setActiveTabType('document');
       }
     }
     setShowDocumentList(false);
+    setPendingNewTabType(null); // Clear any pending state
     setError('');
+  };
+
+  // Helper to switch to another tab after closing one
+  const switchToNextTab = (closedTabId) => {
+    // Find the closed tab's position in tabOrder
+    const closedIndex = tabOrder.findIndex(t => t.id === closedTabId);
+    const remainingTabs = tabOrder.filter(t => t.id !== closedTabId);
+    
+    if (remainingTabs.length === 0) {
+      // No tabs left
+      setActiveTabId(null);
+      setActiveDocumentId(null);
+      setActiveTabType('document');
+      setShowDocumentList(true);
+      return;
+    }
+    
+    // Try to switch to the next tab (or previous if closing the last one)
+    const nextIndex = Math.min(closedIndex, remainingTabs.length - 1);
+    const nextTab = remainingTabs[nextIndex];
+    
+    setActiveTabId(nextTab.id);
+    setActiveTabType(nextTab.type);
+    if (nextTab.type === 'document') {
+      setActiveDocumentId(nextTab.id);
+    }
   };
 
   const handleCloseTab = (documentId, e) => {
     e.stopPropagation();
     const newDocuments = documents.filter(doc => doc.document_id !== documentId);
     setDocuments(newDocuments);
+    setTabOrder(prev => prev.filter(t => t.id !== documentId));
     
-    // If closing active tab, switch to another or clear
-    if (documentId === activeDocumentId) {
-      if (newDocuments.length > 0) {
-        setActiveDocumentId(newDocuments[0].document_id);
-      } else {
-        setActiveDocumentId(null);
-        // Show document list when all tabs are closed
-        setShowDocumentList(true);
-      }
+    // If closing active tab, switch to another
+    if (documentId === activeDocumentId || documentId === activeTabId) {
+      switchToNextTab(documentId);
     }
   };
 
@@ -1148,23 +1332,11 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     e.stopPropagation();
     const newHighlightsTabs = highlightsTabs.filter(tab => tab.id !== tabId);
     setHighlightsTabs(newHighlightsTabs);
+    setTabOrder(prev => prev.filter(t => t.id !== tabId));
     
-    // If closing active tab, switch to another or go to document
+    // If closing active tab, switch to another
     if (tabId === activeTabId) {
-      if (newHighlightsTabs.length > 0) {
-        setActiveTabId(newHighlightsTabs[0].id);
-        setActiveTabType('highlights');
-      } else if (documents.length > 0) {
-        setActiveTabId(activeDocumentId || documents[0].document_id);
-        setActiveTabType('document');
-        if (!activeDocumentId) {
-          setActiveDocumentId(documents[0].document_id);
-        }
-      } else {
-        setActiveTabId(null);
-        setActiveTabType('document');
-        setShowDocumentList(true);
-      }
+      switchToNextTab(tabId);
     }
   };
 
@@ -1172,26 +1344,11 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     e.stopPropagation();
     const newPdfTabs = pdfTabs.filter(tab => tab.id !== tabId);
     setPdfTabs(newPdfTabs);
+    setTabOrder(prev => prev.filter(t => t.id !== tabId));
     
-    // If closing active tab, switch to another tab or go to document
+    // If closing active tab, switch to another
     if (tabId === activeTabId) {
-      if (newPdfTabs.length > 0) {
-        setActiveTabId(newPdfTabs[0].id);
-        setActiveTabType('pdf');
-      } else if (highlightsTabs.length > 0) {
-        setActiveTabId(highlightsTabs[0].id);
-        setActiveTabType('highlights');
-      } else if (documents.length > 0) {
-        setActiveTabId(activeDocumentId || documents[0].document_id);
-        setActiveTabType('document');
-        if (!activeDocumentId) {
-          setActiveDocumentId(documents[0].document_id);
-        }
-      } else {
-        setActiveTabId(null);
-        setActiveTabType('document');
-        setShowDocumentList(true);
-      }
+      switchToNextTab(tabId);
     }
   };
 
@@ -1199,35 +1356,18 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     e.stopPropagation();
     const newResearchDocsTabs = researchDocsTabs.filter(tab => tab.id !== tabId);
     setResearchDocsTabs(newResearchDocsTabs);
+    setTabOrder(prev => prev.filter(t => t.id !== tabId));
     
-    // If closing active tab, switch to another tab or go to document
+    // If closing active tab, switch to another
     if (tabId === activeTabId) {
-      if (newResearchDocsTabs.length > 0) {
-        setActiveTabId(newResearchDocsTabs[0].id);
-        setActiveTabType('researchdocs');
-      } else if (pdfTabs.length > 0) {
-        setActiveTabId(pdfTabs[0].id);
-        setActiveTabType('pdf');
-      } else if (highlightsTabs.length > 0) {
-        setActiveTabId(highlightsTabs[0].id);
-        setActiveTabType('highlights');
-      } else if (documents.length > 0) {
-        setActiveTabId(activeDocumentId || documents[0].document_id);
-        setActiveTabType('document');
-        if (!activeDocumentId) {
-          setActiveDocumentId(documents[0].document_id);
-        }
-      } else {
-        setActiveTabId(null);
-        setActiveTabType('document');
-        setShowDocumentList(true);
-      }
+      switchToNextTab(tabId);
     }
   };
 
   const handleHighlightsTabClick = (tabId) => {
     setActiveTabId(tabId);
     setActiveTabType('highlights');
+    setPendingNewTabType(null); // Clear pending state when clicking existing tab
     if (highlightsUrls.length === 0 && selectedProjectId) {
       loadHighlightsForProject(selectedProjectId);
     }
@@ -1236,6 +1376,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const handlePdfTabClick = (tabId) => {
     setActiveTabId(tabId);
     setActiveTabType('pdf');
+    setPendingNewTabType(null); // Clear pending state when clicking existing tab
     if (pdfs.length === 0 && selectedProjectId) {
       loadPdfsForProject(selectedProjectId);
     }
@@ -1244,6 +1385,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const handleResearchDocsTabClick = (tabId) => {
     setActiveTabId(tabId);
     setActiveTabType('researchdocs');
+    setPendingNewTabType(null); // Clear pending state when clicking existing tab
     if (availableDocuments.length === 0 && selectedProjectId) {
       loadAvailableDocuments(selectedProjectId);
     }
@@ -1253,6 +1395,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     setActiveTabId(documentId);
     setActiveTabType('document');
     setActiveDocumentId(documentId);
+    setPendingNewTabType(null); // Clear pending state when clicking existing tab
   };
 
   const getActiveDocument = () => {
@@ -1311,6 +1454,11 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
   // Handle selecting a research doc from the list - opens it as a regular editable document tab
   const handleResearchDocClick = (doc) => {
+    // Clear pending state if we were in research docs pending view
+    if (pendingNewTabType === 'researchdocs') {
+      setPendingNewTabType(null);
+    }
+    
     // Check if document is already open
     const existingDoc = documents.find(d => d.document_id === doc.document_id);
     if (existingDoc) {
@@ -1321,6 +1469,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     } else {
       // Add to open documents and switch to it
       setDocuments([...documents, doc]);
+      setTabOrder(prev => [...prev, { id: doc.document_id, type: 'document' }]);
       setActiveDocumentId(doc.document_id);
       setActiveTabId(doc.document_id);
       setActiveTabType('document');
@@ -1334,80 +1483,117 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     <div className="document-panel">
       {/* Tab Bar */}
       <div className="document-tabs">
-        {/* Document tabs */}
-        {documents.map((doc) => (
-          <div
-            key={doc.document_id}
-            className={`document-tab ${activeTabType === 'document' && doc.document_id === activeDocumentId ? 'active' : ''}`}
-            onClick={() => handleDocumentTabClick(doc.document_id)}
-          >
-            <span className="tab-title">{doc.title || 'Untitled'}</span>
-            <button
-              className="tab-close-button"
-              onClick={(e) => handleCloseTab(doc.document_id, e)}
-              title="Close tab"
-            >
-              <CloseIcon />
-            </button>
-          </div>
-        ))}
-        {/* Highlights tabs */}
-        {highlightsTabs.map((tab, index) => (
-          <div
-            key={tab.id}
-            className={`document-tab ${activeTabType === 'highlights' && activeTabId === tab.id ? 'active' : ''}`}
-            onClick={() => handleHighlightsTabClick(tab.id)}
-          >
-            <span className="tab-title">
-              Web Highlights {highlightsTabs.length > 1 ? index + 1 : ''}
-            </span>
-            <button
-              className="tab-close-button"
-              onClick={(e) => handleCloseHighlightsTab(tab.id, e)}
-              title="Close highlights tab"
-            >
-              <CloseIcon />
-            </button>
-          </div>
-        ))}
-        {/* PDF/Image tabs */}
-        {pdfTabs.map((tab, index) => (
-          <div
-            key={tab.id}
-            className={`document-tab ${activeTabType === 'pdf' && activeTabId === tab.id ? 'active' : ''}`}
-            onClick={() => handlePdfTabClick(tab.id)}
-          >
-            <span className="tab-title">
-              Highlight Docs {pdfTabs.length > 1 ? index + 1 : ''}
-            </span>
-            <button
-              className="tab-close-button"
-              onClick={(e) => handleClosePdfTab(tab.id, e)}
-              title="Close Highlight Docs tab"
-            >
-              <CloseIcon />
-            </button>
-          </div>
-        ))}
-        {/* Research Output Documents tabs */}
-        {researchDocsTabs.map((tab, index) => (
-          <div
-            key={tab.id}
-            className={`document-tab ${activeTabType === 'researchdocs' && activeTabId === tab.id ? 'active' : ''}`}
-            onClick={() => handleResearchDocsTabClick(tab.id)}
-          >
-            <span className="tab-title">
-              Research Docs {researchDocsTabs.length > 1 ? index + 1 : ''}
-            </span>
-            <button
-              className="tab-close-button"
-              onClick={(e) => handleCloseResearchDocsTab(tab.id, e)}
-              title="Close Research Docs tab"
-            >
-              <CloseIcon />
-            </button>
-          </div>
-        ))}
+        {/* Render tabs in creation order using tabOrder */}
+        {tabOrder.map((tabEntry) => {
+          if (tabEntry.type === 'document') {
+            const doc = documents.find(d => d.document_id === tabEntry.id);
+            if (!doc) return null;
+            // For documents: use title, or "Untitled X" for untitled docs
+            const getDocTabTitle = () => {
+              if (doc.title && doc.title.trim()) return doc.title;
+              // Count untitled docs up to this one for numbering
+              const docIndex = documents.findIndex(d => d.document_id === doc.document_id);
+              const untitledCount = documents.slice(0, docIndex + 1).filter(d => !d.title || !d.title.trim()).length;
+              return untitledCount > 1 ? `Untitled ${untitledCount}` : 'Untitled';
+            };
+            return (
+              <div
+                key={doc.document_id}
+                className={`document-tab ${activeTabType === 'document' && doc.document_id === activeDocumentId ? 'active' : ''}`}
+                onClick={() => handleDocumentTabClick(doc.document_id)}
+              >
+                <span className="tab-title">{getDocTabTitle()}</span>
+                <button
+                  className="tab-close-button"
+                  onClick={(e) => handleCloseTab(doc.document_id, e)}
+                  title="Close tab"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            );
+          } else if (tabEntry.type === 'highlights') {
+            const tab = highlightsTabs.find(t => t.id === tabEntry.id);
+            if (!tab) return null;
+            // For web highlights: use page_title if URL is selected, otherwise "Web Highlights"
+            const getHighlightsTabTitle = () => {
+              if (tab.selectedUrlData?.urlDoc?.page_title) {
+                return tab.selectedUrlData.urlDoc.page_title;
+              }
+              // Fallback for tabs without selected URL
+              const tabIndex = highlightsTabs.filter(t => !t.selectedUrlData?.urlDoc?.page_title).findIndex(t => t.id === tab.id);
+              return tabIndex > 0 ? `Web Highlights ${tabIndex + 1}` : 'Web Highlights';
+            };
+            return (
+              <div
+                key={tab.id}
+                className={`document-tab ${activeTabType === 'highlights' && activeTabId === tab.id ? 'active' : ''}`}
+                onClick={() => handleHighlightsTabClick(tab.id)}
+              >
+                <span className="tab-title">{getHighlightsTabTitle()}</span>
+                <button
+                  className="tab-close-button"
+                  onClick={(e) => handleCloseHighlightsTab(tab.id, e)}
+                  title="Close highlights tab"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            );
+          } else if (tabEntry.type === 'pdf') {
+            const tab = pdfTabs.find(t => t.id === tabEntry.id);
+            if (!tab) return null;
+            // For PDF/document highlights: use filename if PDF is selected, otherwise "Highlight Docs"
+            const getPdfTabTitle = () => {
+              if (tab.selectedPdfData?.pdf?.filename) {
+                return tab.selectedPdfData.pdf.filename;
+              }
+              // Fallback for tabs without selected PDF
+              const tabIndex = pdfTabs.filter(t => !t.selectedPdfData?.pdf?.filename).findIndex(t => t.id === tab.id);
+              return tabIndex > 0 ? `Highlight Docs ${tabIndex + 1}` : 'Highlight Docs';
+            };
+            return (
+              <div
+                key={tab.id}
+                className={`document-tab ${activeTabType === 'pdf' && activeTabId === tab.id ? 'active' : ''}`}
+                onClick={() => handlePdfTabClick(tab.id)}
+              >
+                <span className="tab-title">{getPdfTabTitle()}</span>
+                <button
+                  className="tab-close-button"
+                  onClick={(e) => handleClosePdfTab(tab.id, e)}
+                  title="Close Highlight Docs tab"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            );
+          } else if (tabEntry.type === 'researchdocs') {
+            const tab = researchDocsTabs.find(t => t.id === tabEntry.id);
+            if (!tab) return null;
+            // For research docs tabs: these show a grid, so use "Research Docs" with numbering if multiple
+            const researchTabIndex = researchDocsTabs.findIndex(t => t.id === tab.id);
+            return (
+              <div
+                key={tab.id}
+                className={`document-tab ${activeTabType === 'researchdocs' && activeTabId === tab.id ? 'active' : ''}`}
+                onClick={() => handleResearchDocsTabClick(tab.id)}
+              >
+                <span className="tab-title">
+                  {researchDocsTabs.length > 1 ? `Research Docs ${researchTabIndex + 1}` : 'Research Docs'}
+                </span>
+                <button
+                  className="tab-close-button"
+                  onClick={(e) => handleCloseResearchDocsTab(tab.id, e)}
+                  title="Close Research Docs tab"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            );
+          }
+          return null;
+        })}
         {/* Add document button - always visible */}
         <button
           className="add-tab-button"
@@ -2241,8 +2427,9 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                 onOpenUrlHighlight={(urlDoc) => {
                   // Create a new highlights tab and open this URL
                   const newTabId = `highlights-${Date.now()}`;
-                  const newTab = { id: newTabId, selectedUrlData: null };
+                  const newTab = { id: newTabId, selectedUrlData: null, createdAt: Date.now() };
                   setHighlightsTabs(prev => [...prev, newTab]);
+                  setTabOrder(prev => [...prev, { id: newTabId, type: 'highlights' }]);
                   setActiveTabId(newTabId);
                   setActiveTabType('highlights');
                   setShowDocumentList(false);
@@ -2254,8 +2441,9 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                 onOpenPdfDocument={(pdf) => {
                   // Create a new PDF tab and open this PDF
                   const newTabId = `pdf-${Date.now()}`;
-                  const newTab = { id: newTabId, selectedPdfData: null };
+                  const newTab = { id: newTabId, selectedPdfData: null, createdAt: Date.now() };
                   setPdfTabs(prev => [...prev, newTab]);
+                  setTabOrder(prev => [...prev, { id: newTabId, type: 'pdf' }]);
                   setActiveTabId(newTabId);
                   setActiveTabType('pdf');
                   setShowDocumentList(false);
@@ -2267,8 +2455,9 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                 onUploadPdf={() => {
                   // Create a PDF tab and trigger file upload
                   const newTabId = `pdf-${Date.now()}`;
-                  const newTab = { id: newTabId, selectedPdfData: null };
+                  const newTab = { id: newTabId, selectedPdfData: null, createdAt: Date.now() };
                   setPdfTabs(prev => [...prev, newTab]);
+                  setTabOrder(prev => [...prev, { id: newTabId, type: 'pdf' }]);
                   setActiveTabId(newTabId);
                   setActiveTabType('pdf');
                   setShowDocumentList(false);
@@ -2280,74 +2469,93 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
               />
             )}
             {!loading && !error && activeDocumentId && !showDocumentList && (
-          <>
-            {isEditing ? (
-              <textarea
-                className="document-editor"
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                style={{
-                  minHeight: '400px',
-                  width: '100%',
-                  padding: '20px',
-                  border: '1px solid var(--color-outline)',
-                  borderRadius: '4px',
-                  outline: 'none',
-                  fontFamily: 'Monaco, "Courier New", monospace',
-                  fontSize: '14px',
-                  lineHeight: '1.6',
-                  backgroundColor: 'var(--color-chat-bg)',
-                  resize: 'vertical'
-                }}
-              />
-            ) : (
-              <div className="document-preview markdown-body">
-                <div className="document-preview-actions">
-                  <button type="button" className="doc-action-btn doc-references-btn">References</button>
-                  <div className="doc-menu-wrapper" ref={docMenuRef}>
-                    <button
-                      type="button"
-                      className={`doc-action-btn doc-menu-btn ${isDocMenuOpen ? 'open' : ''}`}
-                      aria-label="Document options"
-                      aria-expanded={isDocMenuOpen}
-                      onClick={toggleDocMenu}
+              <div className="document-editor-wrapper">
+                <div className="document-editor-toolbar">
+                  <div className="document-editor-actions-left">
+                    <button 
+                      type="button" 
+                      className="doc-action-btn doc-undo-btn"
+                      onClick={handleUndo}
+                      title="Undo (Ctrl+Z)"
                     >
-                      <MenuIcon />
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3 7V13H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M3 13C3 13 5.5 7 12 7C18.5 7 21 13 21 13V17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      <span>Undo</span>
                     </button>
-                    {isDocMenuOpen && (
-                      <div className="doc-menu-dropdown" role="menu">
-                        <button type="button" className="doc-menu-item" onClick={handleVersionHistory}>
-                          <VersionHistoryIcon />
-                          <span>Version History</span>
-                        </button>
-                        <button type="button" className="doc-menu-item" onClick={handleDownloadDocument}>
-                          <DownloadIcon />
-                          <span>Download</span>
-                        </button>
-                      </div>
-                    )}
+                    <button 
+                      type="button" 
+                      className="doc-action-btn doc-redo-btn"
+                      onClick={handleRedo}
+                      title="Redo (Ctrl+Shift+Z)"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M21 7V13H15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M21 13C21 13 18.5 7 12 7C5.5 7 3 13 3 13V17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      <span>Redo</span>
+                    </button>
+                    <span className={`save-status-indicator ${saveStatus}`}>
+                      {saveStatus === 'saving' && (
+                        <>
+                          <span className="save-spinner"></span>
+                          <span>Saving...</span>
+                        </>
+                      )}
+                      {saveStatus === 'saved' && (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M20 6L9 17L4 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                          <span>Saved</span>
+                        </>
+                      )}
+                      {saveStatus === 'error' && (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
+                            <path d="M12 8V12M12 16H12.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                          </svg>
+                          <span>Error saving</span>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  <div className="document-editor-actions-right">
+                    <button type="button" className="doc-action-btn doc-references-btn">References</button>
+                    <div className="doc-menu-wrapper" ref={docMenuRef}>
+                      <button
+                        type="button"
+                        className={`doc-action-btn doc-menu-btn ${isDocMenuOpen ? 'open' : ''}`}
+                        aria-label="Document options"
+                        aria-expanded={isDocMenuOpen}
+                        onClick={toggleDocMenu}
+                      >
+                        <MenuIcon />
+                      </button>
+                      {isDocMenuOpen && (
+                        <div className="doc-menu-dropdown" role="menu">
+                          <button type="button" className="doc-menu-item" onClick={handleVersionHistory}>
+                            <VersionHistoryIcon />
+                            <span>Version History</span>
+                          </button>
+                          <button type="button" className="doc-menu-item" onClick={handleDownloadDocument}>
+                            <DownloadIcon />
+                            <span>Download</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-                {content ? (
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeRaw]}
-                  >
-                    {content}
-                  </ReactMarkdown>
-                ) : (
-                  <div className="document-empty-state">
-                    <div className="document-empty-icon">
-                      <DocumentIconEmpty />
-                    </div>
-                    <h3 className="document-empty-title">New Document</h3>
-                    <p className="document-empty-subtitle">Start writing your research paper here.</p>
-                    <p className="document-empty-hint">No content has been added here yet.</p>
-                  </div>
-                )}
+                <RichTextEditor
+                  ref={editorRef}
+                  value={htmlContent}
+                  onChange={handleEditorChange}
+                  placeholder="Start writing your research document..."
+                />
               </div>
-            )}
-          </>
             )}
           </>
         )}
