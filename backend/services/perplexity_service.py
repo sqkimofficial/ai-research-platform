@@ -85,21 +85,6 @@ class PerplexityService:
                         "type": "string",
                         "description": "Markdown content to add to the document, or empty string if no document update"
                     },
-                    "document_structure": {
-                        "type": "array",
-                        "description": "Array of structured document elements",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "id": {"type": "string"},
-                                "type": {"type": "string"},
-                                "content": {"type": "string"},
-                                "parent_id": {"type": ["string", "null"]},
-                                "metadata": {"type": "object"}
-                            },
-                            "required": ["id", "type", "content"]
-                        }
-                    },
                     "sources": {
                         "type": "array",
                         "description": "Array of source URLs or citations",
@@ -119,7 +104,7 @@ class PerplexityService:
                         }
                     }
                 },
-                "required": ["message", "document_content", "document_structure", "sources", "new_types"]
+                "required": ["message", "document_content", "sources", "new_types"]
             }
             
             # Make the API call with structured output enforcement
@@ -157,7 +142,7 @@ class PerplexityService:
         """
         Parse JSON response from AI with fuzzy/robust handling.
         Handles common JSON formatting issues like unescaped newlines, control characters, etc.
-        Returns dict with 'message', 'document_content', 'document_structure', 'sources' keys.
+        Returns dict with 'message', 'document_content', 'sources', 'new_types' keys.
         
         This method mirrors OpenAIService.parse_json_response() for compatibility.
         """
@@ -169,8 +154,6 @@ class PerplexityService:
                 return {
                     'message': response_text,
                     'document_content': '',
-                    'document_structure': [],
-                    'placement': None,
                     'sources': [],
                     'new_types': []
                 }
@@ -180,16 +163,9 @@ class PerplexityService:
             # Step 2: Try standard JSON parsing first
             try:
                 parsed = json.loads(json_str)
-                # Handle both Stage 1 (document_content) and Stage 2 (updated_document_content) responses
                 return {
                     'message': parsed.get('message', ''),
                     'document_content': parsed.get('document_content', '') or parsed.get('updated_document_content', ''),
-                    'updated_document_content': parsed.get('updated_document_content', ''),
-                    'document_structure': parsed.get('document_structure', []) or parsed.get('updated_document_structure', []),
-                    'updated_document_structure': parsed.get('updated_document_structure', []),
-                    'placement': parsed.get('placement'),
-                    'placement_applied': parsed.get('placement_applied', ''),
-                    'placement_explanation': parsed.get('placement_explanation', ''),
                     'sources': parsed.get('sources', []),
                     'new_types': parsed.get('new_types', [])
                 }
@@ -203,16 +179,9 @@ class PerplexityService:
                 # Try parsing the fixed JSON
                 try:
                     parsed = json.loads(fixed_json)
-                    # Handle both Stage 1 and Stage 2 responses
                     return {
                         'message': parsed.get('message', ''),
                         'document_content': parsed.get('document_content', '') or parsed.get('updated_document_content', ''),
-                        'updated_document_content': parsed.get('updated_document_content', ''),
-                        'document_structure': parsed.get('document_structure', []) or parsed.get('updated_document_structure', []),
-                        'updated_document_structure': parsed.get('updated_document_structure', []),
-                        'placement': parsed.get('placement'),
-                        'placement_applied': parsed.get('placement_applied', ''),
-                        'placement_explanation': parsed.get('placement_explanation', ''),
                         'sources': parsed.get('sources', []),
                         'new_types': parsed.get('new_types', [])
                     }
@@ -227,8 +196,6 @@ class PerplexityService:
             return {
                 'message': response_text,
                 'document_content': '',
-                'document_structure': [],
-                'placement': None,
                 'sources': [],
                 'new_types': []
             }
@@ -335,73 +302,6 @@ class PerplexityService:
                             sources = list(set(sources + quoted_sources))
                 break
         
-        # Try to extract document_structure array
-        doc_structure = []
-        structure_patterns = [
-            r'"document_structure"\s*:\s*\[(.*?)\]',
-            r'"document_structure"\s*:\s*\[\s*\]',
-        ]
-        
-        for pattern in structure_patterns:
-            match = re.search(pattern, json_str, re.DOTALL)
-            if match:
-                if match.group(0).strip() == '[]':
-                    doc_structure = []
-                else:
-                    structure_str = match.group(1)
-                    try:
-                        doc_structure = json.loads(f'[{structure_str}]')
-                    except:
-                        doc_structure = []
-                break
-        
-        # Try to extract placement object
-        placement = None
-        placement_patterns = [
-            r'"placement"\s*:\s*(\{[^}]*\})',
-            r'"placement"\s*:\s*null',
-        ]
-        
-        for pattern in placement_patterns:
-            match = re.search(pattern, json_str, re.DOTALL)
-            if match:
-                if 'null' in match.group(0):
-                    placement = None
-                else:
-                    try:
-                        placement = json.loads(match.group(1))
-                    except:
-                        placement = None
-                break
-        
-        # Try to extract placement_applied and placement_explanation
-        placement_applied = ''
-        placement_explanation = ''
-        
-        placement_applied_patterns = [
-            r'"placement_applied"\s*:\s*"((?:[^"\\]|\\.)*)"',
-            r'"placement_applied"\s*:\s*"([^"]*)"',
-        ]
-        for pattern in placement_applied_patterns:
-            match = re.search(pattern, json_str, re.DOTALL)
-            if match:
-                placement_applied = match.group(1)
-                placement_applied = placement_applied.replace('\\n', '\n').replace('\\r', '\r').replace('\\t', '\t')
-                placement_applied = placement_applied.replace('\\"', '"').replace('\\\\', '\\')
-                break
-        
-        placement_explanation_patterns = [
-            r'"placement_explanation"\s*:\s*"((?:[^"\\]|\\.)*)"',
-            r'"placement_explanation"\s*:\s*"([^"]*)"',
-        ]
-        for pattern in placement_explanation_patterns:
-            match = re.search(pattern, json_str, re.DOTALL)
-            if match:
-                placement_explanation = match.group(1)
-                placement_explanation = placement_explanation.replace('\\n', '\n').replace('\\r', '\r').replace('\\t', '\t')
-                placement_explanation = placement_explanation.replace('\\"', '"').replace('\\\\', '\\')
-                break
-        
         # Try to extract new_types array
         new_types = []
         new_types_patterns = [
@@ -425,10 +325,6 @@ class PerplexityService:
         return {
             'message': message,
             'document_content': doc_content,
-            'document_structure': doc_structure if isinstance(doc_structure, list) else [],
-            'placement': placement,
-            'placement_applied': placement_applied,
-            'placement_explanation': placement_explanation,
             'sources': sources if isinstance(sources, list) else [],
             'new_types': new_types if isinstance(new_types, list) else []
         }

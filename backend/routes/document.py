@@ -2,7 +2,6 @@ from flask import Blueprint, request, jsonify, send_file
 from utils.file_helpers import get_session_dir
 from models.database import ChatSessionModel, DocumentModel, ResearchDocumentModel, ProjectModel
 from services.vector_service import VectorService
-from services.document_structure_service import DocumentStructureService
 from utils.auth import verify_token
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle

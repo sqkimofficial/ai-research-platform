@@ -1,9 +1,7 @@
 from flask import Blueprint, request, jsonify
 from models.database import ChatSessionModel, DocumentTypeModel, Database, DocumentModel, ProjectModel, ResearchDocumentModel
-from services.openai_service import OpenAIService
 from services.perplexity_service import PerplexityService
 from services.vector_service import VectorService
-from services.document_structure_service import DocumentStructureService
 from utils.auth import verify_token
 from utils.file_helpers import get_session_dir
 from datetime import datetime
@@ -12,8 +10,7 @@ import json
 import re
 
 chat_bp = Blueprint('chat', __name__)
-openai_service = OpenAIService()  # Used for Stage 2 AI (placement)
-perplexity_service = PerplexityService()  # Used for Stage 1 AI (content generation)
+perplexity_service = PerplexityService()  # Used for content generation
 vector_service = VectorService()
 
 # Initialize document types on module load
@@ -203,203 +200,6 @@ def strip_markdown_to_plain_text(text):
     text = '\n'.join(cleaned_lines)
     
     return text.strip()
-
-def extract_placement_instructions(user_message, document_structure_flat):
-    """
-    Extract placement instructions from user message.
-    Returns dict with placement info or None if no instructions found.
-    Handles patterns like:
-    - "at top of introduction"
-    - "bottom of section 3"
-    - "after introduction"
-    - "in the background section"
-    - "at the end"
-    """
-    import re
-    message_lower = user_message.lower()
-    placement = None
-    
-    # Enhanced placement patterns
-    patterns = {
-        'at_top_of': r'(?:at\s+top\s+of|top\s+of|beginning\s+of|start\s+of)\s+(?:the\s+)?([a-z\s]+?)(?:\s+section)?',
-        'at_bottom_of': r'(?:at\s+bottom\s+of|bottom\s+of|end\s+of)\s+(?:the\s+)?([a-z\s]+?)(?:\s+section)?',
-        'after': r'(?:after|following|following\s+the)\s+(?:the\s+)?([a-z\s]+?)(?:\s+section)?',
-        'before': r'(?:before|preceding|preceding\s+the)\s+(?:the\s+)?([a-z\s]+?)(?:\s+section)?',
-        'in': r'(?:in|into|within|inside)\s+(?:the\s+)?([a-z\s]+?)(?:\s+section)?',
-        'at_end': r'(?:at\s+the\s+end|at\s+end|append|add\s+to\s+end)(?:\s+of\s+document)?',
-    }
-    
-    # Check for "at the end" first (most specific)
-    if re.search(patterns['at_end'], message_lower):
-        return {
-            'strategy': 'insert_at_end',
-            'target_id': None,
-            'position': None,
-            'reason': 'User requested content at the end of document',
-            'user_instruction': 'at the end'
-        }
-    
-    # Check for "at top of [section]" - insert at beginning of section
-    match = re.search(patterns['at_top_of'], message_lower)
-    if match:
-        section_name = match.group(1).strip()
-        target_id = find_section_id_by_name(section_name, document_structure_flat)
-        if target_id:
-            return {
-                'strategy': 'insert_into',
-                'target_id': target_id,
-                'position': 'beginning',
-                'reason': f'User requested content at top/beginning of {section_name} section',
-                'user_instruction': f'at top of {section_name}'
-            }
-    
-    # Check for "at bottom of [section]" - insert at end of section
-    match = re.search(patterns['at_bottom_of'], message_lower)
-    if match:
-        section_name = match.group(1).strip()
-        target_id = find_section_id_by_name(section_name, document_structure_flat)
-        if target_id:
-            return {
-                'strategy': 'insert_into',
-                'target_id': target_id,
-                'position': 'end',
-                'reason': f'User requested content at bottom/end of {section_name} section',
-                'user_instruction': f'at bottom of {section_name}'
-            }
-    
-    # Check for "after [section]"
-    match = re.search(patterns['after'], message_lower)
-    if match:
-        section_name = match.group(1).strip()
-        target_id = find_section_id_by_name(section_name, document_structure_flat)
-        if target_id:
-            return {
-                'strategy': 'insert_after',
-                'target_id': target_id,
-                'position': None,
-                'reason': f'User requested content after {section_name} section',
-                'user_instruction': f'after {section_name}'
-            }
-    
-    # Check for "before [section]"
-    match = re.search(patterns['before'], message_lower)
-    if match:
-        section_name = match.group(1).strip()
-        target_id = find_section_id_by_name(section_name, document_structure_flat)
-        if target_id:
-            return {
-                'strategy': 'insert_before',
-                'target_id': target_id,
-                'position': None,
-                'reason': f'User requested content before {section_name} section',
-                'user_instruction': f'before {section_name}'
-            }
-    
-    # Check for "in [section]" or "add to [section]"
-    match = re.search(patterns['in'], message_lower)
-    if not match:
-        # Also check for "add to [section]" pattern
-        match = re.search(r'add\s+(?:to|in)\s+(?:the\s+)?([a-z\s]+?)(?:\s+section)?', message_lower)
-    
-    if match:
-        section_name = match.group(1).strip()
-        target_id = find_section_id_by_name(section_name, document_structure_flat)
-        if target_id:
-            # Check if user specified position within section
-            position = 'end'  # default
-            if 'top' in message_lower or 'beginning' in message_lower or 'start' in message_lower:
-                position = 'beginning'
-            elif 'bottom' in message_lower or 'end' in message_lower:
-                position = 'end'
-            
-            return {
-                'strategy': 'insert_into',
-                'target_id': target_id,
-                'position': position,
-                'reason': f'User requested content in {section_name} section',
-                'user_instruction': f'in {section_name}' + (f' at {position}' if position != 'end' else '')
-            }
-    
-    # Check for section numbers (e.g., "section 3", "section 1")
-    section_num_match = re.search(r'section\s+(\d+)', message_lower)
-    if section_num_match:
-        section_num = int(section_num_match.group(1))
-        # Find section by index in structure
-        sections = [e for e in document_structure_flat if e.get('type') in ['section', 'subsection']]
-        if section_num <= len(sections):
-            target_section = sections[section_num - 1]  # 1-indexed to 0-indexed
-            target_id = target_section.get('id')
-            
-            # Check for position modifiers
-            position = 'end'
-            if 'top' in message_lower or 'beginning' in message_lower:
-                position = 'beginning'
-            elif 'bottom' in message_lower or 'end' in message_lower:
-                position = 'end'
-            
-            if 'after' in message_lower:
-                return {
-                    'strategy': 'insert_after',
-                    'target_id': target_id,
-                    'position': None,
-                    'reason': f'User requested content after section {section_num}',
-                    'user_instruction': f'after section {section_num}'
-                }
-            elif 'before' in message_lower:
-                return {
-                    'strategy': 'insert_before',
-                    'target_id': target_id,
-                    'position': None,
-                    'reason': f'User requested content before section {section_num}',
-                    'user_instruction': f'before section {section_num}'
-                }
-            else:
-                return {
-                    'strategy': 'insert_into',
-                    'target_id': target_id,
-                    'position': position,
-                    'reason': f'User requested content in section {section_num}',
-                    'user_instruction': f'in section {section_num}' + (f' at {position}' if position != 'end' else '')
-                }
-    
-    # No placement instructions found
-    return None
-
-def find_section_id_by_name(section_name, document_structure_flat):
-    """Find section ID by matching name semantically"""
-    if not document_structure_flat:
-        return None
-    
-    section_name_lower = section_name.lower().strip()
-    
-    # Common section name variations
-    name_variations = {
-        'introduction': ['intro', 'introduction', 'introductions'],
-        'methodology': ['methods', 'methodology', 'method', 'experimental methods'],
-        'results': ['results', 'findings', 'experimental results'],
-        'discussion': ['discussion', 'discussions'],
-        'conclusion': ['conclusion', 'conclusions'],
-        'references': ['references', 'reference', 'bibliography'],
-        'abstract': ['abstract', 'summary']
-    }
-    
-    # Check for exact or semantic match
-    for element in document_structure_flat:
-        if element.get('type') in ['section', 'subsection']:
-            element_title = element.get('metadata', {}).get('title', '')
-            element_title_lower = element_title.lower()
-            
-            # Exact match
-            if section_name_lower in element_title_lower or element_title_lower in section_name_lower:
-                return element.get('id')
-            
-            # Check variations
-            for key, variations in name_variations.items():
-                if section_name_lower in variations:
-                    if any(var in element_title_lower for var in variations):
-                        return element.get('id')
-    
-    return None
 
 @chat_bp.route('/session', methods=['POST'])
 def create_session():
@@ -595,36 +395,14 @@ def send_message():
         
         ChatSessionModel.add_message(session_id, 'user', message_with_highlights)
         
-        # Get document content and structure for context
+        # Get document content for context
         session_dir = get_session_dir(session_id)
         doc_path = session_dir / 'doc.md'
         document_content = ''
-        document_structure_flat = DocumentModel.get_document_structure(session_id)
         
         if os.path.exists(doc_path):
             with open(doc_path, 'r', encoding='utf-8') as f:
                 document_content = f.read()
-        
-        # Build structure tree (initialize even if empty)
-        # Ensure document_structure_flat is a list
-        if document_structure_flat:
-            if not isinstance(document_structure_flat, list):
-                print(f"WARNING: document_structure_flat is not a list, got {type(document_structure_flat)}: {document_structure_flat}")
-                document_structure_flat = []
-        
-        if document_structure_flat and len(document_structure_flat) > 0:
-            try:
-                document_structure_tree = DocumentStructureService.build_tree(document_structure_flat)
-                structure_summary = DocumentStructureService.get_structure_summary(document_structure_tree)
-            except Exception as e:
-                print(f"WARNING: Failed to build structure tree: {e}")
-                import traceback
-                traceback.print_exc()
-                document_structure_tree = {'elements': {}, 'roots': []}
-                structure_summary = "No existing document structure."
-        else:
-            document_structure_tree = {'elements': {}, 'roots': []}
-            structure_summary = "No existing document structure."
         
         # Get available document types (needed for system prompt)
         available_types = DocumentTypeModel.get_all_types()
@@ -662,158 +440,63 @@ NOTE: Only relevant document sections are shown above based on semantic similari
             # No existing document content
             document_context_section = "The document is currently empty - the user is starting a new research paper."
         
-        # Single unified Stage 1 AI System Prompt - Content Generation Only (No Placement)
-        system_message_write = f"""You are a research assistant helping users write research papers. Your role is to GENERATE CONTENT ONLY - you do NOT decide where content should be placed in the document.
+        # Write mode system prompt - for generating document content
+        system_message_write = f"""You are a research assistant helping users write research papers.
 
-CRITICAL: UNDERSTANDING CURRENT VS HISTORICAL CONTEXT
-- You will receive conversation history for context, but you MUST ONLY respond to the CURRENT USER MESSAGE (the last message)
-- Historical messages are provided so you understand what was discussed previously, but you should NOT act on old instructions
-- Only the CURRENT USER MESSAGE contains the instruction you need to fulfill RIGHT NOW
-- If the conversation history shows previous requests, those have already been completed - do NOT repeat them
-- Focus ONLY on what the current user message is asking for
-
-You have two distinct responsibilities:
-
-1. CHAT MESSAGE: Provide conversational, helpful responses focused on reasoning, answering questions, discussing ideas, and providing relevant snippets from the document when helpful. Be concise and conversational - this is for the chat interface.
-
-2. DOCUMENT CONTENT GENERATION: When the user's request requires adding or updating the research document, generate well-structured, formal research content in Markdown format. Your ONLY job is to generate high-quality content - you do NOT provide placement instructions or decide where content goes.
-
-3. SOURCES: Always include any research papers, articles, websites, or other sources you reference or review. Include URLs, DOIs, or citations in the sources array.
+MODE: WRITE (Content Generation)
+- Generate well-structured research content in Markdown format when asked
+- The user will insert content where they want - you just generate quality content
+- If the user asks a question without requesting content, respond conversationally with document_content empty
 
 {document_context_section}
 
-SEMANTIC SECTION MATCHING FOR CONTENT GENERATION:
-When the user asks to add content to an existing section (e.g., "add paragraphs to Introduction" or "add a table to Methodology"), you should:
-1. Look through the document content above to understand the context
-2. Match semantically - "Introduction" matches "intro", "Introduction", "INTRODUCTION", etc.
-3. "Methods" matches "Methodology", "Methods", "Experimental Methods", etc.
-4. "Results" matches "Results", "Findings", "Experimental Results", etc.
-5. DO NOT include the section title/header in document_content when adding to existing sections - only include the NEW content
+MARKDOWN FORMATTING:
+- Headers: # title, ## section, ### subsection
+- Lists: - bullet or 1. numbered
+- Tables: | Col1 | Col2 |\\n|------|------|\\n| val | val |
+- Code: ```language\\ncode\\n```
+- Bold: **text**, Italic: *text*
 
-AVAILABLE DOCUMENT TYPES:
-{types_list}
+RULES:
+- When adding to existing sections, only include NEW content (no headers, no existing text)
+- Keep chat message brief and conversational
+- Put sources in "sources" array, NOT in document_content
+- Escape newlines as \\n in JSON strings
 
-NEW DOCUMENT TYPES:
-If you need a document element type that doesn't exist in the list above, include it in your JSON response under "new_types". For example:
-- If you need to represent mathematical equations: add {{"type_name": "equation", "description": "Mathematical equation or formula", "metadata_schema": {{}}}}
-- If you need to represent diagrams: add {{"type_name": "diagram", "description": "Visual diagram or flowchart", "metadata_schema": {{}}}}
-- If you need to represent footnotes: add {{"type_name": "footnote", "description": "Footnote or endnote", "metadata_schema": {{}}}}
-
-Only create new types when absolutely necessary - first check if an existing type can be used.
-
-
-MARKDOWN FORMATTING GUIDELINES:
-- Use headers: # for main title, ## for sections, ### for subsections
-- Use **bold** for emphasis and *italic* for subtle emphasis
-- Use bullet points (-) or numbered lists (1.) for lists
-- Use code blocks with language tags: ```python for code examples (ALWAYS include language tag)
-- Use tables with Markdown table syntax: | Column 1 | Column 2 |\\n|--------|----------|\\n| Value 1 | Value 2 |
-- Use > for blockquotes when citing sources
-- Use [link text](url) for references
-- Keep paragraphs separated by blank lines
-
-EXAMPLES:
-- For a new section: "## Methodology\\n\\nThis study employs..."
-- For code: "```python\\ndef function():\\n    pass\\n```"
-- For tables: "| Method | Accuracy |\\n|--------|----------|\\n| A | 95% |\\n| B | 87% |"
-- For lists: "- Item 1\\n- Item 2\\n- Item 3"
-
-IMPORTANT RULES:
-- If the user asks a question or wants to discuss something, set document_content to empty string ''
-- Only include document_content when explicitly asked to add/update/write content to the document
-- For code snippets in document_content, ALWAYS use proper markdown code blocks with language tags
-- For tables in document_content, ALWAYS include header separator row (|--------|)
-- Chat message should NEVER contain full document content - only brief snippets if relevant to answer
-- ALWAYS include sources you reference, review, or cite in the sources array (NOT in document_content)
-- Sources should ONLY appear in the "sources" JSON field - NEVER include URLs or citations in document_content
-- The document_content should be clean research writing without source URLs or citations
-
-CRITICAL JSON FORMATTING RULES:
-- You MUST respond with valid JSON only - no extra text before or after
-- ALL newlines within string values MUST be escaped as \\n (backslash followed by n)
-- ALL quotes within string values MUST be escaped as \\" (backslash followed by quote)
-- ALL backslashes within string values MUST be escaped as \\\\ (double backslash)
-- Do NOT include actual newline characters inside JSON string values
-- The JSON must be on a single line OR properly formatted with escaped newlines
-- Example of CORRECT format: {{"message": "Hello\\nWorld", "document_content": "## Section\\n\\nContent", "sources": ["https://example.com"], "new_types": []}}
-- Example of WRONG format: {{"message": "Hello
-World"}} - this will break JSON parsing
-
-CRITICAL: CONTENT GENERATION ONLY - NO PLACEMENT
-- Your ONLY job is to generate high-quality research content
-- Do NOT provide placement instructions or decide where content should go
-- Do NOT include a "placement" field in your response
-- Focus on generating well-structured, accurate, properly formatted content
-- When adding to an existing section, ONLY include the NEW content (no section headers, no existing content)
-
-Always respond in JSON format with exactly these keys:
+Always respond in JSON format:
 {{
-  "message": "your conversational response here (always provide this, even if brief). Use \\n for line breaks.",
-  "document_content": "structured markdown content to add (empty string '' if no document update needed). Use \\n for line breaks. IMPORTANT: When adding to an existing section, ONLY include the NEW content - do NOT repeat the section header or existing content.",
-  "sources": ["array of source URLs, DOIs, or citations you referenced or reviewed. Empty array [] if no sources"],
-  "new_types": [array of new document types to create. Empty array [] if no new types needed. Each type: {{"type_name": "name", "description": "desc", "metadata_schema": {{}}}}]
-}}
+  "message": "brief conversational response",
+  "document_content": "markdown content to add (or empty string if no content needed)",
+  "sources": ["array of URLs/citations"],
+  "new_types": []
+}}"""
 
-CRITICAL: CONTENT SCOPE RULES
-- When adding content to an EXISTING section: document_content should ONLY contain the new paragraphs/tables/content you are adding
-- DO NOT include section headers (## Section Name) when adding to existing sections
-- DO NOT repeat existing paragraphs or content that's already in the document
-- Only include what is NEW and being added in this response
-- Example: If user says "Add a paragraph to Introduction" and Introduction already exists:
-  * WRONG: "## Introduction\\n\\nExisting paragraph text...\\n\\nNew paragraph text..."
-  * CORRECT: "New paragraph text about recent innovations..."
-  * The document_structure should have parent_id pointing to the existing Introduction section ID
+        system_message_research = f"""You are a research assistant helping the user explore ideas and refine what they want to write.
 
-Remember: The chat message should be conversational and helpful. The document_content should be formal research writing in Markdown format, but ONLY include new content being added. Sources should include any papers, articles, or websites you mention or review. You generate content only - placement decisions are made separately."""
+MODE: RESEARCH (Conversation Only)
+- Your role is to have a conversation with the user - answer questions, discuss ideas, help them think through their research
+- NEVER generate document content - document_content must ALWAYS be an empty string ""
+- Focus on understanding what the user wants, providing research insights, and helping them plan their writing
+- When the user is ready to write actual content, they will switch to Write mode
 
-        system_message_research = f"""You are a research assistant focused on producing concise, well-sourced answers.
-
-MODE: RESEARCH
-- PRIMARY: Deliver the researched answer now. Do NOT say you will research; provide findings directly.
-- Keep answers succinct and structured (short paragraphs or bullets).
-- ALWAYS include sources (URLs/DOIs) in the "sources" array for any claim or fact.
-- Use document_content/document_structure ONLY if the user explicitly asks for prose to be drafted/inserted. Otherwise, keep document_content empty.
-- If drafting content, follow the document structure guidance exactly and include sources.
-
-CRITICAL: PLAIN TEXT FORMATTING REQUIREMENTS
-- Your "message" response MUST be in PLAIN TEXT format - NO markdown formatting whatsoever EXCEPT for subheadings
-- DO NOT use markdown syntax like *italic*, # headers, or other markdown characters
-- For SUBHEADINGS (section titles within paragraphs): Use **bold** markers around subheading text. Subheadings should NOT have bullet points before them. Example: "**Hardware and Device**" or "**AI Integration**"
-- For bullet points: Each bullet point MUST be on its own separate line. Use a dash and space ("- ") at the start of each bullet point, followed by a newline character (\\n) after each bullet point.
-- NEVER put multiple bullet points on the same line. Each "- " must be followed by text and then a newline.
-- For paragraphs: Separate paragraphs with blank lines (double newlines)
-- For lists: Use line breaks between items, with each item on its own line. CRITICAL: Each bullet point must end with a newline character.
-- Example of CORRECT format with subheadings and bullets:
-  "Here are the key findings:\\n\\n**Hardware Developments**\\n- First finding about hardware...\\n- Second finding shows...\\n\\n**AI Integration**\\n- First finding about AI...\\n- Second finding indicates...\\n\\nAdditional context follows in the next paragraph."
-
-- Example of WRONG format (DO NOT use - bullets on same line):
-  "Key findings: - First finding - Second finding - Third finding"
-
-- Example of WRONG format (DO NOT use bullets for subheadings):
-  "- Hardware and Device\\n- First point" (subheadings should use **bold**, not bullets)
+RESPONSE FORMAT:
+- Keep responses concise and conversational
+- Use plain text with simple formatting (bullets with "- ", bold with **text**)
+- Separate paragraphs with blank lines
+- ALWAYS include sources (URLs/DOIs) in the "sources" array for any facts or claims
 
 Context from the user's document (if any):
 {document_context_section}
 
-Document structure summary:
-{structure_summary}
+Always respond in JSON format:
+{{
+  "message": "your conversational response here",
+  "document_content": "",
+  "sources": ["array of source URLs or citations"],
+  "new_types": []
+}}
 
-Attached sections from the user message:
-
-Available document types:
-{types_list}
-
-When drafting content (only if explicitly requested):
-- Follow the DOCUMENT STRUCTURE REQUIREMENTS, including hierarchical ids, type, parent_id, and metadata.
-- Exclude section headers when adding to existing sections.
-- Provide new_types only when necessary.
-- Always include sources for any claims.
-
-If the request is purely research/Q&A:
-- Provide the researched answer directly in "message" as PLAIN TEXT (no markdown).
-- Include specific findings (not just intentions) and cite sources in "sources".
-- Keep document_content empty unless the user asked you to write prose.
-- Remember: Use plain text with line breaks for structure, NOT markdown formatting."""
+CRITICAL: document_content must ALWAYS be empty string "" in research mode. This mode is for conversation only."""
 
         system_message = system_message_write if mode == 'write' else system_message_research
         
@@ -948,7 +631,6 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
             ai_response_content = json.dumps({
                 "message": "I apologize, but I didn't receive a proper response. Please try again.",
                 "document_content": "",
-                "document_structure": [],
                 "sources": [],
                 "new_types": []
             })
@@ -1092,123 +774,8 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         print(f"DEBUG: status: {status}")
         print(f"DEBUG: pending_content_id: {pending_content_id}")
         
-        if False:  # Disabled auto-insertion - content is now pending approval
-            try:
-                session_dir = get_session_dir(session_id)
-                doc_path = session_dir / 'doc.md'
-                
-                # Ensure directory exists
-                os.makedirs(session_dir, exist_ok=True)
-                
-                # For fresh documents, auto-append (no placement needed)
-                if is_fresh_document:
-                    # Fresh document - just add content
-                    with open(doc_path, 'w', encoding='utf-8') as f:
-                        f.write(document_content_to_add)
-                    
-                    # Store structure if provided
-                    if document_structure:
-                        DocumentModel.update_document_structure(session_id, document_structure, user_id)
-                        print(f"Fresh document: Added {len(document_structure)} elements")
-                    else:
-                        print("Fresh document: Added content but no structure provided")
-                
-                # Use smart insertion based on placement instructions for existing documents
-                elif placement and document_structure and document_structure_tree and document_structure_tree.get('roots'):
-                    # Insert new structure into existing tree
-                    updated_tree = DocumentStructureService.insert_structure(
-                        document_structure_tree,
-                        document_structure,
-                        placement
-                    )
-                    
-                    # Flatten tree back to list for storage
-                    updated_structure_flat = DocumentStructureService.flatten_tree(updated_tree)
-                    
-                    # Generate markdown from updated tree
-                    updated_markdown = DocumentStructureService.tree_to_markdown(updated_tree)
-                    
-                    # Write updated markdown to file
-                    with open(doc_path, 'w', encoding='utf-8') as f:
-                        f.write(updated_markdown)
-                    
-                    # Update structure in database
-                    DocumentModel.update_document_structure(session_id, updated_structure_flat, user_id)
-                    
-                else:
-                    # Fallback: handle cases where placement is missing or structure is empty
-                    print("DEBUG: Using fallback insertion logic")
-                    
-                    if not placement:
-                        placement = {'strategy': 'insert_at_end', 'target_id': None}
-                        print("DEBUG: No placement provided, using insert_at_end")
-                    
-                    # Check if we have existing structure
-                    has_existing_structure = (
-                        document_structure_tree and 
-                        document_structure_tree.get('roots') and 
-                        len(document_structure_tree.get('roots', [])) > 0
-                    )
-                    
-                    if not has_existing_structure:
-                        # No existing structure - create new tree or append to file
-                        if document_structure:
-                            document_structure_tree = DocumentStructureService.build_tree(document_structure)
-                            updated_structure_flat = document_structure
-                            updated_markdown = DocumentStructureService.tree_to_markdown(document_structure_tree)
-                        else:
-                            # No structure provided - just append content to file
-                            print("DEBUG: No structure, appending content directly")
-                            with open(doc_path, 'a', encoding='utf-8') as f:
-                                if os.path.exists(doc_path) and os.path.getsize(doc_path) > 0:
-                                    f.write('\n\n')
-                                f.write(document_content_to_add)
-                            updated_structure_flat = []
-                            updated_markdown = None
-                    else:
-                        # Insert into existing tree
-                        if document_structure:
-                            updated_tree = DocumentStructureService.insert_structure(
-                                document_structure_tree,
-                                document_structure,
-                                placement
-                            )
-                            updated_structure_flat = DocumentStructureService.flatten_tree(updated_tree)
-                            updated_markdown = DocumentStructureService.tree_to_markdown(updated_tree)
-                        else:
-                            # No structure but have existing structure - just append content
-                            print("DEBUG: No new structure, appending content to existing document")
-                            with open(doc_path, 'a', encoding='utf-8') as f:
-                                f.write('\n\n')
-                                f.write(document_content_to_add)
-                            updated_structure_flat = document_structure_flat  # Keep existing
-                            updated_markdown = None
-                    
-                    # Write to file if markdown was generated
-                    if updated_markdown is not None:
-                        with open(doc_path, 'w', encoding='utf-8') as f:
-                            f.write(updated_markdown)
-                        print(f"DEBUG: Wrote markdown from structure ({len(updated_structure_flat)} elements)")
-                    
-                    # Update structure in database if we have structure
-                    if updated_structure_flat:
-                        DocumentModel.update_document_structure(session_id, updated_structure_flat, user_id)
-                        print(f"DEBUG: Updated structure in database")
-                
-                # Re-index document after update (for semantic search)
-                try:
-                    if os.path.exists(doc_path):
-                        with open(doc_path, 'r', encoding='utf-8') as f:
-                            updated_content = f.read()
-                        vector_service.index_document(session_id, updated_content)
-                except Exception as index_error:
-                    # Log but don't fail if indexing fails
-                    print(f"Warning: Failed to re-index document: {index_error}")
-            except Exception as doc_error:
-                # Log error but don't fail the request if document write fails
-                import traceback
-                print(f"Warning: Failed to write document content: {doc_error}")
-                traceback.print_exc()
+        # Note: Auto-insertion is disabled. Content requires user approval via /direct-insert endpoint.
+        # The frontend handles cursor-based or end-of-document insertion.
         
         response_data = {
             'response': chat_message,
@@ -1228,322 +795,6 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         import traceback
         error_traceback = traceback.format_exc()
         print(f"Error in send_message: {str(e)}")
-        print(f"Traceback: {error_traceback}")
-        return jsonify({'error': str(e), 'traceback': error_traceback}), 500
-
-@chat_bp.route('/approve', methods=['POST'])
-def approve_content():
-    """Approve pending content and place it in the document using Stage 2 AI"""
-    try:
-        user_id = get_user_id_from_token()
-        if not user_id:
-            return jsonify({'error': 'Unauthorized'}), 401
-        
-        data = request.get_json()
-        session_id = data.get('session_id')
-        document_id = data.get('document_id')  # New: document_id for research documents
-        pending_content_id = data.get('pending_content_id')
-        edited_content = data.get('edited_content')  # Optional edited content
-        
-        if not session_id or not pending_content_id:
-            return jsonify({'error': 'session_id and pending_content_id are required'}), 400
-        
-        # Verify session belongs to user
-        session = ChatSessionModel.get_session(session_id)
-        if not session:
-            return jsonify({'error': 'Session not found'}), 404
-        
-        if session['user_id'] != user_id:
-            return jsonify({'error': 'Unauthorized'}), 403
-        
-        # Get pending content
-        pending_data = ChatSessionModel.get_pending_content(session_id)
-        if not pending_data or pending_data['pending_content_id'] != pending_content_id:
-            return jsonify({'error': 'Pending content not found or already processed'}), 404
-        
-        pending_content = pending_data['pending_content']
-        
-        # Use edited content if provided, otherwise use original
-        original_content = pending_content.get('document_content', '')
-        
-        if edited_content:
-            # User edited specific content
-            content_to_place = edited_content
-            print(f"DEBUG: Using edited content (length: {len(edited_content)})")
-        else:
-            content_to_place = original_content
-        
-        # Get session start timestamp to collect all user messages in this session
-        session_start_timestamp = pending_content.get('session_start_timestamp')
-        
-        # Collect ALL user messages from this session (from session_start_timestamp until now)
-        all_messages = ChatSessionModel.get_messages(session_id)
-        session_user_messages = []
-        
-        if session_start_timestamp:
-            # Parse session start timestamp
-            try:
-                # Parse ISO format timestamp string
-                if isinstance(session_start_timestamp, str):
-                    # Handle ISO format with or without timezone
-                    session_start_str = session_start_timestamp.replace('Z', '+00:00')
-                    session_start_dt = datetime.fromisoformat(session_start_str)
-                else:
-                    # Already a datetime object
-                    session_start_dt = session_start_timestamp
-                
-                print(f"DEBUG: Session start timestamp: {session_start_dt}")
-                
-                # Collect all user messages from session start onwards (inclusive)
-                for msg in all_messages:
-                    if msg.get('role') == 'user':
-                        msg_timestamp = msg.get('timestamp')
-                        if msg_timestamp:
-                            # Handle both datetime objects and ISO strings
-                            if isinstance(msg_timestamp, str):
-                                msg_str = msg_timestamp.replace('Z', '+00:00')
-                                try:
-                                    msg_dt = datetime.fromisoformat(msg_str)
-                                except ValueError:
-                                    # Try without timezone adjustment
-                                    msg_dt = datetime.fromisoformat(msg_timestamp)
-                            else:
-                                msg_dt = msg_timestamp
-                            
-                            # Include messages from session start onwards (>= means inclusive)
-                            # Also include messages that are very close (within 1 second) to handle timing edge cases
-                            time_diff = (msg_dt - session_start_dt).total_seconds()
-                            if msg_dt >= session_start_dt or abs(time_diff) < 1.0:
-                                session_user_messages.append(msg.get('content', ''))
-                                print(f"DEBUG: Included user message from {msg_dt} (diff: {time_diff:.2f}s)")
-                        else:
-                            # Message has no timestamp - include it to be safe
-                            print(f"WARNING: User message has no timestamp, including it")
-                            session_user_messages.append(msg.get('content', ''))
-            except Exception as e:
-                print(f"WARNING: Failed to parse session start timestamp: {e}")
-                import traceback
-                traceback.print_exc()
-                # Fallback: use all user messages
-                session_user_messages = [msg.get('content', '') for msg in all_messages if msg.get('role') == 'user']
-        else:
-            # No session start timestamp - use all user messages (fallback)
-            print(f"WARNING: No session_start_timestamp found, using all user messages")
-            session_user_messages = [msg.get('content', '') for msg in all_messages if msg.get('role') == 'user']
-        
-        print(f"DEBUG: Collected {len(session_user_messages)} user messages from session")
-        for i, msg in enumerate(session_user_messages):
-            print(f"DEBUG: User message {i+1}: {msg[:100]}...")
-        
-        if not content_to_place.strip():
-            return jsonify({'error': 'No content to place'}), 400
-        
-        # Get full document content
-        # New approach: use document_id if provided, otherwise fall back to session_id (legacy)
-        document_content = ''
-        
-        if document_id:
-            # Use research document model
-            document = ResearchDocumentModel.get_document(document_id)
-            if not document:
-                return jsonify({'error': 'Document not found'}), 404
-            
-            if document['user_id'] != user_id:
-                return jsonify({'error': 'Unauthorized'}), 403
-            
-            document_content = document.get('markdown_content', '')
-        else:
-            # Legacy approach: use session-based file storage
-            session_dir = get_session_dir(session_id)
-            doc_path = session_dir / 'doc.md'
-            
-            if os.path.exists(doc_path):
-                with open(doc_path, 'r', encoding='utf-8') as f:
-                    document_content = f.read()
-        
-        # Check if document is empty - if so, skip Stage 2 AI and just append content directly
-        is_document_empty = not document_content.strip()
-        
-        if is_document_empty:
-            print("DEBUG: Document is empty - skipping Stage 2 AI and appending content directly")
-            # Just use the content as-is since there's nothing to merge with
-            updated_document_content = content_to_place
-            placement_applied = "Content added to empty document"
-            placement_explanation = "The document was empty, so the content was added as the initial content."
-        else:
-            # Document has content - use Stage 2 AI for placement
-            
-            # Stage 2 AI System Prompt - Placement Specialist
-            is_edited = edited_content is not None and edited_content != original_content
-            edited_note = "\n\nNOTE: The user has edited the content before approving. Use the edited content provided above, but preserve the structure and placement logic." if is_edited else ""
-            
-            # Format all user messages from the session for Stage 2 AI
-            # Let the AI figure out placement instructions from user messages - don't try to be smart in backend
-            user_messages_text = ""
-            if session_user_messages:
-                user_messages_text = "\n\nALL USER MESSAGES FROM THIS SESSION (read through these to understand user intent and placement preferences):\n"
-                for i, user_msg in enumerate(session_user_messages, 1):
-                    user_messages_text += f"\n--- User Message {i} ---\n{user_msg}\n"
-                user_messages_text += "\n\nCRITICAL: Read through ALL the user messages above carefully. If ANY of them specify where content should be placed (e.g., 'in introduction', 'at top of section 3', 'after background', 'at the beginning of the document'), you MUST follow that instruction EXACTLY. Only if NO placement instructions are found in any user message should you make your own decision based on document context.\n"
-            
-            stage2_system_prompt = f"""You are a document placement specialist. Your ONLY job is to place approved content into the research document.
-
-CRITICAL PRIORITY ORDER (FOLLOW THIS EXACTLY):
-1. FIRST PRIORITY: If user provided placement instructions in ANY of their messages below, you MUST follow them EXACTLY - no exceptions
-2. SECOND PRIORITY: Only if NO placement instructions are found in ANY user message, place content in the most logical location based on document context
-
-{user_messages_text}
-
-CRITICAL RULES:
-- Preserve ALL existing document content word-for-word
-- Do NOT rewrite, modify, or rephrase existing document content
-- Only add/insert the new approved content as instructed
-- Maintain document structure integrity
-- Preserve all formatting, spacing, and structure
-- Return valid JSON only - no markdown, no extra text
-- Look through ALL user messages above to find placement instructions (e.g., "in introduction", "at top of section 3", "after background")
-- If placement instructions are found in ANY user message, follow them EXACTLY. Only make your own decision if NO instructions are found in any message.
-
-Current document content (DO NOT MODIFY THIS):
-{document_content}
-
-Content to place (this is the NEW content to add):
-{content_to_place}
-{edited_note}
-
-You MUST return valid JSON with exactly these fields:
-{{
-  "updated_document_content": "full markdown document with ALL existing content preserved exactly + new content placed appropriately",
-  "placement_applied": "brief description of where content was placed (e.g., 'Content placed at the beginning of Introduction section')",
-  "placement_explanation": "Two sentences explaining why you chose this placement. If user provided instructions, explain how you followed them exactly. If no instructions, explain why this location is most logical based on document context."
-}}
-
-CRITICAL JSON FORMATTING:
-- You MUST respond with valid JSON only - no extra text before or after
-- ALL newlines within string values MUST be escaped as \\n
-- ALL quotes within string values MUST be escaped as \\"
-- The JSON must be properly formatted
-- Example format: {{"updated_document_content": "## Existing\\n\\nContent\\n\\n## New\\n\\nContent", "placement_applied": "...", "placement_explanation": "..."}}
-
-CRITICAL: The updated_document_content must include:
-1. ALL existing document content exactly as it was (word-for-word)
-2. The new content placed in the appropriate location (following user instructions EXACTLY if provided)
-3. Proper markdown formatting throughout
-
-REMINDER: If user provided placement instructions above, you MUST follow them exactly. Do NOT use your own judgment - use the user's specified location."""
-            
-            # Call Stage 2 AI
-            stage2_messages = [
-                {'role': 'system', 'content': stage2_system_prompt},
-                {'role': 'user', 'content': 'Place the approved content into the document according to the instructions.'}
-            ]
-            
-            try:
-                stage2_response = openai_service.chat_completion(stage2_messages, functions=None, function_call="none")
-                stage2_content = stage2_response.get('content', '')
-                
-                if not stage2_content:
-                    raise Exception("Stage 2 AI returned empty response")
-                
-                # Parse Stage 2 response
-                print(f"DEBUG: Stage 2 AI raw response length: {len(stage2_content)}")
-                print(f"DEBUG: Stage 2 AI raw response preview: {stage2_content[:500]}...")
-                
-                stage2_parsed = openai_service.parse_json_response(stage2_content)
-                updated_document_content = stage2_parsed.get('updated_document_content', '') or stage2_parsed.get('document_content', '')
-                placement_applied = stage2_parsed.get('placement_applied', 'Content placed')
-                placement_explanation = stage2_parsed.get('placement_explanation', '')
-                
-                print(f"DEBUG: Parsed Stage 2 response:")
-                print(f"  - updated_document_content length: {len(updated_document_content)}")
-                print(f"  - placement_applied: {placement_applied}")
-                
-                if not updated_document_content:
-                    # Try to extract from raw response as fallback
-                    print("WARNING: Stage 2 AI did not return updated_document_content in expected format")
-                    print("Attempting to extract from raw response...")
-                    # Sometimes AI returns markdown directly instead of JSON
-                    if stage2_content.strip().startswith('#') or '##' in stage2_content[:100]:
-                        # Looks like markdown was returned directly
-                        updated_document_content = stage2_content
-                        print("Extracted markdown directly from response")
-                    else:
-                        raise Exception(f"Stage 2 AI did not return updated document content. Raw response: {stage2_content[:500]}")
-                
-            except Exception as e:
-                print(f"Error in Stage 2 AI call: {e}")
-                import traceback
-                traceback.print_exc()
-                return jsonify({'error': f'Failed to place content: {str(e)}'}), 500
-        
-        # Update document
-        try:
-            if document_id:
-                # Update research document in database
-                ResearchDocumentModel.update_document(
-                    document_id,
-                    markdown_content=updated_document_content
-                )
-                
-                # Re-index document for semantic search
-                try:
-                    vector_service.index_document(document_id, updated_document_content)
-                except Exception as index_error:
-                    print(f"Warning: Failed to re-index document: {index_error}")
-            else:
-                # Legacy approach: update file-based document
-                session_dir = get_session_dir(session_id)
-                doc_path = session_dir / 'doc.md'
-                os.makedirs(session_dir, exist_ok=True)
-                with open(doc_path, 'w', encoding='utf-8') as f:
-                    f.write(updated_document_content)
-                
-                # Re-index document for semantic search
-                try:
-                    vector_service.index_document(session_id, updated_document_content)
-                except Exception as index_error:
-                    print(f"Warning: Failed to re-index document: {index_error}")
-            
-        except Exception as e:
-            print(f"Error updating document: {e}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({'error': f'Failed to update document: {str(e)}'}), 500
-        
-        # Clear pending content
-        ChatSessionModel.clear_pending_content(session_id)
-        
-        # Build chat message with placement explanation
-        chat_message = 'Content approved and placed in document.'
-        if placement_applied:
-            chat_message += f' {placement_applied}'
-        if placement_explanation:
-            chat_message += f'\n\n{placement_explanation}'
-        
-        # Add approved message to conversation
-        ChatSessionModel.add_message(
-            session_id,
-            'assistant',
-            chat_message,
-            sources=None,
-            document_content=None,
-            document_structure=None,
-            placement=None,
-            status='approved'
-        )
-        
-        return jsonify({
-            'success': True,
-            'message': chat_message,
-            'placement_applied': placement_applied,
-            'placement_explanation': placement_explanation,
-            'updated_document': updated_document_content[:500] + '...' if len(updated_document_content) > 500 else updated_document_content
-        }), 200
-    
-    except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        print(f"Error in approve_content: {str(e)}")
         print(f"Traceback: {error_traceback}")
         return jsonify({'error': str(e), 'traceback': error_traceback}), 500
 
@@ -1670,7 +921,6 @@ def direct_insert_content():
             chat_message,
             sources=None,
             document_content=None,
-            document_structure=None,
             placement=None,
             status='approved'
         )
@@ -1729,7 +979,6 @@ def clear_pending_content_route():
             'Content inserted at cursor position.',
             sources=None,
             document_content=None,
-            document_structure=None,
             placement=None,
             status='approved'
         )

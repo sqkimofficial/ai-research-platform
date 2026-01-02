@@ -25,7 +25,7 @@ const formatMessageContent = (content) => {
   });
 };
 
-const MessageBubble = ({ message, onApprove, onInsertWithAI, onEdit, editedContent }) => {
+const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'write' }) => {
   const isUser = message.role === 'user';
   const sources = message.sources || [];
   const attachedSections = message.attachedSections || [];
@@ -99,14 +99,6 @@ const MessageBubble = ({ message, onApprove, onInsertWithAI, onEdit, editedConte
     const contentToApprove = isEditing ? localEditedContent : documentContent;
     if (onApprove && pendingContentId) {
       onApprove(pendingContentId, contentToApprove);
-    }
-  };
-
-  const handleInsertWithAI = () => {
-    // Use AI (Stage 2) to intelligently place content in document
-    const contentToApprove = isEditing ? localEditedContent : documentContent;
-    if (onInsertWithAI && pendingContentId) {
-      onInsertWithAI(pendingContentId, contentToApprove);
     }
   };
 
@@ -253,15 +245,13 @@ const MessageBubble = ({ message, onApprove, onInsertWithAI, onEdit, editedConte
             {copied ? <CheckIconSvg className="action-icon" /> : <CopyIconSvg className="action-icon" />}
           </button>
           </div>
-          {documentContent && !isEditing && (
+          {/* Only show Insert button in write mode */}
+          {mode === 'write' && documentContent && !isEditing && (
             <div className="action-right">
               <button className="edit-content-btn" onClick={handleEdit}>Edit</button>
               <button className="insert-btn" onClick={handleApprove} title="Insert at cursor position (or end of document)">
                 <CheckIconSvg className="action-icon" />
                 <span>Insert</span>
-              </button>
-              <button className="insert-with-ai-btn" onClick={handleInsertWithAI} title="Let AI decide where to place content">
-                <span>Insert with AI</span>
               </button>
             </div>
           )}

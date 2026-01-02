@@ -413,50 +413,6 @@ const ChatWindow = ({
     setMessages((prev) => [...prev, successMessage]);
   };
 
-  // AI-assisted insertion using Stage 2 AI for intelligent placement
-  const handleInsertWithAI = async (pendingContentId, editedContent) => {
-    if (!sessionId) return;
-    
-    setLoading(true);
-    try {
-      // Use approve endpoint which triggers Stage 2 AI for placement
-      const response = await chatAPI.approveContent(sessionId, pendingContentId, editedContent, activeDocumentId);
-      
-      // Update message status
-      setMessages((prev) => prev.map(msg => 
-        msg.pending_content_id === pendingContentId
-          ? { ...msg, status: 'approved', document_content: null }
-          : msg
-      ));
-      
-      // Clear editing state
-      setEditingContent((prev) => {
-        const newState = { ...prev };
-        delete newState[pendingContentId];
-        return newState;
-      });
-      
-      // Notify parent to refresh document
-      if (onAIMessage) {
-        onAIMessage('approved');
-      }
-      
-      // Add success message
-      const successMessage = {
-        role: 'assistant',
-        content: response.data.message || 'Content approved and placed by AI successfully.',
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, successMessage]);
-      
-    } catch (error) {
-      console.error('Failed to approve content with AI:', error);
-      alert('Failed to approve content. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-  
   const handleEdit = (pendingContentId, editedContent) => {
     setEditingContent((prev) => ({
       ...prev,
@@ -647,9 +603,9 @@ const ChatWindow = ({
                   <MessageBubble 
                     message={pair.userMessage}
                     onApprove={handleApprove}
-                    onInsertWithAI={handleInsertWithAI}
                     onEdit={handleEdit}
                     editedContent={editingContent[pair.userMessage.pending_content_id]}
+                    mode={chatMode}
                   />
                 </div>
               )}
@@ -660,9 +616,9 @@ const ChatWindow = ({
                       key={index} 
                       message={message}
                       onApprove={handleApprove}
-                      onInsertWithAI={handleInsertWithAI}
                       onEdit={handleEdit}
                       editedContent={editingContent[message.pending_content_id]}
+                      mode={chatMode}
                     />
                   ))}
               </div>
