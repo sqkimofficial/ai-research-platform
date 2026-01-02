@@ -93,16 +93,12 @@ export const chatAPI = {
       edited_content: editedContent
     });
   },
-  rejectContent: (sessionId, pendingContentId) => {
-    return api.post('/api/chat/reject', {
+  // Clear pending content without modifying the document
+  // Used when client-side insertion handles the document update
+  clearPendingContent: (sessionId, pendingContentId) => {
+    return api.post('/api/chat/clear-pending', {
       session_id: sessionId,
       pending_content_id: pendingContentId
-    });
-  },
-  rewriteContent: (sessionId, originalMessage) => {
-    return api.post('/api/chat/rewrite', {
-      session_id: sessionId,
-      original_message: originalMessage
     });
   },
 };

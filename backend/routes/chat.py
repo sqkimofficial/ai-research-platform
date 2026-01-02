@@ -1689,9 +1689,11 @@ def direct_insert_content():
         print(f"Traceback: {error_traceback}")
         return jsonify({'error': str(e), 'traceback': error_traceback}), 500
 
-@chat_bp.route('/reject', methods=['POST'])
-def reject_content():
-    """Reject pending content"""
+@chat_bp.route('/clear-pending', methods=['POST'])
+def clear_pending_content_route():
+    """Clear pending content without modifying the document.
+    Used for client-side insertion where the frontend handles document updates.
+    """
     try:
         user_id = get_user_id_from_token()
         if not user_id:
@@ -1715,244 +1717,31 @@ def reject_content():
         # Verify pending content exists
         pending_data = ChatSessionModel.get_pending_content(session_id)
         if not pending_data or pending_data['pending_content_id'] != pending_content_id:
-            return jsonify({'error': 'Pending content not found'}), 404
+            return jsonify({'error': 'Pending content not found or already processed'}), 404
         
-        # Mark as rejected and clear pending content
+        # Clear pending content
         ChatSessionModel.clear_pending_content(session_id)
         
-        # Add rejected message to conversation
+        # Add approved message to conversation
         ChatSessionModel.add_message(
             session_id,
             'assistant',
-            'Content rejected. Would you like to request a rewrite?',
+            'Content inserted at cursor position.',
             sources=None,
             document_content=None,
             document_structure=None,
             placement=None,
-            status='rejected'
+            status='approved'
         )
         
         return jsonify({
             'success': True,
-            'message': 'Content rejected. Would you like to request a rewrite?'
+            'message': 'Content inserted at cursor position.'
         }), 200
     
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        print(f"Error in reject_content: {str(e)}")
+        print(f"Error in clear_pending_content: {str(e)}")
         print(f"Traceback: {error_traceback}")
         return jsonify({'error': str(e), 'traceback': error_traceback}), 500
-
-@chat_bp.route('/rewrite', methods=['POST'])
-def rewrite_content():
-    """Request a rewrite of rejected content"""
-    try:
-        user_id = get_user_id_from_token()
-        if not user_id:
-            return jsonify({'error': 'Unauthorized'}), 401
-        
-        data = request.get_json()
-        session_id = data.get('session_id')
-        original_message = data.get('original_message')
-        
-        if not session_id or not original_message:
-            return jsonify({'error': 'session_id and original_message are required'}), 400
-        
-        # Verify session belongs to user
-        session = ChatSessionModel.get_session(session_id)
-        if not session:
-            return jsonify({'error': 'Session not found'}), 404
-        
-        if session['user_id'] != user_id:
-            return jsonify({'error': 'Unauthorized'}), 403
-        
-        # Get conversation history to find rejected content context
-        messages = ChatSessionModel.get_messages(session_id)
-        rejected_content = None
-        
-        # Find the most recent rejected content
-        for msg in reversed(messages):
-            if msg.get('status') == 'rejected' and msg.get('document_content'):
-                rejected_content = msg.get('document_content')
-                break
-        
-        # Get document context for Stage 1 AI
-        session_dir = get_session_dir(session_id)
-        doc_path = session_dir / 'doc.md'
-        document_content = ''
-
-        if os.path.exists(doc_path):
-            with open(doc_path, 'r', encoding='utf-8') as f:
-                document_content = f.read()
-        
-        # Use semantic search for relevant context
-        if document_content:
-            relevant_chunks = vector_service.search_relevant_chunks(session_id, original_message, top_k=5)
-            if relevant_chunks:
-                context_parts = [chunk['chunk_text'] for chunk in relevant_chunks]
-                document_context = '\n\n'.join(context_parts)
-            else:
-                document_context = document_content[:2000]  # Limit context
-        else:
-            document_context = ''
-        
-        # Get available document types
-        available_types = DocumentTypeModel.get_all_types()
-        type_names = [t['type_name'] for t in available_types]
-        type_descriptions = {t['type_name']: t['description'] for t in available_types}
-        types_list = '\n'.join([f"- {name}: {type_descriptions.get(name, '')}" for name in type_names])
-        
-        # Stage 1 AI System Prompt with rejection context
-        rewrite_system_prompt = f"""You are a research assistant helping users write research papers. Your role is to GENERATE CONTENT ONLY - you do NOT decide where content should be placed in the document.
-
-CRITICAL: The user rejected previous content and is requesting a rewrite.
-Original user request: {original_message}
-Previous rejected content: {rejected_content if rejected_content else "None available"}
-
-Generate new content addressing the same request. Consider why the previous content might have been rejected and improve accordingly.
-
-The user has been building a research document. Here are the most relevant sections:
-{document_context}
-
-AVAILABLE DOCUMENT TYPES:
-{types_list}
-
-NEW DOCUMENT TYPES:
-If you need a document element type that doesn't exist in the list above, include it in your JSON response under "new_types".
-
-CRITICAL: CONTENT GENERATION ONLY - NO PLACEMENT
-- Your ONLY job is to generate high-quality research content
-- Do NOT provide placement instructions or decide where content should go
-- Do NOT include a "placement" field in your response
-- Focus on generating well-structured, accurate, properly formatted content
-
-Always respond in JSON format with exactly these keys:
-{{
-  "message": "your conversational response here (always provide this, even if brief). Use \\n for line breaks.",
-  "document_content": "structured markdown content to add (empty string '' if no document update needed). Use \\n for line breaks.",
-  "sources": ["array of source URLs, DOIs, or citations you referenced or reviewed. Empty array [] if no sources"],
-  "new_types": [array of new document types to create. Empty array [] if no new types needed]
-}}"""
-        
-        # Call Stage 1 AI for rewrite
-        rewrite_messages = [
-            {'role': 'system', 'content': rewrite_system_prompt},
-            {'role': 'user', 'content': f'Please rewrite the content for: {original_message}'}
-        ]
-        
-        try:
-            rewrite_response = perplexity_service.chat_completion(rewrite_messages)
-            rewrite_content = rewrite_response.get('content', '')
-            
-            if not rewrite_content:
-                raise Exception("Rewrite AI returned empty response")
-            
-            # Parse rewrite response
-            rewrite_parsed = perplexity_service.parse_json_response(rewrite_content)
-            chat_message = rewrite_parsed.get('message', '')
-            document_content_to_add = rewrite_parsed.get('document_content', '')
-            sources = rewrite_parsed.get('sources', [])
-            
-            # Handle new document types from AI response
-            new_types = rewrite_parsed.get('new_types', [])
-            for new_type in new_types:
-                if isinstance(new_type, dict) and new_type.get('type_name'):
-                    try:
-                        type_id = DocumentTypeModel.create_type(
-                            type_name=new_type.get('type_name'),
-                            description=new_type.get('description', ''),
-                            metadata_schema=new_type.get('metadata_schema', {}),
-                            is_system=False
-                        )
-                        if type_id:
-                            print(f"DEBUG: Created new document type in rewrite: {new_type.get('type_name')}")
-                    except Exception as type_error:
-                        print(f"DEBUG: Failed to create document type {new_type.get('type_name')}: {type_error}")
-            
-        except Exception as e:
-            print(f"Error in rewrite AI call: {e}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({'error': f'Failed to generate rewrite: {str(e)}'}), 500
-        
-        # Store as new pending content
-        if document_content_to_add.strip():
-            status = "pending_approval"
-            
-            # Track session start timestamp (when user requested rewrite)
-            all_messages = ChatSessionModel.get_messages(session_id)
-            last_user_message = None
-            for msg in reversed(all_messages):
-                if msg.get('role') == 'user':
-                    last_user_message = msg
-                    break
-            
-            session_start_timestamp = None
-            if last_user_message and last_user_message.get('timestamp'):
-                msg_timestamp = last_user_message.get('timestamp')
-                if isinstance(msg_timestamp, str):
-                    session_start_timestamp = msg_timestamp
-                else:
-                    session_start_timestamp = msg_timestamp.isoformat()
-            else:
-                session_start_timestamp = datetime.utcnow().isoformat()
-            
-            pending_content_data_to_store = {
-                'document_content': document_content_to_add,
-                'sources': sources,
-                'session_start_timestamp': session_start_timestamp,
-                'timestamp': datetime.utcnow().isoformat()
-            }
-            
-            pending_content_id = ChatSessionModel.update_pending_content(session_id, pending_content_data_to_store)
-            
-            # Store message with pending status
-            ChatSessionModel.add_message(
-                session_id,
-                'assistant',
-                chat_message,
-                sources=sources,
-                document_content=document_content_to_add,
-                placement=None,
-                status=status,
-                pending_content_id=pending_content_id
-            )
-            
-            return jsonify({
-                'response': chat_message,
-                'document_content': document_content_to_add,
-                'sources': sources,
-                'status': status,
-                'pending_content_id': pending_content_id,
-                'session_id': session_id
-            }), 200
-        else:
-            # No content generated
-            ChatSessionModel.add_message(
-                session_id,
-                'assistant',
-                chat_message,
-                sources=sources,
-                document_content=None,
-                document_structure=None,
-                placement=None,
-                status=None
-            )
-            
-            return jsonify({
-                'response': chat_message,
-                'document_content': '',
-                'document_structure': [],
-                'sources': sources,
-                'session_id': session_id
-            }), 200
-    
-    except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        print(f"Error in rewrite_content: {str(e)}")
-        print(f"Traceback: {error_traceback}")
-        return jsonify({'error': str(e), 'traceback': error_traceback}), 500
-
-

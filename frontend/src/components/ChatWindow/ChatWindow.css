@@ -629,8 +629,8 @@
   height: 18px;
 }
 
-/* Approve/Reject Buttons */
-.approve-btn {
+/* Insert Buttons */
+.insert-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -644,17 +644,17 @@
   transition: all 0.2s ease;
 }
 
-.approve-btn:hover {
+.insert-btn:hover {
   background: #0f7d48;
 }
 
-.approve-btn svg {
+.insert-btn svg {
   width: 16px;
   height: 16px;
   color: var(--color-white);
 }
 
-.approve-btn span {
+.insert-btn span {
   font-size: 11px;
   font-weight: 500;
   color: var(--color-white);
@@ -681,37 +681,6 @@
 }
 
 .insert-with-ai-btn span {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-white);
-  line-height: 1.5;
-}
-
-.reject-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  height: 28px;
-  padding: 4px 8px;
-  background: #b32525;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.reject-btn:hover {
-  background: #8f1e1e;
-}
-
-.reject-btn svg {
-  width: 16px;
-  height: 16px;
-  color: var(--color-white);
-}
-
-.reject-btn span {
   font-size: 11px;
   font-weight: 500;
   color: var(--color-white);
@@ -1252,86 +1221,6 @@
 }
 
 .cancel-edit-btn:hover {
-  background: rgba(0, 50, 98, 0.15);
-}
-
-/* Content Status Styles */
-.content-status {
-  margin-top: 12px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.approved-status {
-  background: rgba(20, 154, 90, 0.1);
-  color: #149a5a;
-  border: 1px solid rgba(20, 154, 90, 0.2);
-}
-
-.rejected-status {
-  background: rgba(179, 37, 37, 0.1);
-  color: #b32525;
-  border: 1px solid rgba(179, 37, 37, 0.2);
-}
-
-/* Rewrite Prompt Styles */
-.rewrite-prompt {
-  margin-top: 16px;
-  padding: 16px;
-  background: rgba(255, 193, 7, 0.1);
-  border: 1px solid rgba(255, 193, 7, 0.3);
-  border-radius: 8px;
-}
-
-.rewrite-prompt p {
-  margin: 0 0 12px 0;
-  color: #856404;
-  font-size: 13px;
-}
-
-.rewrite-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.rewrite-btn {
-  height: 28px;
-  padding: 4px 12px;
-  background: rgba(255, 193, 7, 0.3);
-  border: 1px solid rgba(255, 193, 7, 0.5);
-  border-radius: 5px;
-  font-size: 11px;
-  font-weight: 500;
-  color: #856404;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.rewrite-btn:hover:not(:disabled) {
-  background: rgba(255, 193, 7, 0.4);
-}
-
-.rewrite-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.cancel-rewrite-btn {
-  height: 28px;
-  padding: 4px 12px;
-  background: rgba(0, 50, 98, 0.1);
-  border: 1px solid rgba(0, 50, 98, 0.2);
-  border-radius: 5px;
-  font-size: 11px;
-  font-weight: 500;
-  color: rgba(0, 50, 98, 0.7);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.cancel-rewrite-btn:hover {
   background: rgba(0, 50, 98, 0.15);
 }
 

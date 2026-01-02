@@ -192,7 +192,7 @@ const FileDocumentIconLarge = () => (
   </svg>
 );
 
-const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, highlightsTabTrigger, pdfTabTrigger, researchDocsTabTrigger }) => {
+const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, highlightsTabTrigger, pdfTabTrigger, researchDocsTabTrigger, onEditorReady }) => {
   const [documents, setDocuments] = useState([]); // All open documents
   const [activeDocumentId, setActiveDocumentId] = useState(null); // Currently active tab
   const [content, setContent] = useState(''); // Markdown content (storage format)
@@ -1153,6 +1153,41 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       editorRef.current.redo();
     }
   }, []);
+
+  // Insert content at the saved cursor position (or end of document if no saved position)
+  // This enables Google Docs-like behavior where the cursor position is remembered
+  // even when user clicks in a different panel (like the chat window)
+  const insertContentAtCursor = useCallback((htmlContent) => {
+    if (editorRef.current && editorRef.current.insertAtCursor) {
+      const success = editorRef.current.insertAtCursor(htmlContent);
+      if (success) {
+        // Trigger auto-save after insertion
+        const newHtml = editorRef.current.getHTML?.() || '';
+        if (newHtml) {
+          scheduleAutoSave(newHtml);
+        }
+      }
+      return success;
+    }
+    return false;
+  }, [scheduleAutoSave]);
+
+  // Check if there's a saved cursor position
+  const hasSavedCursorPosition = useCallback(() => {
+    return editorRef.current?.hasSavedCursorPosition?.() || false;
+  }, []);
+
+  // Expose editor methods to parent component via callback
+  // This allows ChatWindow to insert content at the cursor position
+  useEffect(() => {
+    if (onEditorReady) {
+      onEditorReady({
+        insertContentAtCursor,
+        hasSavedCursorPosition,
+        getActiveDocumentId: () => activeDocumentId,
+      });
+    }
+  }, [onEditorReady, insertContentAtCursor, hasSavedCursorPosition, activeDocumentId]);
 
   // Save on page unload/blur
   useEffect(() => {

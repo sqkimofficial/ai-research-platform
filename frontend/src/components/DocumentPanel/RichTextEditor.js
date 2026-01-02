@@ -1,4 +1,4 @@
-import React, { useImperativeHandle, forwardRef, useEffect, useRef } from 'react';
+import React, { useImperativeHandle, forwardRef, useEffect, useRef, useCallback, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Table } from '@tiptap/extension-table';
@@ -329,6 +329,16 @@ const RichTextEditor = forwardRef(({
   const isExternalUpdate = useRef(false);
   // Track the last value we set externally
   const lastExternalValue = useRef(value);
+  // Track the saved cursor position (persists when user clicks outside document)
+  // This enables Google Docs-like behavior where cursor position is remembered
+  const savedSelectionRef = useRef(null);
+  
+  // Track editor focus state for ghost cursor display
+  const [isEditorFocused, setIsEditorFocused] = useState(false);
+  // Track ghost cursor position (DOM coordinates) for visual indicator
+  const [ghostCursorPosition, setGhostCursorPosition] = useState(null);
+  // Ref to the editor container for positioning calculations
+  const editorContainerRef = useRef(null);
   
   const editor = useEditor({
     extensions: [
@@ -379,6 +389,52 @@ const RichTextEditor = forwardRef(({
         const html = editor.getHTML();
         onChange(html);
       }
+    },
+    // Save cursor position when editor loses focus (Google Docs-like behavior)
+    onBlur: ({ editor }) => {
+      // Save the selection state when editor loses focus
+      // This allows us to insert content at the last cursor position
+      // even when user clicks in a different panel (like chat)
+      savedSelectionRef.current = {
+        from: editor.state.selection.from,
+        to: editor.state.selection.to,
+        anchor: editor.state.selection.anchor,
+      };
+      
+      setIsEditorFocused(false);
+      
+      // Calculate the DOM coordinates of the cursor for the ghost cursor indicator
+      try {
+        const { from } = editor.state.selection;
+        const coords = editor.view.coordsAtPos(from);
+        
+        if (coords && editorContainerRef.current) {
+          // Find the content wrapper which contains the ghost cursor
+          const contentWrapper = editorContainerRef.current.querySelector('.tiptap-editor-content-wrapper');
+          const wrapperRect = contentWrapper ? contentWrapper.getBoundingClientRect() : editorContainerRef.current.getBoundingClientRect();
+          
+          // Find the scrollable editor content element
+          const editorContent = editorContainerRef.current.querySelector('.tiptap-editor-content');
+          const scrollTop = editorContent ? editorContent.scrollTop : 0;
+          const scrollLeft = editorContent ? editorContent.scrollLeft : 0;
+          
+          // Calculate position relative to the content wrapper, accounting for scroll
+          setGhostCursorPosition({
+            top: coords.top - wrapperRect.top + scrollTop,
+            left: coords.left - wrapperRect.left + scrollLeft,
+            height: coords.bottom - coords.top || 20, // Default height if not available
+          });
+        }
+      } catch (e) {
+        // If we can't get coordinates, just don't show ghost cursor
+        console.warn('Could not calculate ghost cursor position:', e);
+        setGhostCursorPosition(null);
+      }
+    },
+    // Clear ghost cursor when editor gains focus
+    onFocus: () => {
+      setIsEditorFocused(true);
+      setGhostCursorPosition(null);
     },
   });
 
@@ -434,7 +490,7 @@ const RichTextEditor = forwardRef(({
     }
   }, [readOnly, editor]);
 
-  // Expose undo/redo methods to parent component
+  // Expose methods to parent component
   useImperativeHandle(ref, () => ({
     undo: () => {
       if (editor) {
@@ -451,6 +507,51 @@ const RichTextEditor = forwardRef(({
       if (editor) {
         editor.chain().focus().run();
       }
+    },
+    // Get the saved cursor position (null if user never clicked in document)
+    getSavedCursorPosition: () => savedSelectionRef.current,
+    
+    // Check if there's a saved cursor position
+    hasSavedCursorPosition: () => savedSelectionRef.current !== null,
+    
+    // Insert content at the saved cursor position, or at end if no position saved
+    // This enables Google Docs-like behavior where clicking "Insert" in chat
+    // places content at the last known cursor position in the document
+    insertAtCursor: (htmlContent) => {
+      if (!editor) return false;
+      
+      if (savedSelectionRef.current) {
+        // Restore selection and insert at that position
+        editor
+          .chain()
+          .focus()
+          .setTextSelection(savedSelectionRef.current.from)
+          .insertContent(htmlContent)
+          .run();
+      } else {
+        // No saved position - append to end of document
+        const endPosition = editor.state.doc.content.size;
+        editor
+          .chain()
+          .focus()
+          .setTextSelection(endPosition)
+          .insertContent(htmlContent)
+          .run();
+      }
+      return true;
+    },
+    
+    // Clear the saved cursor position (useful for edge cases)
+    clearSavedPosition: () => {
+      savedSelectionRef.current = null;
+    },
+    
+    // Get the current HTML content
+    getHTML: () => {
+      if (editor) {
+        return editor.getHTML();
+      }
+      return '';
     },
   }));
 
@@ -473,7 +574,31 @@ const RichTextEditor = forwardRef(({
   return (
     <div className="rich-text-editor-container">
       <MenuBar editor={editor} />
-      <EditorContent editor={editor} className="tiptap-editor-content" />
+      <div 
+        ref={editorContainerRef} 
+        className={`tiptap-editor-wrapper ${!isEditorFocused && ghostCursorPosition ? 'has-ghost-cursor' : ''}`}
+      >
+        <div className="tiptap-editor-content-wrapper" style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <EditorContent editor={editor} className="tiptap-editor-content" />
+          {/* Ghost cursor indicator - shows where cursor was when user clicked outside */}
+          {/* This mimics Google Docs behavior: thicker, non-blinking line at last cursor position */}
+          {!isEditorFocused && ghostCursorPosition && (
+            <div 
+              className="ghost-cursor-indicator"
+              style={{
+                position: 'absolute',
+                top: `${ghostCursorPosition.top}px`,
+                left: `${ghostCursorPosition.left}px`,
+                height: `${ghostCursorPosition.height}px`,
+                width: '2px',
+                backgroundColor: 'rgba(0, 50, 98, 0.8)',
+                pointerEvents: 'none',
+                zIndex: 10,
+              }}
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
 });

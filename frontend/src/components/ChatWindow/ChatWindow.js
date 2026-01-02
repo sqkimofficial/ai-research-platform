@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { chatAPI } from '../../services/api';
 import { getSessionId, setSessionId } from '../../utils/auth';
+import { markdownToHtml } from '../../utils/markdownConverter';
 import MessageBubble from './MessageBubble';
 import ProjectSelector from '../ProjectSelector/ProjectSelector';
 import './ChatWindow.css';
@@ -25,7 +26,8 @@ const ChatWindow = ({
   attachedSections = [], 
   attachedHighlights = [], 
   onClearAttachedHighlights,
-  onRemoveAttachedHighlight
+  onRemoveAttachedHighlight,
+  onInsertContentAtCursor  // New: callback for cursor-aware insertion (Google Docs-like behavior)
 }) => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -34,9 +36,6 @@ const ChatWindow = ({
   const [currentAttachedSections, setCurrentAttachedSections] = useState([]);
   const [currentAttachedHighlights, setCurrentAttachedHighlights] = useState([]);
   const [editingContent, setEditingContent] = useState({}); // { pendingContentId: editedContent }
-  const [showRewritePrompt, setShowRewritePrompt] = useState(false);
-  const [rejectedMessageId, setRejectedMessageId] = useState(null);
-  const [originalUserMessage, setOriginalUserMessage] = useState('');
   const [showProjectSelector, setShowProjectSelector] = useState(false);
   const [pendingMessage, setPendingMessage] = useState(null); // Store message while selecting project
   const [chatMode, setChatMode] = useState('write'); // 'write' | 'research'
@@ -290,11 +289,6 @@ const ChatWindow = ({
       };
       setMessages((prev) => [...prev, aiMessage]);
       
-      // Store original user message for rewrite if needed
-      if (status === 'pending_approval') {
-        setOriginalUserMessage(userMessage);
-      }
-      
       // Don't notify parent for pending content - only notify when approved
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -311,40 +305,73 @@ const ChatWindow = ({
   };
   
   // Direct insertion at cursor position or end of document (no AI placement)
+  // Uses Google Docs-like behavior: inserts at the last known cursor position
+  // even if user clicked away from the document (e.g., into chat window)
   const handleApprove = async (pendingContentId, editedContent) => {
     if (!sessionId) return;
     
     setLoading(true);
     try {
-      // Use direct insert endpoint - inserts at cursor or end of document
-      const response = await chatAPI.directInsertContent(sessionId, pendingContentId, editedContent, activeDocumentId);
+      // Find the message with this pending content to get the content
+      const pendingMessage = messages.find(msg => msg.pending_content_id === pendingContentId);
+      const contentToInsert = editedContent || pendingMessage?.document_content || '';
       
-      // Update message status
-      setMessages((prev) => prev.map(msg => 
-        msg.pending_content_id === pendingContentId
-          ? { ...msg, status: 'approved', document_content: null }
-          : msg
-      ));
-      
-      // Clear editing state
-      setEditingContent((prev) => {
-        const newState = { ...prev };
-        delete newState[pendingContentId];
-        return newState;
-      });
-      
-      // Notify parent to refresh document
-      if (onAIMessage) {
-        onAIMessage('approved');
+      if (!contentToInsert) {
+        alert('No content to insert.');
+        setLoading(false);
+        return;
       }
       
-      // Add success message
-      const successMessage = {
-        role: 'assistant',
-        content: response.data.message || 'Content inserted successfully.',
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, successMessage]);
+      // Convert markdown to HTML for the TipTap editor
+      const htmlContent = markdownToHtml(contentToInsert);
+      
+      // Use client-side insertion at cursor position (Google Docs-like behavior)
+      // This inserts at the saved cursor position, or at end if no position saved
+      if (onInsertContentAtCursor) {
+        const inserted = onInsertContentAtCursor(htmlContent);
+        
+        if (inserted) {
+          // Client-side insertion successful - now clear pending content on backend
+          try {
+            await chatAPI.clearPendingContent(sessionId, pendingContentId);
+          } catch (clearError) {
+            // Log but don't fail - the content is already inserted
+            console.warn('Failed to clear pending content on backend:', clearError);
+          }
+          
+          // Update message status
+          setMessages((prev) => prev.map(msg => 
+            msg.pending_content_id === pendingContentId
+              ? { ...msg, status: 'approved', document_content: null }
+              : msg
+          ));
+          
+          // Clear editing state
+          setEditingContent((prev) => {
+            const newState = { ...prev };
+            delete newState[pendingContentId];
+            return newState;
+          });
+          
+          // Add success message
+          const successMessage = {
+            role: 'assistant',
+            content: 'Content inserted at cursor position.',
+            timestamp: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, successMessage]);
+          
+          // Note: We don't call onAIMessage here because auto-save will handle
+          // syncing the document to backend, so no need to trigger a refresh
+        } else {
+          // Client-side insertion failed - fall back to backend insertion
+          console.warn('Client-side insertion failed, falling back to backend');
+          await fallbackToBackendInsertion(pendingContentId, editedContent);
+        }
+      } else {
+        // No client-side insertion available - use backend
+        await fallbackToBackendInsertion(pendingContentId, editedContent);
+      }
       
     } catch (error) {
       console.error('Failed to insert content:', error);
@@ -352,6 +379,38 @@ const ChatWindow = ({
     } finally {
       setLoading(false);
     }
+  };
+  
+  // Fallback to backend insertion (appends to end of document)
+  const fallbackToBackendInsertion = async (pendingContentId, editedContent) => {
+    const response = await chatAPI.directInsertContent(sessionId, pendingContentId, editedContent, activeDocumentId);
+    
+    // Update message status
+    setMessages((prev) => prev.map(msg => 
+      msg.pending_content_id === pendingContentId
+        ? { ...msg, status: 'approved', document_content: null }
+        : msg
+    ));
+    
+    // Clear editing state
+    setEditingContent((prev) => {
+      const newState = { ...prev };
+      delete newState[pendingContentId];
+      return newState;
+    });
+    
+    // Notify parent to refresh document
+    if (onAIMessage) {
+      onAIMessage('approved');
+    }
+    
+    // Add success message
+    const successMessage = {
+      role: 'assistant',
+      content: response.data.message || 'Content inserted at end of document.',
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, successMessage]);
   };
 
   // AI-assisted insertion using Stage 2 AI for intelligent placement
@@ -393,74 +452,6 @@ const ChatWindow = ({
     } catch (error) {
       console.error('Failed to approve content with AI:', error);
       alert('Failed to approve content. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  const handleReject = async (pendingContentId) => {
-    if (!sessionId) return;
-    
-    setLoading(true);
-    try {
-      const response = await chatAPI.rejectContent(sessionId, pendingContentId);
-      
-      // Update message status
-      setMessages((prev) => prev.map(msg => 
-        msg.pending_content_id === pendingContentId
-          ? { ...msg, status: 'rejected' }
-          : msg
-      ));
-      
-      // Show rewrite prompt
-      setShowRewritePrompt(true);
-      setRejectedMessageId(pendingContentId);
-      
-      // Add rejection message
-      const rejectionMessage = {
-        role: 'assistant',
-        content: response.data.message || 'Content rejected. Would you like to request a rewrite?',
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, rejectionMessage]);
-      
-    } catch (error) {
-      console.error('Failed to reject content:', error);
-      alert('Failed to reject content. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  const handleRewrite = async () => {
-    if (!sessionId || !originalUserMessage) return;
-    
-    setLoading(true);
-    setShowRewritePrompt(false);
-    
-    try {
-      const response = await chatAPI.rewriteContent(sessionId, originalUserMessage);
-      
-      const chatMessage = response.data.response || '';
-      const documentContent = response.data.document_content || '';
-      const sources = response.data.sources || [];
-      const status = response.data.status;
-      const pendingContentId = response.data.pending_content_id;
-      
-      const rewriteMessage = {
-        role: 'assistant',
-        content: chatMessage,
-        sources: sources,
-        document_content: documentContent,
-        status: status,
-        pending_content_id: pendingContentId,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, rewriteMessage]);
-      
-    } catch (error) {
-      console.error('Failed to rewrite content:', error);
-      alert('Failed to rewrite content. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -657,7 +648,6 @@ const ChatWindow = ({
                     message={pair.userMessage}
                     onApprove={handleApprove}
                     onInsertWithAI={handleInsertWithAI}
-                    onReject={handleReject}
                     onEdit={handleEdit}
                     editedContent={editingContent[pair.userMessage.pending_content_id]}
                   />
@@ -671,7 +661,6 @@ const ChatWindow = ({
                       message={message}
                       onApprove={handleApprove}
                       onInsertWithAI={handleInsertWithAI}
-                      onReject={handleReject}
                       onEdit={handleEdit}
                       editedContent={editingContent[message.pending_content_id]}
                     />
@@ -679,19 +668,6 @@ const ChatWindow = ({
               </div>
             </div>
           ))}
-        {showRewritePrompt && (
-          <div className="rewrite-prompt">
-            <p>Content was rejected. Would you like to request a rewrite?</p>
-            <div className="rewrite-actions">
-              <button className="rewrite-btn" onClick={handleRewrite} disabled={loading}>
-                Request Rewrite
-              </button>
-              <button className="cancel-rewrite-btn" onClick={() => setShowRewritePrompt(false)}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
         {loading && (
           <div className="loading-indicator">
             <div className="typing-dots">

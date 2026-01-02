@@ -33,6 +33,9 @@ function App() {
   const [showProjectSelector, setShowProjectSelector] = useState(false);
   const [currentProjectName, setCurrentProjectName] = useState('');
   
+  // Editor methods for cursor-aware content insertion (Google Docs-like behavior)
+  const editorMethodsRef = useRef(null);
+  
   // Resizable panel state
   const [chatWidth, setChatWidth] = useState(50); // percentage of resizable area
   const [isResizing, setIsResizing] = useState(false);
@@ -244,6 +247,21 @@ function App() {
     handleCloseChatPanel();
   };
 
+  // Handler for when DocumentPanel's editor is ready
+  // This gives us access to cursor-aware insertion methods
+  const handleEditorReady = useCallback((editorMethods) => {
+    editorMethodsRef.current = editorMethods;
+  }, []);
+
+  // Insert content at the cursor position in the document editor
+  // Uses the saved cursor position (Google Docs-like behavior)
+  const handleInsertContentAtCursor = useCallback((htmlContent) => {
+    if (editorMethodsRef.current?.insertContentAtCursor) {
+      return editorMethodsRef.current.insertContentAtCursor(htmlContent);
+    }
+    return false;
+  }, []);
+
   if (!isAuthenticated) {
     return (
       <div className="auth-container">
@@ -404,6 +422,7 @@ function App() {
               onRemoveAttachedHighlight={(highlightId) => {
                 setAttachedHighlights(prev => prev.filter(h => h.id !== highlightId));
               }}
+              onInsertContentAtCursor={handleInsertContentAtCursor}
             />
           </div>
           <div 
@@ -437,6 +456,7 @@ function App() {
               highlightsTabTrigger={highlightsTabTrigger}
               pdfTabTrigger={pdfTabTrigger}
               researchDocsTabTrigger={researchDocsTabTrigger}
+              onEditorReady={handleEditorReady}
             />
           </div>
           <RightPanel 

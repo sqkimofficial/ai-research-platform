@@ -7,7 +7,6 @@ import dropdownIcon from '../../assets/dropdown-icon.svg';
 import webIcon from '../../assets/web-icon.svg';
 import { ReactComponent as CopyIconSvg } from '../../assets/copy-icon.svg';
 import { ReactComponent as CheckIconSvg } from '../../assets/check-icon.svg';
-import { ReactComponent as CancelIconSvg } from '../../assets/cancel-icon.svg';
 
 // Helper function to format message content with bold subheadings
 const formatMessageContent = (content) => {
@@ -26,15 +25,13 @@ const formatMessageContent = (content) => {
   });
 };
 
-const MessageBubble = ({ message, onApprove, onInsertWithAI, onReject, onEdit, editedContent }) => {
+const MessageBubble = ({ message, onApprove, onInsertWithAI, onEdit, editedContent }) => {
   const isUser = message.role === 'user';
   const sources = message.sources || [];
   const attachedSections = message.attachedSections || [];
   const attachedHighlights = message.attachedHighlights || [];
-  const status = message.status;
   const documentContent = message.document_content || '';
   const pendingContentId = message.pending_content_id;
-  const isPendingApproval = status === 'pending_approval';
   const [isEditing, setIsEditing] = useState(false);
   const [localEditedContent, setLocalEditedContent] = useState(documentContent);
   const [copied, setCopied] = useState(false);
@@ -112,12 +109,6 @@ const MessageBubble = ({ message, onApprove, onInsertWithAI, onReject, onEdit, e
       onInsertWithAI(pendingContentId, contentToApprove);
     }
   };
-  
-  const handleReject = () => {
-    if (onReject && pendingContentId) {
-      onReject(pendingContentId);
-    }
-  };
 
   const handleCopy = async () => {
     try {
@@ -184,10 +175,10 @@ const MessageBubble = ({ message, onApprove, onInsertWithAI, onReject, onEdit, e
         </div>
       )}
       
-      {/* Pending Content Preview */}
-      {!isUser && isPendingApproval && documentContent && (
+      {/* Generated Content Preview */}
+      {!isUser && documentContent && (
         <div className="pending-content-preview">
-          <div className="pending-content-label">Generated Content (Pending Approval)</div>
+          <div className="pending-content-label">Generated Content</div>
           {isEditing ? (
             <div className="pending-content-editor">
               <textarea
@@ -212,14 +203,6 @@ const MessageBubble = ({ message, onApprove, onInsertWithAI, onReject, onEdit, e
             </div>
           )}
         </div>
-      )}
-      
-      {/* Status indicators */}
-      {!isUser && status === 'approved' && (
-        <div className="content-status approved-status">✓ Content approved and placed</div>
-      )}
-      {!isUser && status === 'rejected' && (
-        <div className="content-status rejected-status">✗ Content rejected</div>
       )}
       
       {/* Sources Section - New Design */}
@@ -263,26 +246,22 @@ const MessageBubble = ({ message, onApprove, onInsertWithAI, onReject, onEdit, e
       )}
 
       {/* Action Buttons Row - New Design */}
-      {!isUser && (isPendingApproval || sources.length > 0) && (
+      {!isUser && (documentContent || sources.length > 0) && (
         <div className="message-actions">
           <div className="action-left">
           <button className="copy-btn" onClick={handleCopy} title={copied ? "Copied!" : "Copy"}>
             {copied ? <CheckIconSvg className="action-icon" /> : <CopyIconSvg className="action-icon" />}
           </button>
           </div>
-          {isPendingApproval && !isEditing && (
+          {documentContent && !isEditing && (
             <div className="action-right">
               <button className="edit-content-btn" onClick={handleEdit}>Edit</button>
-              <button className="approve-btn" onClick={handleApprove} title="Insert at cursor position (or end of document)">
+              <button className="insert-btn" onClick={handleApprove} title="Insert at cursor position (or end of document)">
                 <CheckIconSvg className="action-icon" />
-                <span>Approve</span>
+                <span>Insert</span>
               </button>
               <button className="insert-with-ai-btn" onClick={handleInsertWithAI} title="Let AI decide where to place content">
                 <span>Insert with AI</span>
-              </button>
-              <button className="reject-btn" onClick={handleReject}>
-                <CancelIconSvg className="action-icon" />
-                <span>Reject</span>
               </button>
             </div>
           )}

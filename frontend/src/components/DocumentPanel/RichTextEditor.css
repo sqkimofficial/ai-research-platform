@@ -408,3 +408,43 @@
   pointer-events: none;
 }
 
+/* Editor wrapper for ghost cursor positioning */
+.tiptap-editor-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tiptap-editor-content-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.tiptap-editor-wrapper .tiptap-editor-content {
+  flex: 1;
+}
+
+/* Ghost cursor indicator - shows where cursor was when user clicked outside */
+/* This mimics Google Docs behavior: thicker, non-blinking line */
+.ghost-cursor-indicator {
+  position: absolute;
+  width: 2px;
+  background-color: rgba(0, 50, 98, 0.8);
+  pointer-events: none;
+  z-index: 100;
+  /* No animation - static line like Google Docs */
+  transition: none;
+  /* Slightly rounded edges for a polished look */
+  border-radius: 1px;
+}
+
+/* Hide the default blinking caret when editor is not focused but ghost cursor is shown */
+.tiptap-editor-wrapper.has-ghost-cursor .tiptap-editor-content .ProseMirror-focused .ProseMirror-gapcursor,
+.tiptap-editor-wrapper.has-ghost-cursor .tiptap-editor-content .ProseMirror .ProseMirror-cursor {
+  display: none;
+}
+
