@@ -9,6 +9,7 @@ import { ReactComponent as CopyIconSvg } from '../../assets/copy-icon.svg';
 import { ReactComponent as CheckIconSvg } from '../../assets/check-icon.svg';
 import { ReactComponent as EditSimpleIcon } from '../../assets/edit-simple.svg';
 import { ReactComponent as InsertIcon } from '../../assets/insert-icon.svg.svg';
+import expandIcon from '../../assets/expand-icon.svg';
 
 // Helper function to format message content with bold subheadings
 const formatMessageContent = (content) => {
@@ -34,12 +35,15 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
   const attachedHighlights = message.attachedHighlights || [];
   const documentContent = message.document_content || '';
   const pendingContentId = message.pending_content_id;
+  const messageStatus = message.status || '';
   const [isEditing, setIsEditing] = useState(false);
   const [localEditedContent, setLocalEditedContent] = useState(documentContent);
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
   const [isSourcesOpen, setIsSourcesOpen] = useState(false);
+  const [isInserted, setIsInserted] = useState(messageStatus === 'approved');
+  const [isContentExpanded, setIsContentExpanded] = useState(false);
   const contentWrapperRef = useRef(null);
   const contentRef = useRef(null);
   const sourcesDropdownRef = useRef(null);
@@ -81,6 +85,11 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
     };
   }, [checkOverflow, message.content]);
 
+  // Initialize isInserted from message status
+  useEffect(() => {
+    setIsInserted(messageStatus === 'approved');
+  }, [messageStatus]);
+
   // Close sources dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -114,6 +123,8 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
     const contentToApprove = isEditing ? localEditedContent : documentContent;
     if (onApprove && pendingContentId) {
       onApprove(pendingContentId, contentToApprove);
+      setIsInserted(true);
+      setIsContentExpanded(false);
     }
   };
 
@@ -187,7 +198,22 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
       {/* Generated Content Preview */}
       {!isUser && documentContent && (
         <div className="pending-content-preview">
-          {isEditing ? (
+          {isInserted && !isContentExpanded ? (
+            <div className="inserted-content-collapsed">
+              <p className="inserted-content-label">Content inserted in document</p>
+              <button 
+                className="expand-content-btn"
+                onClick={() => setIsContentExpanded(true)}
+                title="Expand content"
+              >
+                <img
+                  src={expandIcon}
+                  alt=""
+                  className="expand-content-icon"
+                />
+              </button>
+            </div>
+          ) : isEditing ? (
             <div className="pending-content-editor">
               <textarea
                 className="content-editor-textarea"
@@ -201,18 +227,34 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
               </div>
             </div>
           ) : (
-            <div className="pending-content-preview-box">
-              <div className="pending-content-preview-markdown markdown-body">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[rehypeRaw]}
-                >
-                  {editedContent || documentContent}
-                </ReactMarkdown>
+            <div className="pending-content-preview-wrapper">
+              <div className="pending-content-preview-box">
+                <div className="pending-content-preview-markdown markdown-body">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeRaw]}
+                  >
+                    {editedContent || documentContent}
+                  </ReactMarkdown>
+                </div>
               </div>
-              {mode === 'write' && (
+              {mode === 'write' && !isInserted && (
                 <button className="inline-edit-btn" onClick={handleEdit} title="Edit">
                   <EditSimpleIcon className="inline-edit-icon" />
+                </button>
+              )}
+              {isInserted && isContentExpanded && (
+                <button 
+                  className="collapse-content-btn"
+                  onClick={() => setIsContentExpanded(false)}
+                  title="Collapse content"
+                >
+                  <img
+                    src={expandIcon}
+                    alt=""
+                    className="expand-content-icon"
+                    style={{ transform: 'rotate(180deg)' }}
+                  />
                 </button>
               )}
             </div>
@@ -276,7 +318,7 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
           )}
           
           {/* Action Buttons */}
-          {mode === 'write' && documentContent && !isEditing && (
+          {mode === 'write' && documentContent && !isEditing && !isInserted && (
             <div className="action-buttons-group">
               <button 
                 className="action-button copy-action-btn" 

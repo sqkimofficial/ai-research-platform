@@ -8,7 +8,9 @@ import { ReactComponent as CancelIcon } from '../../assets/cancel-icon.svg';
 import { ReactComponent as DropdownIcon } from '../../assets/dropdown-icon.svg';
 import { ReactComponent as StarIcon } from '../../assets/star.svg';
 import { ReactComponent as StarToggledIcon } from '../../assets/star-toggled.svg';
+import { ReactComponent as CheckIcon } from '../../assets/check-icon.svg';
 import ProjectSelector from '../ProjectSelector/ProjectSelector';
+import { projectAPI } from '../../services/api';
 
 const LeftSidebar = ({ 
   onLogout, 
@@ -34,10 +36,15 @@ const LeftSidebar = ({
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showProjectSelector, setShowProjectSelector] = useState(false);
+  const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
+  const [projects, setProjects] = useState([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [currentProjectId, setCurrentProjectId] = useState(null);
   const [hoverTimeout, setHoverTimeout] = useState(null);
   const [favorites, setFavorites] = useState(new Set());
   const menuRef = useRef(null);
   const sidebarRef = useRef(null);
+  const projectDropdownRef = useRef(null);
 
   // Get user first name from localStorage
   const getUserFirstName = () => {
@@ -64,6 +71,7 @@ const LeftSidebar = ({
       setHoverTimeout(null);
     }
     setIsExpanded(false);
+    setIsProjectDropdownOpen(false);
   };
 
   // Close menu when clicking outside
@@ -72,15 +80,18 @@ const LeftSidebar = ({
       if (menuRef.current && !menuRef.current.contains(event.target)) {
         setShowAccountMenu(false);
       }
+      if (projectDropdownRef.current && !projectDropdownRef.current.contains(event.target)) {
+        setIsProjectDropdownOpen(false);
+      }
     };
 
-    if (showAccountMenu) {
+    if (showAccountMenu || isProjectDropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showAccountMenu]);
+  }, [showAccountMenu, isProjectDropdownOpen]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -109,7 +120,78 @@ const LeftSidebar = ({
     if (onChangeProject) {
       onChangeProject(projectId, projectName);
     }
+    setCurrentProjectId(projectId);
+    localStorage.setItem('selectedProjectId', projectId);
     setShowProjectSelector(false);
+    setIsProjectDropdownOpen(false);
+  };
+
+  // Get current project ID from localStorage on mount
+  useEffect(() => {
+    const savedProjectId = localStorage.getItem('selectedProjectId');
+    if (savedProjectId) {
+      setCurrentProjectId(savedProjectId);
+    }
+  }, []);
+
+  // Update current project ID when currentProjectName changes
+  useEffect(() => {
+    if (currentProjectName && projects.length > 0 && !currentProjectId) {
+      const currentProject = projects.find(
+        p => p.project_name === currentProjectName
+      );
+      if (currentProject) {
+        setCurrentProjectId(currentProject.project_id);
+      }
+    }
+  }, [currentProjectName, projects, currentProjectId]);
+
+  // Load projects when dropdown opens
+  useEffect(() => {
+    if (isProjectDropdownOpen) {
+      loadProjects();
+    }
+  }, [isProjectDropdownOpen]);
+
+  const loadProjects = async () => {
+    try {
+      setLoadingProjects(true);
+      const response = await projectAPI.getAllProjects();
+      setProjects(response.data.projects || []);
+      
+      // Find current project ID from projects list if we have currentProjectName
+      if (currentProjectName && !currentProjectId) {
+        const currentProject = response.data.projects?.find(
+          p => p.project_name === currentProjectName
+        );
+        if (currentProject) {
+          setCurrentProjectId(currentProject.project_id);
+        }
+      }
+      
+      // Also check localStorage
+      const savedProjectId = localStorage.getItem('selectedProjectId');
+      if (savedProjectId && !currentProjectId) {
+        setCurrentProjectId(savedProjectId);
+      }
+    } catch (err) {
+      console.error('Failed to load projects:', err);
+    } finally {
+      setLoadingProjects(false);
+    }
+  };
+
+  const handleProjectDropdownClick = () => {
+    setIsProjectDropdownOpen((prev) => !prev);
+  };
+
+  const handleProjectItemClick = (project) => {
+    handleSelectProject(project.project_id, project.project_name);
+  };
+
+  const handleNewProjectClick = () => {
+    setIsProjectDropdownOpen(false);
+    setShowProjectSelector(true);
   };
 
   // Get tab title based on type
@@ -227,18 +309,47 @@ const LeftSidebar = ({
       >
         {/* Top Section - Project Selector */}
         <div className="sidebar-top-section">
-          <div className="project-selector-container">
-            <div className="project-icon-red"></div>
-            {isExpanded && (
-              <>
-                <div className="project-name-text">{currentProjectName || 'Select Project'}</div>
-                <button 
-                  className="project-dropdown-button"
-                  onClick={() => setShowProjectSelector(true)}
-                >
+          <div className="project-selector-wrapper" ref={projectDropdownRef}>
+            <div 
+              className="project-selector-container"
+              onClick={handleProjectDropdownClick}
+            >
+              <div className="project-icon-red"></div>
+              {isExpanded && (
+                <>
+                  <div className="project-name-text">{currentProjectName || 'Select Project'}</div>
                   <DropdownIcon className="dropdown-icon" />
+                </>
+              )}
+            </div>
+            {isProjectDropdownOpen && isExpanded && (
+              <div className="project-dropdown">
+                <button
+                  type="button"
+                  className="project-new-button"
+                  onClick={handleNewProjectClick}
+                >
+                  <PlusIcon className="project-new-icon" />
+                  <span>New Project</span>
                 </button>
-              </>
+                {projects.length > 0 && (
+                  <div className="project-list">
+                    {projects.map((project) => (
+                      <button
+                        key={project.project_id}
+                        type="button"
+                        className={`project-item ${currentProjectId === project.project_id ? 'active' : ''}`}
+                        onClick={() => handleProjectItemClick(project)}
+                      >
+                        <span>{project.project_name}</span>
+                        {currentProjectId === project.project_id && (
+                          <CheckIcon className="project-check-icon" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
           
@@ -275,8 +386,13 @@ const LeftSidebar = ({
         <div className="sidebar-tabs-section">
           <button 
             className="new-tab-button"
-            onClick={onAddDocument}
+            onClick={() => {
+              if (onAddDocument) {
+                onAddDocument();
+              }
+            }}
             title="New Tab"
+            disabled={!onAddDocument}
           >
             <PlusIcon className="new-tab-icon" />
             {isExpanded && <span className="new-tab-text">New Tab</span>}

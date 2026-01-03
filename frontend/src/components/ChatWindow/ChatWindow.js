@@ -27,6 +27,7 @@ const ChatWindow = ({
   onSessionCreated,
   onSwitchSession,  // New: callback to switch sessions
   activeDocumentId, 
+  documentNameRefreshTrigger = 0,  // Trigger to refresh document name
   onAIMessage, 
   attachedSections = [], 
   attachedHighlights = [], 
@@ -102,7 +103,7 @@ const ChatWindow = ({
     scrollToBottom();
   }, [messages]);
 
-  // Fetch document name when activeDocumentId changes
+  // Fetch document name when activeDocumentId or documentNameRefreshTrigger changes
   useEffect(() => {
     const fetchDocumentName = async () => {
       if (activeDocumentId) {
@@ -119,7 +120,7 @@ const ChatWindow = ({
       }
     };
     fetchDocumentName();
-  }, [activeDocumentId]);
+  }, [activeDocumentId, documentNameRefreshTrigger]);
 
   // Fetch available documents for dropdown
   useEffect(() => {
@@ -135,7 +136,7 @@ const ChatWindow = ({
       }
     };
     fetchAvailableDocuments();
-  }, [selectedProjectId]);
+  }, [selectedProjectId, documentNameRefreshTrigger]);
 
   // Fetch chat sessions for dropdown
   useEffect(() => {
@@ -296,6 +297,15 @@ const ChatWindow = ({
     if (sessionId) {
       await sendMessageToSession(sessionId, userMessage);
     }
+  };
+
+  const handleKeyDown = (e) => {
+    // If Enter is pressed without Shift, send the message
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage(e);
+    }
+    // If Shift+Enter is pressed, allow default behavior (new line)
   };
   
   const createSessionAndSendMessage = async (projectId, userMessage) => {
@@ -472,10 +482,10 @@ const ChatWindow = ({
             console.warn('Failed to clear pending content on backend:', clearError);
           }
           
-          // Update message status
+          // Update message status (keep document_content so it can be shown when expanded)
           setMessages((prev) => prev.map(msg => 
             msg.pending_content_id === pendingContentId
-              ? { ...msg, status: 'approved', document_content: null }
+              ? { ...msg, status: 'approved' }
               : msg
           ));
           
@@ -485,14 +495,6 @@ const ChatWindow = ({
             delete newState[pendingContentId];
             return newState;
           });
-          
-          // Add success message
-          const successMessage = {
-            role: 'assistant',
-            content: 'Content inserted at cursor position.',
-            timestamp: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, successMessage]);
           
           // Note: We don't call onAIMessage here because auto-save will handle
           // syncing the document to backend, so no need to trigger a refresh
@@ -518,10 +520,10 @@ const ChatWindow = ({
   const fallbackToBackendInsertion = async (pendingContentId, editedContent) => {
     const response = await chatAPI.directInsertContent(sessionId, pendingContentId, editedContent, activeDocumentId);
     
-    // Update message status
+    // Update message status (keep document_content so it can be shown when expanded)
     setMessages((prev) => prev.map(msg => 
       msg.pending_content_id === pendingContentId
-        ? { ...msg, status: 'approved', document_content: null }
+        ? { ...msg, status: 'approved' }
         : msg
     ));
     
@@ -536,14 +538,6 @@ const ChatWindow = ({
     if (onAIMessage) {
       onAIMessage('approved');
     }
-    
-    // Add success message
-    const successMessage = {
-      role: 'assistant',
-      content: response.data.message || 'Content inserted at end of document.',
-      timestamp: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, successMessage]);
   };
 
   const handleEdit = (pendingContentId, editedContent) => {
@@ -959,6 +953,7 @@ const ChatWindow = ({
               className="chat-input"
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder="Ask Anything..."
               disabled={loading}
               rows={1}

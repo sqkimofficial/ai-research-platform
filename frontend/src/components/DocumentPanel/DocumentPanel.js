@@ -193,7 +193,7 @@ const FileDocumentIconLarge = () => (
   </svg>
 );
 
-const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, highlightsTabTrigger, pdfTabTrigger, researchDocsTabTrigger, onEditorReady, onTabDataChange }) => {
+const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, onDocumentNameUpdate, highlightsTabTrigger, pdfTabTrigger, researchDocsTabTrigger, onEditorReady, onTabDataChange }) => {
   const [documents, setDocuments] = useState([]); // All open documents
   const [activeDocumentId, setActiveDocumentId] = useState(null); // Currently active tab
   const [content, setContent] = useState(''); // Markdown content (storage format)
@@ -247,6 +247,10 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const [isEditingDocumentName, setIsEditingDocumentName] = useState(false);
   const [editingDocumentName, setEditingDocumentName] = useState('');
 
+  // Ref to track if we've restored tabs from localStorage (prevents saving empty arrays on mount)
+  const hasRestoredTabsRef = useRef(false);
+  const restoredProjectIdRef = useRef(null);
+
   // Auto-poll for PDF extraction status updates
   useEffect(() => {
     const pollForUpdates = async () => {
@@ -294,6 +298,111 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     };
   }, [activeTabType, activeTabId, selectedProjectId, pdfs, pdfTabs]);
 
+  // Helper function to get localStorage key for tabs (per project)
+  const getTabsStorageKey = (projectId) => {
+    return projectId ? `tabs_${projectId}` : null;
+  };
+
+  // Helper function to get localStorage key for active tab (per project)
+  const getActiveTabStorageKey = (projectId) => {
+    return projectId ? `activeTab_${projectId}` : null;
+  };
+
+  // Restore tabs from localStorage when selectedProjectId is set (after prop sync)
+  useEffect(() => {
+    if (!selectedProjectId) {
+      hasRestoredTabsRef.current = false;
+      restoredProjectIdRef.current = null;
+      return;
+    }
+
+    // If we've already restored for this project, don't restore again
+    if (hasRestoredTabsRef.current && restoredProjectIdRef.current === selectedProjectId) {
+      return;
+    }
+
+    const tabsKey = getTabsStorageKey(selectedProjectId);
+    const activeTabKey = getActiveTabStorageKey(selectedProjectId);
+    let restoredActiveDocumentId = null;
+    let restoredActiveTabType = 'document';
+    let restoredActiveTabId = null;
+
+    if (tabsKey) {
+      try {
+        const savedTabs = localStorage.getItem(tabsKey);
+        if (savedTabs) {
+          const tabsData = JSON.parse(savedTabs);
+          
+          // Restore tab arrays (restore even if empty, to maintain state)
+          if (tabsData.documents && Array.isArray(tabsData.documents)) {
+            setDocuments(tabsData.documents);
+          }
+          if (tabsData.highlightsTabs && Array.isArray(tabsData.highlightsTabs)) {
+            setHighlightsTabs(tabsData.highlightsTabs);
+          }
+          if (tabsData.pdfTabs && Array.isArray(tabsData.pdfTabs)) {
+            setPdfTabs(tabsData.pdfTabs);
+          }
+          if (tabsData.researchDocsTabs && Array.isArray(tabsData.researchDocsTabs)) {
+            setResearchDocsTabs(tabsData.researchDocsTabs);
+          }
+          if (tabsData.tabOrder && Array.isArray(tabsData.tabOrder)) {
+            setTabOrder(tabsData.tabOrder);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to restore tabs from localStorage:', err);
+      }
+    }
+
+    if (activeTabKey) {
+      try {
+        const savedActiveTab = localStorage.getItem(activeTabKey);
+        if (savedActiveTab) {
+          const activeTabData = JSON.parse(savedActiveTab);
+          
+          // Store restored values to set them after state updates
+          if (activeTabData.activeTabId !== undefined) {
+            restoredActiveTabId = activeTabData.activeTabId;
+          }
+          if (activeTabData.activeTabType) {
+            restoredActiveTabType = activeTabData.activeTabType;
+          }
+          if (activeTabData.activeDocumentId !== undefined) {
+            restoredActiveDocumentId = activeTabData.activeDocumentId;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to restore active tab from localStorage:', err);
+      }
+    }
+
+    // Restore active tab state after a brief delay to ensure documents are set first
+    if (restoredActiveTabId !== null || restoredActiveDocumentId !== null) {
+      // Use setTimeout to ensure state updates are processed
+      setTimeout(() => {
+        if (restoredActiveTabId !== null) {
+          setActiveTabId(restoredActiveTabId);
+        }
+        if (restoredActiveTabType) {
+          setActiveTabType(restoredActiveTabType);
+        }
+        if (restoredActiveDocumentId !== null) {
+          setActiveDocumentId(restoredActiveDocumentId);
+          // Hide document list when we have an active document
+          setShowDocumentList(false);
+        }
+      }, 10); // Small delay to ensure state updates are processed
+    } else {
+      // If no active document was restored but we have documents, show the list
+      // This will be handled by the useEffect that watches documents.length
+    }
+
+    // Mark that we've restored tabs for this project (even if no tabs were saved)
+    hasRestoredTabsRef.current = true;
+    restoredProjectIdRef.current = selectedProjectId;
+  }, [selectedProjectId]);
+
   // Sync with prop selectedProjectId - this is the primary source of truth
   useEffect(() => {
     if (propSelectedProjectId) {
@@ -304,12 +413,68 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     }
   }, [propSelectedProjectId]);
 
-  // Show document list when no documents are open
+  // Save tabs to localStorage whenever tab state changes
   useEffect(() => {
-    if (documents.length === 0 && selectedProjectId) {
-      setShowDocumentList(true);
+    if (!selectedProjectId) return;
+
+    // Don't save if we haven't restored tabs yet (prevents overwriting with empty arrays on mount)
+    if (!hasRestoredTabsRef.current || restoredProjectIdRef.current !== selectedProjectId) {
+      return;
     }
-  }, [documents.length, selectedProjectId]);
+
+    // Don't save on initial selectedProjectId change - only save when tab arrays actually change
+    // This prevents saving empty arrays before restore completes
+    const tabsKey = getTabsStorageKey(selectedProjectId);
+    if (tabsKey) {
+      try {
+        const tabsData = {
+          documents,
+          highlightsTabs,
+          pdfTabs,
+          researchDocsTabs,
+          tabOrder
+        };
+        localStorage.setItem(tabsKey, JSON.stringify(tabsData));
+      } catch (err) {
+        console.error('Failed to save tabs to localStorage:', err);
+      }
+    }
+  }, [documents, highlightsTabs, pdfTabs, researchDocsTabs, tabOrder, selectedProjectId]);
+
+  // Save active tab state to localStorage whenever it changes
+  useEffect(() => {
+    if (!selectedProjectId) return;
+
+    // Don't save if we haven't restored tabs yet (prevents overwriting on mount)
+    if (!hasRestoredTabsRef.current || restoredProjectIdRef.current !== selectedProjectId) {
+      return;
+    }
+
+    // Don't save on initial selectedProjectId change - only save when active tab actually changes
+    const activeTabKey = getActiveTabStorageKey(selectedProjectId);
+    if (activeTabKey) {
+      try {
+        const activeTabData = {
+          activeTabId,
+          activeTabType,
+          activeDocumentId
+        };
+        localStorage.setItem(activeTabKey, JSON.stringify(activeTabData));
+      } catch (err) {
+        console.error('Failed to save active tab to localStorage:', err);
+      }
+    }
+  }, [activeTabId, activeTabType, activeDocumentId, selectedProjectId]);
+
+  // Show document list when no documents are open (but not if we have an active document)
+  useEffect(() => {
+    if (documents.length === 0 && selectedProjectId && !activeDocumentId) {
+      setShowDocumentList(true);
+    } else if (activeDocumentId && documents.length > 0) {
+      // If we have an active document, hide the document list
+      setShowDocumentList(false);
+    }
+  }, [documents.length, selectedProjectId, activeDocumentId]);
 
   // Close the document options dropdown when clicking outside or pressing Escape
   useEffect(() => {
@@ -362,6 +527,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
         try {
           const response = await documentAPI.getDocument(null, doc.document_id);
           const content = response.data.content || '';
+          // getWordCount now handles HTML properly, so we can pass it directly
           wordCounts[doc.document_id] = getWordCount(content);
         } catch (err) {
           console.error(`Failed to fetch content for document ${doc.document_id}:`, err);
@@ -947,10 +1113,22 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   };
 
   // Calculate word count from content (approximate)
+  // Handles both HTML and markdown content
   const getWordCount = (content) => {
     if (!content) return 0;
-    // Strip markdown and count words
-    const text = content.replace(/[#*_~`\[\](){}|>]/g, '').trim();
+    
+    // If content looks like HTML (contains tags), extract text first
+    let text = content;
+    if (content.includes('<') && content.includes('>')) {
+      // It's HTML, extract text content
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = content;
+      text = tempDiv.textContent || tempDiv.innerText || '';
+    } else {
+      // It's markdown or plain text, strip markdown syntax
+      text = content.replace(/[#*_~`\[\](){}|>]/g, '').trim();
+    }
+    
     if (!text) return 0;
     return text.split(/\s+/).filter(word => word.length > 0).length;
   };
@@ -1046,11 +1224,43 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   }, [activeDocumentId]);
 
   // Auto-refresh when refreshTrigger changes (new AI message)
+  // But only if there are no unsaved changes
   useEffect(() => {
     if (refreshTrigger > 0 && activeDocumentId) {
-      setTimeout(() => {
-        fetchDocument(activeDocumentId);
-      }, 1000);
+      // Check if there are unsaved changes (using refs for current values)
+      const hasUnsavedChanges = pendingContentRef.current !== null || 
+                                (debounceTimerRef.current !== null);
+      
+      if (hasUnsavedChanges) {
+        // Wait for auto-save to complete, then refresh
+        // We'll wait for the debounce timer to complete plus a small buffer
+        const waitForSave = async () => {
+          // Wait for debounce delay plus a small buffer to ensure save completes
+          await new Promise(resolve => setTimeout(resolve, DEBOUNCE_DELAY + 500));
+          
+          // Check if save completed (refs are always current)
+          if (pendingContentRef.current === null && debounceTimerRef.current === null) {
+            // Save completed, now refresh
+            fetchDocument(activeDocumentId);
+          } else {
+            // Still has pending changes, wait a bit more
+            setTimeout(() => {
+              // Final check - if still pending, skip refresh to avoid data loss
+              if (pendingContentRef.current === null && debounceTimerRef.current === null) {
+                fetchDocument(activeDocumentId);
+              }
+              // If still pending, we skip the refresh to protect user's unsaved work
+            }, 1000);
+          }
+        };
+        
+        waitForSave();
+      } else {
+        // No unsaved changes, safe to refresh immediately
+        setTimeout(() => {
+          fetchDocument(activeDocumentId);
+        }, 1000);
+      }
     }
   }, [refreshTrigger, activeDocumentId]);
 
@@ -1078,6 +1288,10 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
           : doc
       ));
       setIsEditingDocumentName(false);
+      // Notify parent component that document name was updated
+      if (onDocumentNameUpdate) {
+        onDocumentNameUpdate();
+      }
     } catch (err) {
       console.error('Failed to update document name:', err);
       setError('Failed to update document name');
@@ -1478,6 +1692,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     setActiveTabType('document');
     setActiveDocumentId(documentId);
     setPendingNewTabType(null); // Clear pending state when clicking existing tab
+    setShowDocumentList(false); // Hide document list when clicking on a document tab
   };
 
   // Unified tab click handler for LeftSidebar

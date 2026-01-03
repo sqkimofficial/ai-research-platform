@@ -17,6 +17,7 @@ const Workspace = () => {
   const [isNewChat, setIsNewChat] = useState(!sessionId);
   const [selectedProjectId, setSelectedProjectId] = useState(projectId || null);
   const [documentRefreshTrigger, setDocumentRefreshTrigger] = useState(0);
+  const [documentNameRefreshTrigger, setDocumentNameRefreshTrigger] = useState(0);
   const [attachedSections, setAttachedSections] = useState([]);
   const [attachedHighlights, setAttachedHighlights] = useState([]);
   const [activeDocumentId, setActiveDocumentId] = useState(null);
@@ -324,6 +325,9 @@ const Workspace = () => {
               onActiveDocumentChange={(documentId) => {
                 setActiveDocumentId(documentId);
               }}
+              onDocumentNameUpdate={() => {
+                setDocumentNameRefreshTrigger(prev => prev + 1);
+              }}
               highlightsTabTrigger={highlightsTabTrigger}
               pdfTabTrigger={pdfTabTrigger}
               researchDocsTabTrigger={researchDocsTabTrigger}
@@ -348,6 +352,7 @@ const Workspace = () => {
               onSessionCreated={handleSessionCreated}
               onSwitchSession={handleSwitchSession}
               activeDocumentId={activeDocumentId}
+              documentNameRefreshTrigger={documentNameRefreshTrigger}
               onAIMessage={(message) => {
                 setDocumentRefreshTrigger(prev => prev + 1);
               }}

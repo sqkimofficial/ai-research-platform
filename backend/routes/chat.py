@@ -911,26 +911,17 @@ def direct_insert_content():
             traceback.print_exc()
             return jsonify({'error': f'Failed to update document: {str(e)}'}), 500
         
+        # Update the message status to 'approved' in the database
+        updated = ChatSessionModel.update_message_status(session_id, pending_content_id, 'approved')
+        
+        if not updated:
+            return jsonify({'error': 'Message not found'}), 404
+        
         # Clear pending content
         ChatSessionModel.clear_pending_content(session_id)
         
-        # Build chat message
-        chat_message = 'Content inserted at the end of the document.'
-        
-        # Add approved message to conversation
-        ChatSessionModel.add_message(
-            session_id,
-            'assistant',
-            chat_message,
-            sources=None,
-            document_content=None,
-            placement=None,
-            status='approved'
-        )
-        
         return jsonify({
             'success': True,
-            'message': chat_message,
             'placement_applied': 'Content appended at the end of document',
             'updated_document': updated_document_content[:500] + '...' if len(updated_document_content) > 500 else updated_document_content
         }), 200
@@ -972,23 +963,17 @@ def clear_pending_content_route():
         if not pending_data or pending_data['pending_content_id'] != pending_content_id:
             return jsonify({'error': 'Pending content not found or already processed'}), 404
         
+        # Update the message status to 'approved' in the database
+        updated = ChatSessionModel.update_message_status(session_id, pending_content_id, 'approved')
+        
+        if not updated:
+            return jsonify({'error': 'Message not found'}), 404
+        
         # Clear pending content
         ChatSessionModel.clear_pending_content(session_id)
         
-        # Add approved message to conversation
-        ChatSessionModel.add_message(
-            session_id,
-            'assistant',
-            'Content inserted at cursor position.',
-            sources=None,
-            document_content=None,
-            placement=None,
-            status='approved'
-        )
-        
         return jsonify({
-            'success': True,
-            'message': 'Content inserted at cursor position.'
+            'success': True
         }), 200
     
     except Exception as e:

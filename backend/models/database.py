@@ -251,6 +251,24 @@ class ChatSessionModel:
                 '$set': {'updated_at': datetime.utcnow()}
             }
         )
+    
+    @staticmethod
+    def update_message_status(session_id, pending_content_id, status):
+        """Update the status of a message by pending_content_id"""
+        db = Database.get_db()
+        result = db.chat_sessions.update_one(
+            {
+                'session_id': session_id,
+                'messages.pending_content_id': pending_content_id
+            },
+            {
+                '$set': {
+                    'messages.$.status': status,
+                    'updated_at': datetime.utcnow()
+                }
+            }
+        )
+        return result.modified_count > 0
 
 class ResearchDocumentModel:
     """Model for managing research documents (separate from sessions)"""
