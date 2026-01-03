@@ -46,7 +46,7 @@ class Database:
 
 class UserModel:
     @staticmethod
-    def create_user(username, password_hash):
+    def create_user(username, password_hash, first_name=None, last_name=None):
         """Create a new user"""
         db = Database.get_db()
         user_id = str(uuid.uuid4())
@@ -54,6 +54,8 @@ class UserModel:
             'username': username,
             'password_hash': password_hash,
             'user_id': user_id,
+            'first_name': first_name,
+            'last_name': last_name,
             'created_at': datetime.utcnow(),
             'updated_at': datetime.utcnow()
         }

@@ -11,6 +11,8 @@ def register():
         data = request.get_json()
         username = data.get('username')
         password = data.get('password')
+        first_name = data.get('first_name')
+        last_name = data.get('last_name')
         
         if not username or not password:
             return jsonify({'error': 'Username and password are required'}), 400
@@ -22,7 +24,7 @@ def register():
         
         # Create user
         password_hash = hash_password(password)
-        user_id = UserModel.create_user(username, password_hash)
+        user_id = UserModel.create_user(username, password_hash, first_name, last_name)
         
         if not user_id:
             return jsonify({'error': 'Failed to create user'}), 500
@@ -30,6 +32,8 @@ def register():
         return jsonify({
             'user_id': user_id,
             'username': username,
+            'first_name': first_name,
+            'last_name': last_name,
             'message': 'User registered successfully'
         }), 201
     
@@ -62,7 +66,9 @@ def login():
         return jsonify({
             'token': token,
             'user_id': user['user_id'],
-            'username': user['username']
+            'username': user['username'],
+            'first_name': user.get('first_name'),
+            'last_name': user.get('last_name')
         }), 200
     
     except Exception as e:

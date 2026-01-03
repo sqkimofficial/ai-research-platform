@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { documentAPI, projectAPI, highlightsAPI, pdfAPI } from '../../services/api';
 import { getToken } from '../../utils/auth';
-import { markdownToHtml, htmlToMarkdown } from '../../utils/markdownConverter';
+// Note: markdownToHtml is not needed here anymore - content is stored as HTML
+// It's still used in ChatWindow.js for converting AI's Markdown output to HTML
 import RichTextEditor from './RichTextEditor';
 import AddNewTabView from './AddNewTabView';
 import './DocumentPanel.css';
@@ -192,7 +193,7 @@ const FileDocumentIconLarge = () => (
   </svg>
 );
 
-const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, highlightsTabTrigger, pdfTabTrigger, researchDocsTabTrigger, onEditorReady }) => {
+const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, highlightsTabTrigger, pdfTabTrigger, researchDocsTabTrigger, onEditorReady, onTabDataChange }) => {
   const [documents, setDocuments] = useState([]); // All open documents
   const [activeDocumentId, setActiveDocumentId] = useState(null); // Currently active tab
   const [content, setContent] = useState(''); // Markdown content (storage format)
@@ -243,6 +244,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   // PDF highlight note editing state
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [editingNoteText, setEditingNoteText] = useState('');
+  const [isEditingDocumentName, setIsEditingDocumentName] = useState(false);
+  const [editingDocumentName, setEditingDocumentName] = useState('');
 
   // Auto-poll for PDF extraction status updates
   useEffect(() => {
@@ -330,6 +333,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       document.removeEventListener('keyup', handleEscape);
     };
   }, []);
+
 
   // Load available documents for the project
   const loadAvailableDocuments = async (projectId) => {
@@ -1015,11 +1019,10 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     setError('');
     try {
       const response = await documentAPI.getDocument(null, documentId);
-      const markdownContent = response.data.content || '';
-      setContent(markdownContent);
-      // Convert Markdown to HTML for Quill editor
-      const html = markdownToHtml(markdownContent);
-      setHtmlContent(html);
+      // Content is now HTML directly (stored in markdown_content field for backward compatibility)
+      const htmlContent = response.data.content || '';
+      setContent(htmlContent); // Store HTML in state
+      setHtmlContent(htmlContent); // Set HTML directly for TipTap
       setSaveStatus('saved');
       lastSaveTimeRef.current = Date.now();
       pendingContentRef.current = null;
@@ -1062,6 +1065,53 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const DEBOUNCE_DELAY = 2000; // 2 seconds after user stops typing
   const MAX_SAVE_INTERVAL = 30000; // Force save every 30 seconds
 
+  // Handle document name update
+  const handleDocumentNameUpdate = async (newName) => {
+    if (!activeDocumentId) return;
+    
+    try {
+      await documentAPI.saveDocument(null, htmlContent, 'replace', activeDocumentId, null, newName);
+      // Update local document state
+      setDocuments(prev => prev.map(doc => 
+        doc.document_id === activeDocumentId 
+          ? { ...doc, title: newName || doc.title }
+          : doc
+      ));
+      setIsEditingDocumentName(false);
+    } catch (err) {
+      console.error('Failed to update document name:', err);
+      setError('Failed to update document name');
+    }
+  };
+
+  // Handle document name edit start
+  const handleDocumentNameClick = () => {
+    const activeDoc = getActiveDocument();
+    if (activeDoc) {
+      setEditingDocumentName(activeDoc.title || '');
+      setIsEditingDocumentName(true);
+    }
+  };
+
+  // Handle document name edit end
+  const handleDocumentNameBlur = () => {
+    if (editingDocumentName.trim()) {
+      handleDocumentNameUpdate(editingDocumentName.trim());
+    } else {
+      setIsEditingDocumentName(false);
+    }
+  };
+
+  // Handle document name key press
+  const handleDocumentNameKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      e.target.blur();
+    } else if (e.key === 'Escape') {
+      setIsEditingDocumentName(false);
+      setEditingDocumentName('');
+    }
+  };
+
   // Perform the actual save operation
   const performSave = useCallback(async (htmlContentToSave) => {
     if (!activeDocumentId || !htmlContentToSave) {
@@ -1070,11 +1120,9 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
     setSaveStatus('saving');
     try {
-      // Convert HTML from Quill to Markdown for storage
-      const markdownContent = htmlToMarkdown(htmlContentToSave);
-      
-      await documentAPI.saveDocument(null, markdownContent, 'replace', activeDocumentId);
-      setContent(markdownContent);
+      // Save HTML directly (no conversion needed)
+      await documentAPI.saveDocument(null, htmlContentToSave, 'replace', activeDocumentId);
+      setContent(htmlContentToSave); // Store HTML in state
       setSaveStatus('saved');
       lastSaveTimeRef.current = Date.now();
       pendingContentRef.current = null;
@@ -1193,13 +1241,12 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (pendingContentRef.current && activeDocumentId) {
-        // Try to save synchronously before page unloads
-        const markdownContent = htmlToMarkdown(pendingContentRef.current);
+        // Save HTML directly (no conversion needed)
         navigator.sendBeacon(
           `/api/document`,
           JSON.stringify({
             document_id: activeDocumentId,
-            content: markdownContent,
+            content: pendingContentRef.current, // HTML content
             mode: 'replace'
           })
         );
@@ -1433,6 +1480,59 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     setPendingNewTabType(null); // Clear pending state when clicking existing tab
   };
 
+  // Unified tab click handler for LeftSidebar
+  const handleTabClick = (tabEntry) => {
+    if (tabEntry.type === 'document') {
+      handleDocumentTabClick(tabEntry.id);
+    } else if (tabEntry.type === 'highlights') {
+      handleHighlightsTabClick(tabEntry.id);
+    } else if (tabEntry.type === 'pdf') {
+      handlePdfTabClick(tabEntry.id);
+    } else if (tabEntry.type === 'researchdocs') {
+      handleResearchDocsTabClick(tabEntry.id);
+    }
+  };
+
+  // Unified tab close handler for LeftSidebar
+  const handleTabClose = (tabEntry) => {
+    if (tabEntry.type === 'document') {
+      handleCloseTab(tabEntry.id, { stopPropagation: () => {} });
+    } else if (tabEntry.type === 'highlights') {
+      handleCloseHighlightsTab(tabEntry.id, { stopPropagation: () => {} });
+    } else if (tabEntry.type === 'pdf') {
+      handleClosePdfTab(tabEntry.id, { stopPropagation: () => {} });
+    } else if (tabEntry.type === 'researchdocs') {
+      handleCloseResearchDocsTab(tabEntry.id, { stopPropagation: () => {} });
+    }
+  };
+
+  // Expose tab data to parent component
+  useEffect(() => {
+    if (onTabDataChange) {
+      onTabDataChange({
+        tabOrder,
+        documents,
+        highlightsTabs,
+        pdfTabs,
+        researchDocsTabs,
+        activeTabType,
+        activeTabId,
+        activeDocumentId,
+        onTabClick: handleTabClick,
+        onCloseTab: handleTabClose,
+        onAddDocument: handleAddDocument,
+        getFaviconUrl: (url) => {
+          try {
+            const urlObj = new URL(url);
+            return `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=128`;
+          } catch {
+            return null;
+          }
+        }
+      });
+    }
+  }, [tabOrder, documents, highlightsTabs, pdfTabs, researchDocsTabs, activeTabType, activeTabId, activeDocumentId, onTabDataChange]);
+
   const getActiveDocument = () => {
     return documents.find(doc => doc.document_id === activeDocumentId);
   };
@@ -1514,131 +1614,9 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     setError('');
   };
 
+
   return (
     <div className="document-panel">
-      {/* Tab Bar */}
-      <div className="document-tabs">
-        {/* Render tabs in creation order using tabOrder */}
-        {tabOrder.map((tabEntry) => {
-          if (tabEntry.type === 'document') {
-            const doc = documents.find(d => d.document_id === tabEntry.id);
-            if (!doc) return null;
-            // For documents: use title, or "Untitled X" for untitled docs
-            const getDocTabTitle = () => {
-              if (doc.title && doc.title.trim()) return doc.title;
-              // Count untitled docs up to this one for numbering
-              const docIndex = documents.findIndex(d => d.document_id === doc.document_id);
-              const untitledCount = documents.slice(0, docIndex + 1).filter(d => !d.title || !d.title.trim()).length;
-              return untitledCount > 1 ? `Untitled ${untitledCount}` : 'Untitled';
-            };
-            return (
-              <div
-                key={doc.document_id}
-                className={`document-tab ${activeTabType === 'document' && doc.document_id === activeDocumentId ? 'active' : ''}`}
-                onClick={() => handleDocumentTabClick(doc.document_id)}
-              >
-                <span className="tab-title">{getDocTabTitle()}</span>
-                <button
-                  className="tab-close-button"
-                  onClick={(e) => handleCloseTab(doc.document_id, e)}
-                  title="Close tab"
-                >
-                  <CloseIcon />
-                </button>
-              </div>
-            );
-          } else if (tabEntry.type === 'highlights') {
-            const tab = highlightsTabs.find(t => t.id === tabEntry.id);
-            if (!tab) return null;
-            // For web highlights: use page_title if URL is selected, otherwise "Web Highlights"
-            const getHighlightsTabTitle = () => {
-              if (tab.selectedUrlData?.urlDoc?.page_title) {
-                return tab.selectedUrlData.urlDoc.page_title;
-              }
-              // Fallback for tabs without selected URL
-              const tabIndex = highlightsTabs.filter(t => !t.selectedUrlData?.urlDoc?.page_title).findIndex(t => t.id === tab.id);
-              return tabIndex > 0 ? `Web Highlights ${tabIndex + 1}` : 'Web Highlights';
-            };
-            return (
-              <div
-                key={tab.id}
-                className={`document-tab ${activeTabType === 'highlights' && activeTabId === tab.id ? 'active' : ''}`}
-                onClick={() => handleHighlightsTabClick(tab.id)}
-              >
-                <span className="tab-title">{getHighlightsTabTitle()}</span>
-                <button
-                  className="tab-close-button"
-                  onClick={(e) => handleCloseHighlightsTab(tab.id, e)}
-                  title="Close highlights tab"
-                >
-                  <CloseIcon />
-                </button>
-              </div>
-            );
-          } else if (tabEntry.type === 'pdf') {
-            const tab = pdfTabs.find(t => t.id === tabEntry.id);
-            if (!tab) return null;
-            // For PDF/document highlights: use filename if PDF is selected, otherwise "Highlight Docs"
-            const getPdfTabTitle = () => {
-              if (tab.selectedPdfData?.pdf?.filename) {
-                return tab.selectedPdfData.pdf.filename;
-              }
-              // Fallback for tabs without selected PDF
-              const tabIndex = pdfTabs.filter(t => !t.selectedPdfData?.pdf?.filename).findIndex(t => t.id === tab.id);
-              return tabIndex > 0 ? `Highlight Docs ${tabIndex + 1}` : 'Highlight Docs';
-            };
-            return (
-              <div
-                key={tab.id}
-                className={`document-tab ${activeTabType === 'pdf' && activeTabId === tab.id ? 'active' : ''}`}
-                onClick={() => handlePdfTabClick(tab.id)}
-              >
-                <span className="tab-title">{getPdfTabTitle()}</span>
-                <button
-                  className="tab-close-button"
-                  onClick={(e) => handleClosePdfTab(tab.id, e)}
-                  title="Close Highlight Docs tab"
-                >
-                  <CloseIcon />
-                </button>
-              </div>
-            );
-          } else if (tabEntry.type === 'researchdocs') {
-            const tab = researchDocsTabs.find(t => t.id === tabEntry.id);
-            if (!tab) return null;
-            // For research docs tabs: these show a grid, so use "Research Docs" with numbering if multiple
-            const researchTabIndex = researchDocsTabs.findIndex(t => t.id === tab.id);
-            return (
-              <div
-                key={tab.id}
-                className={`document-tab ${activeTabType === 'researchdocs' && activeTabId === tab.id ? 'active' : ''}`}
-                onClick={() => handleResearchDocsTabClick(tab.id)}
-              >
-                <span className="tab-title">
-                  {researchDocsTabs.length > 1 ? `Research Docs ${researchTabIndex + 1}` : 'Research Docs'}
-                </span>
-                <button
-                  className="tab-close-button"
-                  onClick={(e) => handleCloseResearchDocsTab(tab.id, e)}
-                  title="Close Research Docs tab"
-                >
-                  <CloseIcon />
-                </button>
-              </div>
-            );
-          }
-          return null;
-        })}
-        {/* Add document button - always visible */}
-        <button
-          className="add-tab-button"
-          onClick={handleAddDocument}
-          title="Add document"
-        >
-          <PlusIcon />
-        </button>
-      </div>
-
       <div className="document-content">
         {error && <div className="error-message">{error}</div>}
         
@@ -2505,91 +2483,34 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
             )}
             {!loading && !error && activeDocumentId && !showDocumentList && (
               <div className="document-editor-wrapper">
-                <div className="document-editor-toolbar">
-                  <div className="document-editor-actions-left">
-                    <button 
-                      type="button" 
-                      className="doc-action-btn doc-undo-btn"
-                      onClick={handleUndo}
-                      title="Undo (Ctrl+Z)"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M3 7V13H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M3 13C3 13 5.5 7 12 7C18.5 7 21 13 21 13V17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                      <span>Undo</span>
-                    </button>
-                    <button 
-                      type="button" 
-                      className="doc-action-btn doc-redo-btn"
-                      onClick={handleRedo}
-                      title="Redo (Ctrl+Shift+Z)"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M21 7V13H15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M21 13C21 13 18.5 7 12 7C5.5 7 3 13 3 13V17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                      <span>Redo</span>
-                    </button>
-                    <span className={`save-status-indicator ${saveStatus}`}>
-                      {saveStatus === 'saving' && (
-                        <>
-                          <span className="save-spinner"></span>
-                          <span>Saving...</span>
-                        </>
-                      )}
-                      {saveStatus === 'saved' && (
-                        <>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M20 6L9 17L4 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                          <span>Saved</span>
-                        </>
-                      )}
-                      {saveStatus === 'error' && (
-                        <>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
-                            <path d="M12 8V12M12 16H12.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                          </svg>
-                          <span>Error saving</span>
-                        </>
-                      )}
-                    </span>
-                  </div>
-                  <div className="document-editor-actions-right">
-                    <button type="button" className="doc-action-btn doc-references-btn">References</button>
-                    <div className="doc-menu-wrapper" ref={docMenuRef}>
-                      <button
-                        type="button"
-                        className={`doc-action-btn doc-menu-btn ${isDocMenuOpen ? 'open' : ''}`}
-                        aria-label="Document options"
-                        aria-expanded={isDocMenuOpen}
-                        onClick={toggleDocMenu}
-                      >
-                        <MenuIcon />
-                      </button>
-                      {isDocMenuOpen && (
-                        <div className="doc-menu-dropdown" role="menu">
-                          <button type="button" className="doc-menu-item" onClick={handleVersionHistory}>
-                            <VersionHistoryIcon />
-                            <span>Version History</span>
-                          </button>
-                          <button type="button" className="doc-menu-item" onClick={handleDownloadDocument}>
-                            <DownloadIcon />
-                            <span>Download</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
                 <RichTextEditor
                   ref={editorRef}
                   value={htmlContent}
                   onChange={handleEditorChange}
-                  placeholder="Start writing your research document..."
+                  placeholder=""
+                  documentName={getActiveDocument()?.title || 'Untitled Document'}
+                  onDocumentNameClick={handleDocumentNameClick}
+                  isEditingDocumentName={isEditingDocumentName}
+                  editingDocumentName={editingDocumentName}
+                  onDocumentNameChange={(e) => setEditingDocumentName(e.target.value)}
+                  onDocumentNameBlur={handleDocumentNameBlur}
+                  onDocumentNameKeyPress={handleDocumentNameKeyPress}
+                  saveStatus={saveStatus}
+                  onReferencesClick={() => {}}
+                  onMenuClick={toggleDocMenu}
                 />
+                {isDocMenuOpen && (
+                  <div className="doc-menu-dropdown" role="menu" ref={docMenuRef}>
+                    <button type="button" className="doc-menu-item" onClick={handleVersionHistory}>
+                      <VersionHistoryIcon />
+                      <span>Version History</span>
+                    </button>
+                    <button type="button" className="doc-menu-item" onClick={handleDownloadDocument}>
+                      <DownloadIcon />
+                      <span>Download</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </>

@@ -2,8 +2,10 @@ from flask import Blueprint, request, jsonify
 from models.database import ChatSessionModel, DocumentTypeModel, Database, DocumentModel, ProjectModel, ResearchDocumentModel
 from services.perplexity_service import PerplexityService
 from services.vector_service import VectorService
-from utils.auth import verify_token
+from utils.auth import verify_token, log_auth_info
 from utils.file_helpers import get_session_dir
+from utils.html_helpers import strip_html_tags
+from utils.markdown_converter import markdown_to_html
 from datetime import datetime
 import os
 import json
@@ -215,6 +217,9 @@ def create_session():
         if not project_id:
             return jsonify({'error': 'project_id is required'}), 400
         
+        # Log auth info for Chrome extension
+        log_auth_info(project_id)
+        
         # Verify project exists and belongs to user
         project = ProjectModel.get_project(project_id)
         if not project:
@@ -253,14 +258,8 @@ def get_session():
                 return jsonify({'error': 'Unauthorized'}), 403
             
             # Log session entry details for Chrome extension configuration
-            auth_header = request.headers.get('Authorization', '')
-            token = auth_header.split(' ')[1] if auth_header.startswith('Bearer ') else 'N/A'
             project_id = session.get('project_id')
-            print("=" * 60)
-            print("SESSION ENTRY - Use these for Chrome Extension:")
-            print(f"  JWT Token: {token}")
-            print(f"  Project ID: {project_id}")
-            print("=" * 60)
+            log_auth_info(project_id)
             
             # Serialize messages to ensure datetime objects and sources are properly formatted
             serialized_messages = []
@@ -834,15 +833,18 @@ def direct_insert_content():
         original_content = pending_content.get('document_content', '')
         
         if edited_content:
-            content_to_insert = edited_content
+            content_to_insert_markdown = edited_content
             print(f"DEBUG: Using edited content for direct insert (length: {len(edited_content)})")
         else:
-            content_to_insert = original_content
+            content_to_insert_markdown = original_content
         
-        if not content_to_insert.strip():
+        if not content_to_insert_markdown.strip():
             return jsonify({'error': 'No content to insert'}), 400
         
-        # Get current document content
+        # Convert AI's Markdown output to HTML before storing
+        content_to_insert_html = markdown_to_html(content_to_insert_markdown)
+        
+        # Get current document content (stored as HTML)
         document_content = ''
         
         if document_id:
@@ -854,6 +856,7 @@ def direct_insert_content():
             if document['user_id'] != user_id:
                 return jsonify({'error': 'Unauthorized'}), 403
             
+            # Content is stored as HTML in markdown_content field
             document_content = document.get('markdown_content', '')
         else:
             # Legacy approach: use session-based file storage
@@ -864,15 +867,15 @@ def direct_insert_content():
                 with open(doc_path, 'r', encoding='utf-8') as f:
                     document_content = f.read()
         
-        # Direct insertion: Append content at the end of the document
+        # Direct insertion: Append HTML content at the end of the document
         # If document is empty, just use the new content
         # If document has content, add a separator and append
         if document_content.strip():
-            # Add new content at the end with proper spacing
-            updated_document_content = document_content.rstrip() + '\n\n' + content_to_insert
+            # Add new HTML content at the end with proper spacing
+            updated_document_content = document_content.rstrip() + '\n\n' + content_to_insert_html
         else:
-            # Empty document - just use the new content
-            updated_document_content = content_to_insert
+            # Empty document - just use the new HTML content
+            updated_document_content = content_to_insert_html
         
         # Update document
         try:

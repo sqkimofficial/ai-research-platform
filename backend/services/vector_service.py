@@ -1,5 +1,6 @@
 from services.openai_service import OpenAIService
 from models.database import DocumentEmbeddingModel
+from utils.html_helpers import strip_html_tags
 import numpy as np
 from typing import List, Dict
 import uuid
@@ -63,8 +64,11 @@ class VectorService:
             # Delete existing embeddings for this document
             DocumentEmbeddingModel.delete_embeddings_by_document(document_id)
             
+            # Strip HTML tags for cleaner embeddings (document_text is HTML)
+            plain_text = strip_html_tags(document_text)
+            
             # Chunk the document
-            chunks = self.chunk_text(document_text)
+            chunks = self.chunk_text(plain_text)
             
             if not chunks:
                 return True

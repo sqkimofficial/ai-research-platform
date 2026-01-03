@@ -15,19 +15,25 @@ import { ReactComponent as SendIcon } from '../../assets/send-icon.svg';
 import { ReactComponent as WebIcon } from '../../assets/web-icon.svg';
 import { ReactComponent as PdfIcon } from '../../assets/pdf-icon.svg';
 import { ReactComponent as DeleteIcon } from '../../assets/delete-icon.svg';
+import { ReactComponent as DocumentIcon } from '../../assets/document-icon.svg';
+import { ReactComponent as AttachIcon } from '../../assets/attach-icon.svg';
+import { ReactComponent as PlusIcon } from '../../assets/plus-icon.svg';
+import { documentAPI } from '../../services/api';
 
 const ChatWindow = ({ 
   sessionId: propSessionId, 
   isNewChat = false,
   selectedProjectId = null,
   onSessionCreated,
+  onSwitchSession,  // New: callback to switch sessions
   activeDocumentId, 
   onAIMessage, 
   attachedSections = [], 
   attachedHighlights = [], 
   onClearAttachedHighlights,
   onRemoveAttachedHighlight,
-  onInsertContentAtCursor  // New: callback for cursor-aware insertion (Google Docs-like behavior)
+  onInsertContentAtCursor,  // New: callback for cursor-aware insertion (Google Docs-like behavior)
+  onActiveDocumentChange  // New: callback to change active document
 }) => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -47,10 +53,19 @@ const ChatWindow = ({
   const [sortOrder, setSortOrder] = useState('oldest'); // oldest | newest
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false); // Track if we're currently sending a message
+  const [currentDocumentName, setCurrentDocumentName] = useState('');
+  const [availableDocuments, setAvailableDocuments] = useState([]);
+  const [isDocumentDropdownOpen, setIsDocumentDropdownOpen] = useState(false);
+  const [chatSessions, setChatSessions] = useState([]);
+  const [currentChatTitle, setCurrentChatTitle] = useState('Untitled');
+  const [isChatDropdownOpen, setIsChatDropdownOpen] = useState(false);
   const modeMenuRef = useRef(null);
   const commandsMenuRef = useRef(null);
   const sortMenuRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const documentDropdownRef = useRef(null);
+  const chatDropdownRef = useRef(null);
+  const textareaRef = useRef(null);
   
   // Update attached sections when prop changes
   useEffect(() => {
@@ -87,6 +102,118 @@ const ChatWindow = ({
     scrollToBottom();
   }, [messages]);
 
+  // Fetch document name when activeDocumentId changes
+  useEffect(() => {
+    const fetchDocumentName = async () => {
+      if (activeDocumentId) {
+        try {
+          const response = await documentAPI.getDocument(null, activeDocumentId);
+          const title = response.data.title || 'Untitled Document';
+          setCurrentDocumentName(title);
+        } catch (error) {
+          console.error('Failed to fetch document:', error);
+          setCurrentDocumentName('Untitled Document');
+        }
+      } else {
+        setCurrentDocumentName('');
+      }
+    };
+    fetchDocumentName();
+  }, [activeDocumentId]);
+
+  // Fetch available documents for dropdown
+  useEffect(() => {
+    const fetchAvailableDocuments = async () => {
+      if (selectedProjectId) {
+        try {
+          const response = await documentAPI.getAllResearchDocuments(selectedProjectId);
+          setAvailableDocuments(response.data.documents || []);
+        } catch (error) {
+          console.error('Failed to fetch documents:', error);
+          setAvailableDocuments([]);
+        }
+      }
+    };
+    fetchAvailableDocuments();
+  }, [selectedProjectId]);
+
+  // Fetch chat sessions for dropdown
+  useEffect(() => {
+    const fetchChatSessions = async () => {
+      if (selectedProjectId) {
+        try {
+          const response = await chatAPI.getAllSessions(selectedProjectId);
+          setChatSessions(response.data.sessions || []);
+        } catch (error) {
+          console.error('Failed to fetch chat sessions:', error);
+          setChatSessions([]);
+        }
+      }
+    };
+    fetchChatSessions();
+  }, [selectedProjectId, sessionId]); // Reload when session changes to refresh list
+
+  // Update chat title based on messages or session
+  useEffect(() => {
+    if (isNewChat || messages.length === 0) {
+      setCurrentChatTitle('Untitled');
+    } else if (sessionId) {
+      // Find current session in the list to get its title
+      const currentSession = chatSessions.find(s => s.session_id === sessionId);
+      if (currentSession) {
+        setCurrentChatTitle(currentSession.title || 'Untitled');
+      } else if (messages.length > 0) {
+        // Fallback: extract title from first user message (first 5 words)
+        const firstUserMessage = messages.find(m => m.role === 'user');
+        if (firstUserMessage) {
+          // Extract only the first part before any attached sections/highlights markers
+          const content = firstUserMessage.content.split('\n\n[Attached')[0];
+          const words = content.split(' ').slice(0, 5);
+          setCurrentChatTitle(words.join(' ') || 'Untitled');
+        }
+      }
+    }
+  }, [messages, sessionId, isNewChat, chatSessions]);
+
+  // Refresh sessions after sending a message to update titles
+  useEffect(() => {
+    const refreshSessions = async () => {
+      if (selectedProjectId && sessionId && messages.length > 0) {
+        try {
+          const response = await chatAPI.getAllSessions(selectedProjectId);
+          setChatSessions(response.data.sessions || []);
+        } catch (error) {
+          console.error('Failed to refresh chat sessions:', error);
+        }
+      }
+    };
+    
+    // Refresh sessions after messages change (with a small delay to allow backend to update)
+    if (messages.length > 0) {
+      const timeoutId = setTimeout(refreshSessions, 500);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [messages.length, selectedProjectId, sessionId]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      // Reset height to auto to get the correct scrollHeight
+      textarea.style.height = 'auto';
+      const scrollHeight = textarea.scrollHeight;
+      const maxHeight = 20 * 5; // 5 lines max (20px line-height)
+      
+      if (scrollHeight <= maxHeight) {
+        textarea.style.height = `${scrollHeight}px`;
+        textarea.style.overflowY = 'hidden';
+      } else {
+        textarea.style.height = `${maxHeight}px`;
+        textarea.style.overflowY = 'auto';
+      }
+    }
+  }, [inputMessage]);
+
   // Close menus when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -98,6 +225,12 @@ const ChatWindow = ({
       }
       if (sortMenuRef.current && !sortMenuRef.current.contains(event.target)) {
         setIsSortMenuOpen(false);
+      }
+      if (documentDropdownRef.current && !documentDropdownRef.current.contains(event.target)) {
+        setIsDocumentDropdownOpen(false);
+      }
+      if (chatDropdownRef.current && !chatDropdownRef.current.contains(event.target)) {
+        setIsChatDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -463,13 +596,67 @@ const ChatWindow = ({
     return count;
   }, 0);
 
+  const handleNewChat = () => {
+    if (onSwitchSession) {
+      onSwitchSession(null);
+    }
+    setIsChatDropdownOpen(false);
+  };
+
+  const handleSessionSelect = (sessionId) => {
+    if (onSwitchSession) {
+      onSwitchSession(sessionId);
+    }
+    setIsChatDropdownOpen(false);
+  };
+
   return (
     <div className="chat-window">
-      {/* Chat Header - Shows title only */}
-      {messages.length > 0 && (
-        <div className="chat-header">
-          <div className="chat-header-top">
-            <h1 className="chat-title">Research Session</h1>
+      {/* Chat Header - Always visible with dropdown, filter, and add button */}
+      <div className="chat-header">
+        <div className="chat-header-top">
+          <div className="chat-session-dropdown-wrapper" ref={chatDropdownRef}>
+            <button
+              type="button"
+              className="chat-session-selector"
+              onClick={() => setIsChatDropdownOpen((prev) => !prev)}
+              aria-expanded={isChatDropdownOpen}
+              aria-haspopup="true"
+            >
+              <span className="chat-session-title">{currentChatTitle}</span>
+              <DropdownIcon className="chat-session-caret" />
+            </button>
+            {isChatDropdownOpen && (
+              <div className="chat-session-dropdown">
+                <button
+                  type="button"
+                  className="chat-session-new-button"
+                  onClick={handleNewChat}
+                >
+                  <PlusIcon className="chat-session-new-icon" />
+                  <span>New Chat</span>
+                </button>
+                {chatSessions.length > 0 && (
+                  <div className="chat-session-list">
+                    {chatSessions.map((session) => (
+                      <button
+                        key={session.session_id}
+                        type="button"
+                        className={`chat-session-item ${sessionId === session.session_id && !isNewChat ? 'active' : ''}`}
+                        onClick={() => handleSessionSelect(session.session_id)}
+                      >
+                        <span>{session.title || 'Untitled Chat'}</span>
+                        {sessionId === session.session_id && !isNewChat && (
+                          <CheckIcon className="chat-session-check-icon" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="chat-header-actions">
             <button
               type="button"
               className={`filter-button ${isFilterActive ? 'active' : ''}`}
@@ -479,8 +666,17 @@ const ChatWindow = ({
             >
               <FilterIcon className="filter-icon" />
             </button>
-            {isFilterActive && (
-              <div className="filter-dropdown">
+            <button
+              type="button"
+              className="add-chat-button"
+              aria-label="New Chat"
+              onClick={handleNewChat}
+            >
+              <PlusIcon className="add-chat-icon" />
+            </button>
+          </div>
+          {isFilterActive && (
+            <div className="filter-dropdown">
                 <input
                   type="text"
                   value={filterQuery}
@@ -583,7 +779,6 @@ const ChatWindow = ({
             )}
           </div>
         </div>
-      )}
       
       <div className="chat-messages">
         {renderedMessageCount === 0 && (
@@ -637,6 +832,55 @@ const ChatWindow = ({
       </div>
       <div className="chat-input-area">
         <div className="chat-input-container">
+          {/* Top Section: Document Selector and Bookmark */}
+          <div className="chat-input-top-section">
+            <div className="document-selector-wrapper" ref={documentDropdownRef}>
+              <button
+                type="button"
+                className="document-selector"
+                onClick={() => setIsDocumentDropdownOpen((prev) => !prev)}
+                aria-expanded={isDocumentDropdownOpen}
+                aria-haspopup="true"
+              >
+                <DocumentIcon className="document-selector-icon" />
+                <span className="document-selector-name">
+                  {currentDocumentName || 'No document selected'}
+                </span>
+                <DropdownIcon className="document-selector-caret" />
+              </button>
+              {isDocumentDropdownOpen && availableDocuments.length > 0 && (
+                <div className="document-dropdown">
+                  {availableDocuments.map((doc) => (
+                    <button
+                      key={doc.document_id}
+                      type="button"
+                      className={`document-dropdown-item ${doc.document_id === activeDocumentId ? 'active' : ''}`}
+                      onClick={() => {
+                        if (onActiveDocumentChange) {
+                          onActiveDocumentChange(doc.document_id);
+                        }
+                        setIsDocumentDropdownOpen(false);
+                      }}
+                    >
+                      <span>{doc.title || 'Untitled Document'}</span>
+                      {doc.document_id === activeDocumentId && <CheckIcon className="document-check-icon" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              className="attach-button"
+              aria-label="Attach"
+              title="Attach"
+            >
+              <AttachIcon className="attach-button-icon" />
+            </button>
+          </div>
+
+          {/* Middle Section: Input Area */}
+          <div className="chat-input-middle-section">
           {(currentAttachedSections.length > 0 || currentAttachedHighlights.length > 0) && (
             <div className="attached-items-container">
               {currentAttachedSections.length > 0 && (
@@ -710,16 +954,20 @@ const ChatWindow = ({
               )}
             </div>
           )}
-          <form className="chat-input-form" onSubmit={handleSendMessage}>
-            <input
-              type="text"
+            <textarea
+              ref={textareaRef}
               className="chat-input"
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder="Ask Anything..."
               disabled={loading}
+              rows={1}
             />
-            <div className="chat-input-actions">
+          </div>
+
+          {/* Bottom Section: Mode Dropdown and Send Button */}
+          <form className="chat-input-form" onSubmit={handleSendMessage}>
+            <div className="chat-input-bottom-section">
               <div className="mode-dropdown" ref={modeMenuRef}>
                 <button
                   type="button"

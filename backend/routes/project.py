@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from models.database import ProjectModel
-from utils.auth import verify_token
+from utils.auth import verify_token, log_auth_info
 
 project_bp = Blueprint('project', __name__)
 
@@ -51,6 +51,9 @@ def get_projects():
         project_id = request.args.get('project_id')
         
         if project_id:
+            # Log auth info for Chrome extension
+            log_auth_info(project_id)
+            
             # Get specific project
             project = ProjectModel.get_project(project_id)
             if not project:
@@ -104,6 +107,9 @@ def update_project():
         if not project_id:
             return jsonify({'error': 'project_id is required'}), 400
         
+        # Log auth info for Chrome extension
+        log_auth_info(project_id)
+        
         # Verify project exists and belongs to user
         project = ProjectModel.get_project(project_id)
         if not project:
@@ -139,6 +145,9 @@ def delete_project():
         
         if not project_id:
             return jsonify({'error': 'project_id is required'}), 400
+        
+        # Log auth info for Chrome extension
+        log_auth_info(project_id)
         
         # Verify project exists and belongs to user
         project = ProjectModel.get_project(project_id)

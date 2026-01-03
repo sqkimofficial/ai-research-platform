@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from models.database import HighlightModel, ProjectModel
-from utils.auth import get_user_id_from_token
+from utils.auth import get_user_id_from_token, log_auth_info
 
 highlight_bp = Blueprint('highlight', __name__)
 
@@ -41,6 +41,9 @@ def save_highlight():
     text = data['text']
     note = data.get('note')
     tags = data.get('tags', [])
+    
+    # Log auth info for Chrome extension
+    log_auth_info(project_id)
     
     # Validate project belongs to user
     project = ProjectModel.get_project(project_id)
@@ -87,6 +90,9 @@ def get_highlights():
     
     if not project_id:
         return jsonify({'error': 'project_id is required'}), 400
+    
+    # Log auth info for Chrome extension
+    log_auth_info(project_id)
     
     # Validate project belongs to user
     project = ProjectModel.get_project(project_id)
@@ -147,6 +153,9 @@ def delete_highlight():
     project_id = data['project_id']
     source_url = data['source_url']
     highlight_id = data['highlight_id']
+    
+    # Log auth info for Chrome extension
+    log_auth_info(project_id)
     
     # Validate project belongs to user
     project = ProjectModel.get_project(project_id)

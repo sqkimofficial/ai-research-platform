@@ -48,3 +48,21 @@ def get_user_id_from_token():
     except:
         return None
 
+def log_auth_info(project_id=None):
+    """
+    Log JWT token and project ID for Chrome extension configuration.
+    This prints the information needed for the Chrome extension to authenticate.
+    """
+    from flask import request
+    auth_header = request.headers.get('Authorization', '')
+    token = auth_header.split(' ')[1] if auth_header.startswith('Bearer ') else 'N/A'
+    
+    print("=" * 60)
+    print("CHROME EXTENSION AUTH INFO:")
+    print(f"  JWT Token: {token}")
+    if project_id:
+        print(f"  Project ID: {project_id}")
+    else:
+        print(f"  Project ID: Not provided in this request")
+    print("=" * 60)
+

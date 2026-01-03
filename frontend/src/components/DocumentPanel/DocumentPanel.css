@@ -2,7 +2,6 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  border-left: 1px solid var(--color-outline);
   background-color: var(--color-document-bg);
 }
 
@@ -292,8 +291,8 @@
   justify-content: space-between;
   align-items: center;
   padding: 8px 16px;
-  background-color: #fafafa;
-  border-bottom: 1px solid #e0e0e0;
+  background-color: white;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
   flex-shrink: 0;
 }
 
@@ -307,6 +306,46 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.document-name-display {
+  max-width: 200px;
+  padding: 4px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.7);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.document-name-display:hover {
+  color: rgba(0, 0, 0, 1);
+}
+
+.document-name-input {
+  max-width: 200px;
+  height: 28px;
+  padding: 4px 8px;
+  border: 1px solid #1366eb;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: black;
+  background: white;
+  outline: none;
+}
+
+.document-name-input:focus {
+  border-color: #1366eb;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background-color: rgba(0, 0, 0, 0.2);
 }
 
 /* Undo/Redo buttons */

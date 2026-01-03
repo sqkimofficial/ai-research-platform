@@ -7,6 +7,8 @@ import dropdownIcon from '../../assets/dropdown-icon.svg';
 import webIcon from '../../assets/web-icon.svg';
 import { ReactComponent as CopyIconSvg } from '../../assets/copy-icon.svg';
 import { ReactComponent as CheckIconSvg } from '../../assets/check-icon.svg';
+import { ReactComponent as EditSimpleIcon } from '../../assets/edit-simple.svg';
+import { ReactComponent as InsertIcon } from '../../assets/insert-icon.svg.svg';
 
 // Helper function to format message content with bold subheadings
 const formatMessageContent = (content) => {
@@ -37,8 +39,10 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isOverflowing, setIsOverflowing] = useState(false);
+  const [isSourcesOpen, setIsSourcesOpen] = useState(false);
   const contentWrapperRef = useRef(null);
   const contentRef = useRef(null);
+  const sourcesDropdownRef = useRef(null);
 
   // Check if content overflows 3 lines
   const checkOverflow = useCallback(() => {
@@ -76,6 +80,17 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
       }
     };
   }, [checkOverflow, message.content]);
+
+  // Close sources dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (sourcesDropdownRef.current && !sourcesDropdownRef.current.contains(event.target)) {
+        setIsSourcesOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
   
   const handleEdit = () => {
     setIsEditing(true);
@@ -104,7 +119,9 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(message.content);
+      // Copy document content if available, otherwise copy message content
+      const contentToCopy = documentContent || message.content;
+      await navigator.clipboard.writeText(contentToCopy);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
@@ -170,7 +187,6 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
       {/* Generated Content Preview */}
       {!isUser && documentContent && (
         <div className="pending-content-preview">
-          <div className="pending-content-label">Generated Content</div>
           {isEditing ? (
             <div className="pending-content-editor">
               <textarea
@@ -185,73 +201,102 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
               </div>
             </div>
           ) : (
-            <div className="pending-content-preview-markdown markdown-body">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeRaw]}
-              >
-                {editedContent || documentContent}
-              </ReactMarkdown>
+            <div className="pending-content-preview-box">
+              <div className="pending-content-preview-markdown markdown-body">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeRaw]}
+                >
+                  {editedContent || documentContent}
+                </ReactMarkdown>
+              </div>
+              {mode === 'write' && (
+                <button className="inline-edit-btn" onClick={handleEdit} title="Edit">
+                  <EditSimpleIcon className="inline-edit-icon" />
+                </button>
+              )}
             </div>
           )}
         </div>
       )}
-      
-      {/* Sources Section - New Design */}
-      {!isUser && sources.length > 0 && (
-        <div className="message-sources">
-          <div className="sources-label">Sources</div>
-          <ul className="sources-list">
-            {sources.map((source, index) => {
-              const normalizedSource = typeof source === 'string' ? source.trim() : String(source);
-              const isUrl = normalizedSource.startsWith('http://') || 
-                           normalizedSource.startsWith('https://') ||
-                           normalizedSource.startsWith('www.');
-              const url = isUrl && !normalizedSource.startsWith('http') 
-                         ? `https://${normalizedSource}` 
-                         : normalizedSource;
-              
-              return (
-                <li key={index}>
-                  <div className="source-item">
-                    <span className="source-icon">
-                      <img src={webIcon} alt="" className="source-icon-img" />
-                    </span>
-                    {isUrl || normalizedSource.includes('.') ? (
-                      <a 
-                        href={url} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="source-link"
-                      >
-                        {normalizedSource}
-                      </a>
-                    ) : (
-                      <span className="source-text">{normalizedSource}</span>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
 
-      {/* Action Buttons Row - New Design */}
+      {/* Sources and Action Buttons Row */}
       {!isUser && (documentContent || sources.length > 0) && (
-        <div className="message-actions">
-          <div className="action-left">
-          <button className="copy-btn" onClick={handleCopy} title={copied ? "Copied!" : "Copy"}>
-            {copied ? <CheckIconSvg className="action-icon" /> : <CopyIconSvg className="action-icon" />}
-          </button>
-          </div>
-          {/* Only show Insert button in write mode */}
+        <div className="message-actions-row">
+          {/* Sources Dropdown */}
+          {sources.length > 0 && (
+            <div className="sources-dropdown-wrapper" ref={sourcesDropdownRef}>
+              <button 
+                className="sources-dropdown-button"
+                onClick={() => setIsSourcesOpen(!isSourcesOpen)}
+                aria-expanded={isSourcesOpen}
+              >
+                <img 
+                  src={dropdownIcon} 
+                  alt="" 
+                  className="sources-dropdown-icon"
+                  style={{ transform: isSourcesOpen ? 'rotate(90deg)' : 'rotate(270deg)' }}
+                />
+                <span className="sources-dropdown-text">Sources</span>
+              </button>
+              {isSourcesOpen && (
+                <div className="sources-dropdown-list">
+                  {sources.map((source, index) => {
+                    const normalizedSource = typeof source === 'string' ? source.trim() : String(source);
+                    const isUrl = normalizedSource.startsWith('http://') || 
+                                 normalizedSource.startsWith('https://') ||
+                                 normalizedSource.startsWith('www.');
+                    const url = isUrl && !normalizedSource.startsWith('http') 
+                               ? `https://${normalizedSource}` 
+                               : normalizedSource;
+                    
+                    return (
+                      <div key={index} className="source-dropdown-item">
+                        <span className="source-icon">
+                          <img src={webIcon} alt="" className="source-icon-img" />
+                        </span>
+                        {isUrl || normalizedSource.includes('.') ? (
+                          <a 
+                            href={url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="source-dropdown-link"
+                          >
+                            {normalizedSource}
+                          </a>
+                        ) : (
+                          <span className="source-dropdown-text">{normalizedSource}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Action Buttons */}
           {mode === 'write' && documentContent && !isEditing && (
-            <div className="action-right">
-              <button className="edit-content-btn" onClick={handleEdit}>Edit</button>
-              <button className="insert-btn" onClick={handleApprove} title="Insert at cursor position (or end of document)">
-                <CheckIconSvg className="action-icon" />
-                <span>Insert</span>
+            <div className="action-buttons-group">
+              <button 
+                className="action-button copy-action-btn" 
+                onClick={handleCopy} 
+                title={copied ? "Copied!" : "Copy"}
+              >
+                {copied ? (
+                  <CheckIconSvg className="action-button-icon" />
+                ) : (
+                  <CopyIconSvg className="action-button-icon" />
+                )}
+                <span className="action-button-text">Copy</span>
+              </button>
+              <button 
+                className="action-button insert-action-btn" 
+                onClick={handleApprove} 
+                title="Insert at cursor position (or end of document)"
+              >
+                <InsertIcon className="action-button-icon" />
+                <span className="action-button-text">Insert</span>
               </button>
             </div>
           )}

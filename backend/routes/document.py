@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, send_file
 from utils.file_helpers import get_session_dir
 from models.database import ChatSessionModel, DocumentModel, ResearchDocumentModel, ProjectModel
 from services.vector_service import VectorService
-from utils.auth import verify_token
+from utils.auth import verify_token, log_auth_info
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -47,8 +47,13 @@ def get_document():
             if document['user_id'] != user_id:
                 return jsonify({'error': 'Unauthorized'}), 403
             
+            # Log auth info for Chrome extension
+            project_id = document.get('project_id')
+            log_auth_info(project_id)
+            
+            # Return HTML content directly (stored in markdown_content field for backward compatibility)
             return jsonify({
-                'content': document.get('markdown_content', ''),
+                'content': document.get('markdown_content', ''),  # Actually HTML now
                 'structure': [],  # Structure removed - kept for backward compatibility
                 'title': document.get('title', 'Untitled'),
                 'document_id': document_id
@@ -109,7 +114,11 @@ def save_document():
             if document['user_id'] != user_id:
                 return jsonify({'error': 'Unauthorized'}), 403
             
-            # Get current content
+            # Log auth info for Chrome extension
+            project_id = document.get('project_id')
+            log_auth_info(project_id)
+            
+            # Get current content (stored as HTML in markdown_content field)
             current_content = document.get('markdown_content', '')
             
             # Apply mode
@@ -118,14 +127,14 @@ def save_document():
             else:
                 new_content = content
             
-            # Update document
+            # Update document (storing HTML in markdown_content field for backward compatibility)
             ResearchDocumentModel.update_document(
                 document_id,
-                markdown_content=new_content,
+                markdown_content=new_content,  # Actually HTML now
                 title=title
             )
             
-            # Index document for semantic search
+            # Index document for semantic search (will strip HTML tags in vector service)
             try:
                 vector_service.index_document(document_id, new_content)
             except Exception as index_error:
@@ -142,6 +151,10 @@ def save_document():
             
             if session['user_id'] != user_id:
                 return jsonify({'error': 'Unauthorized'}), 403
+            
+            # Log auth info for Chrome extension
+            project_id = session.get('project_id')
+            log_auth_info(project_id)
             
             # Get document file path
             session_dir = get_session_dir(session_id)
@@ -323,11 +336,12 @@ def download_research_document_pdf(document_id):
         if document['user_id'] != user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         
-        # Get markdown content
-        markdown_content = document.get('markdown_content', '')
+        # Get content (stored as HTML in markdown_content field)
+        html_content = document.get('markdown_content', '')
         
-        # Convert markdown to plain text
-        plain_text = markdown_to_plain_text(markdown_content)
+        # Strip HTML tags to get plain text for PDF
+        from utils.html_helpers import strip_html_tags
+        plain_text = strip_html_tags(html_content)
         
         # Get document title for filename
         doc_title = document.get('title', 'Untitled Document')
