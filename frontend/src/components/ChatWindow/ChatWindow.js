@@ -10,7 +10,6 @@ import { ReactComponent as ResearchIcon } from '../../assets/research-icon.svg';
 import { ReactComponent as CheckIcon } from '../../assets/check-icon.svg';
 import { ReactComponent as FilterIcon } from '../../assets/filter-icon.svg';
 import { ReactComponent as DropdownIcon } from '../../assets/dropdown-icon.svg';
-import { ReactComponent as ChatIconSvg } from '../../assets/chat-icon.svg';
 import { ReactComponent as SendIcon } from '../../assets/send-icon.svg';
 import { ReactComponent as WebIcon } from '../../assets/web-icon.svg';
 import { ReactComponent as PdfIcon } from '../../assets/pdf-icon.svg';
@@ -157,7 +156,7 @@ const ChatWindow = ({
   // Update chat title based on messages or session
   useEffect(() => {
     if (isNewChat || messages.length === 0) {
-      setCurrentChatTitle('Untitled');
+      setCurrentChatTitle('New Chat');
     } else if (sessionId) {
       // Find current session in the list to get its title
       const currentSession = chatSessions.find(s => s.session_id === sessionId);
@@ -604,227 +603,12 @@ const ChatWindow = ({
     setIsChatDropdownOpen(false);
   };
 
-  return (
-    <div className="chat-window">
-      {/* Chat Header - Always visible with dropdown, filter, and add button */}
-      <div className="chat-header">
-        <div className="chat-header-top">
-          <div className="chat-session-dropdown-wrapper" ref={chatDropdownRef}>
-            <button
-              type="button"
-              className="chat-session-selector"
-              onClick={() => setIsChatDropdownOpen((prev) => !prev)}
-              aria-expanded={isChatDropdownOpen}
-              aria-haspopup="true"
-            >
-              <span className="chat-session-title">{currentChatTitle}</span>
-              <DropdownIcon className="chat-session-caret" />
-            </button>
-            {isChatDropdownOpen && (
-              <div className="chat-session-dropdown">
-                <button
-                  type="button"
-                  className="chat-session-new-button"
-                  onClick={handleNewChat}
-                >
-                  <PlusIcon className="chat-session-new-icon" />
-                  <span>New Chat</span>
-                </button>
-                {chatSessions.length > 0 && (
-                  <div className="chat-session-list">
-                    {chatSessions.map((session) => (
-                      <button
-                        key={session.session_id}
-                        type="button"
-                        className={`chat-session-item ${sessionId === session.session_id && !isNewChat ? 'active' : ''}`}
-                        onClick={() => handleSessionSelect(session.session_id)}
-                      >
-                        <span>{session.title || 'Untitled Chat'}</span>
-                        {sessionId === session.session_id && !isNewChat && (
-                          <CheckIcon className="chat-session-check-icon" />
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="chat-header-actions">
-            <button
-              type="button"
-              className={`filter-button ${isFilterActive ? 'active' : ''}`}
-              aria-label="Filter questions"
-              aria-pressed={isFilterActive}
-              onClick={() => setIsFilterActive((prev) => !prev)}
-            >
-              <FilterIcon className="filter-icon" />
-            </button>
-            <button
-              type="button"
-              className="add-chat-button"
-              aria-label="New Chat"
-              onClick={handleNewChat}
-            >
-              <PlusIcon className="add-chat-icon" />
-            </button>
-          </div>
-          {isFilterActive && (
-            <div className="filter-dropdown">
-                <input
-                  type="text"
-                  value={filterQuery}
-                  onChange={(e) => setFilterQuery(e.target.value)}
-                  placeholder="Search previous commands"
-                  className="filter-search-input"
-                />
-                <div className="filter-actions">
-                  <div className="filter-actions-right">
-                    <div className="sort-menu-wrapper" ref={sortMenuRef}>
-                      <button
-                        type="button"
-                        className="filter-chip with-caret"
-                        onClick={() => setIsSortMenuOpen((prev) => !prev)}
-                        aria-haspopup="true"
-                        aria-expanded={isSortMenuOpen}
-                      >
-                        <span>Sort by : {sortOrder === 'oldest' ? 'Oldest' : 'Newest'}</span>
-                        <DropdownIcon className="caret-icon" />
-                      </button>
-                      {isSortMenuOpen && (
-                        <div className="sort-dropdown">
-                          <button
-                            type="button"
-                            className={`commands-item ${sortOrder === 'oldest' ? 'active' : ''}`}
-                            onClick={() => {
-                              setSortOrder('oldest');
-                              setIsSortMenuOpen(false);
-                            }}
-                          >
-                            <span>Oldest</span>
-                            {sortOrder === 'oldest' && <CheckIcon className="check-icon" />}
-                          </button>
-                          <button
-                            type="button"
-                            className={`commands-item ${sortOrder === 'newest' ? 'active' : ''}`}
-                            onClick={() => {
-                              setSortOrder('newest');
-                              setIsSortMenuOpen(false);
-                            }}
-                          >
-                            <span>Newest</span>
-                            {sortOrder === 'newest' && <CheckIcon className="check-icon" />}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <div className="commands-menu-wrapper" ref={commandsMenuRef}>
-                      <button
-                        type="button"
-                        className="filter-chip with-caret"
-                        onClick={() => setIsCommandsMenuOpen((prev) => !prev)}
-                        aria-haspopup="true"
-                        aria-expanded={isCommandsMenuOpen}
-                      >
-                        <span>Commands</span>
-                        <DropdownIcon className="caret-icon" />
-                      </button>
-                      {isCommandsMenuOpen && (
-                        <div className="commands-dropdown">
-                          <button
-                            type="button"
-                            className={`commands-item ${commandsFilter === 'commands' ? 'active' : ''}`}
-                            onClick={() => {
-                              setCommandsFilter('commands');
-                              setIsCommandsMenuOpen(false);
-                            }}
-                          >
-                            <span>Commands</span>
-                            {commandsFilter === 'commands' && <CheckIcon className="check-icon" />}
-                          </button>
-                          <button
-                            type="button"
-                            className={`commands-item ${commandsFilter === 'answers' ? 'active' : ''}`}
-                            onClick={() => {
-                              setCommandsFilter('answers');
-                              setIsCommandsMenuOpen(false);
-                            }}
-                          >
-                            <span>Answers</span>
-                            {commandsFilter === 'answers' && <CheckIcon className="check-icon" />}
-                          </button>
-                          <button
-                            type="button"
-                            className={`commands-item ${commandsFilter === 'all' ? 'active' : ''}`}
-                            onClick={() => {
-                              setCommandsFilter('all');
-                              setIsCommandsMenuOpen(false);
-                            }}
-                          >
-                            <span>All</span>
-                            {commandsFilter === 'all' && <CheckIcon className="check-icon" />}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      
-      <div className="chat-messages">
-        {renderedMessageCount === 0 && (
-          <div className="new-chat-empty-state">
-            <div className="empty-state-icon">
-              <ChatIconSvg className="empty-chat-icon" />
-            </div>
-            <h2>New Chat</h2>
-            <p>What would you like me to write or research?</p>
-            <p className="empty-state-hint">Type a message below to begin.</p>
-          </div>
-        )}
-        {sortedPairs.map((pair, pairIndex) => (
-            <div key={pairIndex} className="conversation-pair">
-              {pair.userMessage && commandsFilter !== 'answers' && (
-                <div className="user-prompt-sticky">
-                  <MessageBubble 
-                    message={pair.userMessage}
-                    onApprove={handleApprove}
-                    onEdit={handleEdit}
-                    editedContent={editingContent[pair.userMessage.pending_content_id]}
-                    mode={chatMode}
-                  />
-                </div>
-              )}
-              <div className="assistant-responses">
-                {commandsFilter !== 'commands' &&
-                  pair.assistantMessages.map(({ message, index }) => (
-                    <MessageBubble 
-                      key={index} 
-                      message={message}
-                      onApprove={handleApprove}
-                      onEdit={handleEdit}
-                      editedContent={editingContent[message.pending_content_id]}
-                      mode={chatMode}
-                    />
-                  ))}
-              </div>
-            </div>
-          ))}
-        {loading && (
-          <div className="loading-indicator">
-            <div className="typing-dots">
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-      <div className="chat-input-area">
+  // Determine if we're in empty state
+  const isEmptyState = renderedMessageCount === 0;
+
+  // Chat input component (reusable)
+  const chatInputArea = (
+    <div className="chat-input-area">
         <div className="chat-input-container">
           {/* Top Section: Document Selector and Bookmark */}
           <div className="chat-input-top-section">
@@ -1023,6 +807,224 @@ const ChatWindow = ({
           </form>
         </div>
       </div>
+  );
+
+  return (
+    <div className="chat-window">
+      {/* Chat Header - Always visible with dropdown, filter, and add button */}
+      <div className="chat-header">
+        <div className="chat-header-top">
+          <div className="chat-session-dropdown-wrapper" ref={chatDropdownRef}>
+            <button
+              type="button"
+              className="chat-session-selector"
+              onClick={() => setIsChatDropdownOpen((prev) => !prev)}
+              aria-expanded={isChatDropdownOpen}
+              aria-haspopup="true"
+            >
+              <span className="chat-session-title">{currentChatTitle}</span>
+              <DropdownIcon className="chat-session-caret" />
+            </button>
+            {isChatDropdownOpen && (
+              <div className="chat-session-dropdown">
+                <button
+                  type="button"
+                  className="chat-session-new-button"
+                  onClick={handleNewChat}
+                >
+                  <PlusIcon className="chat-session-new-icon" />
+                  <span>New Chat</span>
+                </button>
+                {chatSessions.length > 0 && (
+                  <div className="chat-session-list">
+                    {chatSessions.map((session) => (
+                      <button
+                        key={session.session_id}
+                        type="button"
+                        className={`chat-session-item ${sessionId === session.session_id && !isNewChat ? 'active' : ''}`}
+                        onClick={() => handleSessionSelect(session.session_id)}
+                      >
+                        <span>{session.title || 'Untitled Chat'}</span>
+                        {sessionId === session.session_id && !isNewChat && (
+                          <CheckIcon className="chat-session-check-icon" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="chat-header-actions">
+            <button
+              type="button"
+              className={`filter-button ${isFilterActive ? 'active' : ''}`}
+              aria-label="Filter questions"
+              aria-pressed={isFilterActive}
+              onClick={() => setIsFilterActive((prev) => !prev)}
+            >
+              <FilterIcon className="filter-icon" />
+            </button>
+            <button
+              type="button"
+              className="add-chat-button"
+              aria-label="New Chat"
+              onClick={handleNewChat}
+            >
+              <PlusIcon className="add-chat-icon" />
+            </button>
+          </div>
+          {isFilterActive && (
+            <div className="filter-dropdown">
+                <input
+                  type="text"
+                  value={filterQuery}
+                  onChange={(e) => setFilterQuery(e.target.value)}
+                  placeholder="Search previous commands"
+                  className="filter-search-input"
+                />
+                <div className="filter-actions">
+                  <div className="filter-actions-right">
+                    <div className="sort-menu-wrapper" ref={sortMenuRef}>
+                      <button
+                        type="button"
+                        className="filter-chip with-caret"
+                        onClick={() => setIsSortMenuOpen((prev) => !prev)}
+                        aria-haspopup="true"
+                        aria-expanded={isSortMenuOpen}
+                      >
+                        <span>Sort by : {sortOrder === 'oldest' ? 'Oldest' : 'Newest'}</span>
+                        <DropdownIcon className="caret-icon" />
+                      </button>
+                      {isSortMenuOpen && (
+                        <div className="sort-dropdown">
+                          <button
+                            type="button"
+                            className={`commands-item ${sortOrder === 'oldest' ? 'active' : ''}`}
+                            onClick={() => {
+                              setSortOrder('oldest');
+                              setIsSortMenuOpen(false);
+                            }}
+                          >
+                            <span>Oldest</span>
+                            {sortOrder === 'oldest' && <CheckIcon className="check-icon" />}
+                          </button>
+                          <button
+                            type="button"
+                            className={`commands-item ${sortOrder === 'newest' ? 'active' : ''}`}
+                            onClick={() => {
+                              setSortOrder('newest');
+                              setIsSortMenuOpen(false);
+                            }}
+                          >
+                            <span>Newest</span>
+                            {sortOrder === 'newest' && <CheckIcon className="check-icon" />}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="commands-menu-wrapper" ref={commandsMenuRef}>
+                      <button
+                        type="button"
+                        className="filter-chip with-caret"
+                        onClick={() => setIsCommandsMenuOpen((prev) => !prev)}
+                        aria-haspopup="true"
+                        aria-expanded={isCommandsMenuOpen}
+                      >
+                        <span>Commands</span>
+                        <DropdownIcon className="caret-icon" />
+                      </button>
+                      {isCommandsMenuOpen && (
+                        <div className="commands-dropdown">
+                          <button
+                            type="button"
+                            className={`commands-item ${commandsFilter === 'commands' ? 'active' : ''}`}
+                            onClick={() => {
+                              setCommandsFilter('commands');
+                              setIsCommandsMenuOpen(false);
+                            }}
+                          >
+                            <span>Commands</span>
+                            {commandsFilter === 'commands' && <CheckIcon className="check-icon" />}
+                          </button>
+                          <button
+                            type="button"
+                            className={`commands-item ${commandsFilter === 'answers' ? 'active' : ''}`}
+                            onClick={() => {
+                              setCommandsFilter('answers');
+                              setIsCommandsMenuOpen(false);
+                            }}
+                          >
+                            <span>Answers</span>
+                            {commandsFilter === 'answers' && <CheckIcon className="check-icon" />}
+                          </button>
+                          <button
+                            type="button"
+                            className={`commands-item ${commandsFilter === 'all' ? 'active' : ''}`}
+                            onClick={() => {
+                              setCommandsFilter('all');
+                              setIsCommandsMenuOpen(false);
+                            }}
+                          >
+                            <span>All</span>
+                            {commandsFilter === 'all' && <CheckIcon className="check-icon" />}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      
+      {/* Chat input at top for empty state */}
+      {isEmptyState && chatInputArea}
+      
+      <div className="chat-messages">
+        {sortedPairs.map((pair, pairIndex) => (
+            <div key={pairIndex} className="conversation-pair">
+              {pair.userMessage && commandsFilter !== 'answers' && (
+                <div className="user-prompt-sticky">
+                  <MessageBubble 
+                    message={pair.userMessage}
+                    onApprove={handleApprove}
+                    onEdit={handleEdit}
+                    editedContent={editingContent[pair.userMessage.pending_content_id]}
+                    mode={chatMode}
+                  />
+                </div>
+              )}
+              <div className="assistant-responses">
+                {commandsFilter !== 'commands' &&
+                  pair.assistantMessages.map(({ message, index }) => (
+                    <MessageBubble 
+                      key={index} 
+                      message={message}
+                      onApprove={handleApprove}
+                      onEdit={handleEdit}
+                      editedContent={editingContent[message.pending_content_id]}
+                      mode={chatMode}
+                    />
+                  ))}
+              </div>
+            </div>
+          ))}
+        {loading && (
+          <div className="loading-indicator">
+            <div className="typing-dots">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+      
+      {/* Chat input at bottom for non-empty state */}
+      {!isEmptyState && chatInputArea}
       
       {showProjectSelector && (
         <ProjectSelector
