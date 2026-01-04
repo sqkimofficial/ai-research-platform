@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { removeToken, removeSessionId, setSessionId } from '../utils/auth';
+import { useAuth0 } from '@auth0/auth0-react';
+import { removeSessionId, setSessionId, clearAuthData } from '../utils/auth';
+import useAuth0Token from '../hooks/useAuth0Token';
 import ChatWindow from '../components/ChatWindow/ChatWindow';
 import DocumentPanel from '../components/DocumentPanel/DocumentPanel';
 import LeftSidebar from '../components/LeftSidebar/LeftSidebar';
@@ -9,6 +11,9 @@ import ProjectSelector from '../components/ProjectSelector/ProjectSelector';
 import '../App.css';
 
 const Workspace = () => {
+  // Set up Auth0 token for API calls
+  useAuth0Token();
+  const { logout } = useAuth0();
   const { projectId, sessionId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -149,11 +154,18 @@ const Workspace = () => {
   }, [currentSessionId, selectedProjectId, sessionId, navigate]);
 
   const handleLogout = () => {
-    removeToken();
+    // Clear local auth data
+    clearAuthData();
     removeSessionId();
     localStorage.removeItem('selectedProjectId');
     localStorage.removeItem('selectedProjectName');
-    navigate('/login/email');
+    
+    // Logout from Auth0 and redirect to login page
+    logout({
+      logoutParams: {
+        returnTo: window.location.origin + '/login/email'
+      }
+    });
   };
 
   const handleSelectProject = async (projectId, projectName) => {

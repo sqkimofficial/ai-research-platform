@@ -1,53 +1,139 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth0 } from '@auth0/auth0-react';
 import { authAPI } from '../services/api';
-import { setToken } from '../utils/auth';
+import googleIcon from '../assets/google-icon.svg';
 import stitchLogo from '../assets/stitch-logo.svg';
 import '../App.css';
 
+/**
+ * Register component - Account creation page
+ * 
+ * - Custom registration form (calls our backend)
+ * - Social login buttons redirect to Auth0
+ */
 const Register = () => {
-  const [email, setEmail] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+    firstName: '',
+    lastName: ''
+  });
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const { loginWithRedirect, isAuthenticated, isLoading: auth0Loading } = useAuth0();
 
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    setError('');
-    
-    // Validate passwords match
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-    
-    try {
-      // Use email as username for now (backend expects username)
-      await authAPI.register(email, password, firstName, lastName);
-      // Auto-login after registration
-      const response = await authAPI.login(email, password);
-      setToken(response.data.token);
-      // Store user first name for account display
-      if (response.data.first_name) {
-        localStorage.setItem('userFirstName', response.data.first_name);
-      }
-      // Navigate to workspace (will show project selector if needed)
+  // If already authenticated via Auth0 (social login), redirect to workspace
+  useEffect(() => {
+    if (isAuthenticated && !auth0Loading) {
       const savedProjectId = localStorage.getItem('selectedProjectId');
       if (savedProjectId) {
         navigate(`/project/${savedProjectId}/workspace`);
       } else {
-        // Navigate to workspace route without projectId - will show project selector
         navigate('/workspace');
       }
-    } catch (error) {
-      setError(error.response?.data?.error || 'Registration failed. Please try again.');
+    }
+  }, [isAuthenticated, auth0Loading, navigate]);
+
+  /**
+   * Handle input change
+   */
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    setError('');
+  };
+
+  /**
+   * Handle registration form submission
+   */
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    // Validation
+    if (!formData.email.trim()) {
+      setError('Please enter your email address');
+      return;
+    }
+    if (!formData.password) {
+      setError('Please enter a password');
+      return;
+    }
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters long');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      await authAPI.register(
+        formData.email.trim(),
+        formData.password,
+        formData.firstName.trim(),
+        formData.lastName.trim()
+      );
+
+      // Registration successful - redirect to login
+      navigate('/login/email', { 
+        state: { 
+          message: 'Account created successfully! Please sign in.',
+          email: formData.email.trim()
+        } 
+      });
+    } catch (err) {
+      console.error('Registration error:', err);
+      const errorMessage = err.response?.data?.error || 'Registration failed. Please try again.';
+      setError(errorMessage);
+    } finally {
+      setIsLoading(false);
     }
   };
+
+  /**
+   * Handle Google Sign-Up via Auth0
+   */
+  const handleGoogleSignUp = () => {
+    loginWithRedirect({
+      authorizationParams: {
+        connection: 'google-oauth2'
+      }
+    });
+  };
+
+  // Show loading state while Auth0 initializes
+  if (auth0Loading) {
+    return (
+      <div className="auth-container">
+        <div className="auth-top-section">
+          <div className="auth-logo-wrapper">
+            <img src={stitchLogo} alt="Stitch" className="auth-logo" />
+          </div>
+        </div>
+        <div className="auth-main-section auth-main-section--register">
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <div style={{ 
+              width: '40px', 
+              height: '40px', 
+              border: '4px solid #e0e0e0',
+              borderTop: '4px solid #3b82f6',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              margin: '0 auto'
+            }} />
+            <style>{`
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+            `}</style>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="auth-container">
@@ -57,131 +143,107 @@ const Register = () => {
         </div>
       </div>
       
-      <div className="auth-main-section">
+      <div className="auth-main-section auth-main-section--register">
         <div className="auth-welcome-section">
           <h1 className="auth-welcome-title">
             <span>Welcome </span>
             <span className="lowercase">to</span>
             <span> Stitch</span>
           </h1>
-          <p className="auth-subtitle">Sign In to access your dashboard</p>
+          <p className="auth-subtitle">Create your account to get started</p>
+        </div>
+        
+        <div className="auth-social-buttons-container">
+          <button 
+            type="button" 
+            className="auth-social-button"
+            onClick={handleGoogleSignUp}
+          >
+            <img src={googleIcon} alt="" className="auth-social-icon" />
+            <span>Continue with Google</span>
+          </button>
+        </div>
+        
+        <div className="auth-separator">
+          <div className="auth-separator-line"></div>
+          <span className="auth-separator-text">or</span>
+          <div className="auth-separator-line"></div>
         </div>
         
         <div className="auth-form-container">
-          <form onSubmit={handleRegister} className="auth-form-wrapper">
+          <form onSubmit={handleSubmit} className="auth-form-wrapper">
             {error && <div className="auth-error-text">{error}</div>}
+            
+            <div className="auth-form-row">
+              <div className="auth-form-group auth-form-group-half">
+                <label htmlFor="firstName" className="auth-form-label">First Name</label>
+                <input
+                  id="firstName"
+                  name="firstName"
+                  type="text"
+                  placeholder=""
+                  value={formData.firstName}
+                  onChange={handleChange}
+                  className="auth-input"
+                  autoComplete="given-name"
+                  disabled={isLoading}
+                />
+              </div>
+              <div className="auth-form-group auth-form-group-half">
+                <label htmlFor="lastName" className="auth-form-label">Last Name</label>
+                <input
+                  id="lastName"
+                  name="lastName"
+                  type="text"
+                  placeholder=""
+                  value={formData.lastName}
+                  onChange={handleChange}
+                  className="auth-input"
+                  autoComplete="family-name"
+                  disabled={isLoading}
+                />
+              </div>
+            </div>
+            
             <div className="auth-form-group">
-              <label htmlFor="register-email" className="auth-form-label">Email ID</label>
+              <label htmlFor="email" className="auth-form-label">Email ID</label>
               <input
-                id="register-email"
+                id="email"
+                name="email"
                 type="email"
                 placeholder=""
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  setError('');
-                }}
+                value={formData.email}
+                onChange={handleChange}
                 className="auth-input"
+                autoComplete="email"
                 required
+                disabled={isLoading}
               />
             </div>
+            
             <div className="auth-form-group">
-              <label htmlFor="register-first-name" className="auth-form-label">First Name</label>
+              <label htmlFor="password" className="auth-form-label">Password</label>
               <input
-                id="register-first-name"
-                type="text"
+                id="password"
+                name="password"
+                type="password"
                 placeholder=""
-                value={firstName}
-                onChange={(e) => {
-                  setFirstName(e.target.value);
-                  setError('');
-                }}
+                value={formData.password}
+                onChange={handleChange}
                 className="auth-input"
+                autoComplete="new-password"
                 required
+                disabled={isLoading}
               />
             </div>
-            <div className="auth-form-group">
-              <label htmlFor="register-last-name" className="auth-form-label">Last Name</label>
-              <input
-                id="register-last-name"
-                type="text"
-                placeholder=""
-                value={lastName}
-                onChange={(e) => {
-                  setLastName(e.target.value);
-                  setError('');
-                }}
-                className="auth-input"
-                required
-              />
-            </div>
-            <div className="auth-form-group">
-              <label htmlFor="register-password" className="auth-form-label">Password</label>
-              <div className="auth-password-wrapper">
-                <input
-                  id="register-password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder=""
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setError('');
-                  }}
-                  className="auth-input"
-                  required
-                />
-                <button
-                  type="button"
-                  className="auth-password-toggle"
-                  onClick={() => setShowPassword(!showPassword)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? (
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M10 3.75C5.83333 3.75 2.275 6.34167 0.833333 10C2.275 13.6583 5.83333 16.25 10 16.25C14.1667 16.25 17.725 13.6583 19.1667 10C17.725 6.34167 14.1667 3.75 10 3.75ZM10 14.1667C7.7 14.1667 5.83333 12.3 5.83333 10C5.83333 7.7 7.7 5.83333 10 5.83333C12.3 5.83333 14.1667 7.7 14.1667 10C14.1667 12.3 12.3 14.1667 10 14.1667ZM10 7.5C8.61667 7.5 7.5 8.61667 7.5 10C7.5 11.3833 8.61667 12.5 10 12.5C11.3833 12.5 12.5 11.3833 12.5 10C12.5 8.61667 11.3833 7.5 10 7.5Z" fill="rgba(0,0,0,0.5)"/>
-                    </svg>
-                  ) : (
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M2.5 2.5L17.5 17.5M8.33333 8.33333C7.89167 8.775 7.5 9.375 7.5 10C7.5 11.3833 8.61667 12.5 10 12.5C10.625 12.5 11.225 12.1083 11.6667 11.6667M5.83333 5.83333C4.25 7.08333 3.125 8.45833 2.5 10C3.94167 13.6583 7.5 16.25 11.6667 16.25C12.9167 16.25 14.0833 15.9167 15.0833 15.4167L11.6667 12M2.5 10C3.94167 6.34167 7.5 3.75 11.6667 3.75C13.0833 3.75 14.375 4.16667 15.4167 4.75L12.5 7.66667" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  )}
-                </button>
-              </div>
-            </div>
-            <div className="auth-form-group">
-              <label htmlFor="register-confirm-password" className="auth-form-label">Confirm Password</label>
-              <div className="auth-password-wrapper">
-                <input
-                  id="register-confirm-password"
-                  type={showConfirmPassword ? "text" : "password"}
-                  placeholder=""
-                  value={confirmPassword}
-                  onChange={(e) => {
-                    setConfirmPassword(e.target.value);
-                    setError('');
-                  }}
-                  className="auth-input"
-                  required
-                />
-                <button
-                  type="button"
-                  className="auth-password-toggle"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
-                >
-                  {showConfirmPassword ? (
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M10 3.75C5.83333 3.75 2.275 6.34167 0.833333 10C2.275 13.6583 5.83333 16.25 10 16.25C14.1667 16.25 17.725 13.6583 19.1667 10C17.725 6.34167 14.1667 3.75 10 3.75ZM10 14.1667C7.7 14.1667 5.83333 12.3 5.83333 10C5.83333 7.7 7.7 5.83333 10 5.83333C12.3 5.83333 14.1667 7.7 14.1667 10C14.1667 12.3 12.3 14.1667 10 14.1667ZM10 7.5C8.61667 7.5 7.5 8.61667 7.5 10C7.5 11.3833 8.61667 12.5 10 12.5C11.3833 12.5 12.5 11.3833 12.5 10C12.5 8.61667 11.3833 7.5 10 7.5Z" fill="rgba(0,0,0,0.5)"/>
-                    </svg>
-                  ) : (
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M2.5 2.5L17.5 17.5M8.33333 8.33333C7.89167 8.775 7.5 9.375 7.5 10C7.5 11.3833 8.61667 12.5 10 12.5C10.625 12.5 11.225 12.1083 11.6667 11.6667M5.83333 5.83333C4.25 7.08333 3.125 8.45833 2.5 10C3.94167 13.6583 7.5 16.25 11.6667 16.25C12.9167 16.25 14.0833 15.9167 15.0833 15.4167L11.6667 12M2.5 10C3.94167 6.34167 7.5 3.75 11.6667 3.75C13.0833 3.75 14.375 4.16667 15.4167 4.75L12.5 7.66667" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  )}
-                </button>
-              </div>
-            </div>
-            <button type="submit" className="auth-sign-in-button">Create Account</button>
+            
+            <button 
+              type="submit" 
+              className="auth-sign-in-button"
+              disabled={isLoading}
+            >
+              {isLoading ? 'Creating Account...' : 'Create Account'}
+            </button>
           </form>
         </div>
 
@@ -206,4 +268,3 @@ const Register = () => {
 };
 
 export default Register;
-

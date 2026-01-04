@@ -1,7 +1,10 @@
 /**
  * Background service worker for AI Research Platform Highlights
- * Handles API communication and highlight queue management
+ * Handles API communication, highlight queue management, and OAuth authentication
  */
+
+// Import auth utilities
+importScripts('auth.js');
 
 // Default configuration
 const DEFAULT_CONFIG = {
@@ -112,8 +115,54 @@ async function saveHighlightToAPI(highlightData, config) {
   return await response.json();
 }
 
+// Handle Google OAuth authentication
+async function handleGoogleAuth() {
+  try {
+    const accessToken = await initiateGoogleAuth();
+    
+    // Sync user to backend
+    const config = await getConfig();
+    const apiUrl = config.apiUrl || 'http://localhost:5001';
+    
+    const syncResponse = await fetch(`${apiUrl}/api/auth/sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    
+    if (!syncResponse.ok) {
+      const error = await syncResponse.json();
+      throw new Error(error.error || 'Failed to sync user');
+    }
+    
+    // Save token
+    await saveConfig({ token: accessToken });
+    
+    return {
+      success: true,
+      token: accessToken
+    };
+  } catch (error) {
+    console.error('Google auth error:', error);
+    return {
+      success: false,
+      error: error.message || 'Authentication failed'
+    };
+  }
+}
+
 // Message listener
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Handle Google OAuth request
+  if (message.action === 'googleAuth') {
+    handleGoogleAuth()
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true; // Keep channel open for async response
+  }
+  
   if (message.action === 'saveHighlight') {
     handleSaveHighlight(message.data)
       .then(sendResponse)

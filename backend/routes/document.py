@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, send_file
 from utils.file_helpers import get_session_dir
 from models.database import ChatSessionModel, DocumentModel, ResearchDocumentModel, ProjectModel
 from services.vector_service import VectorService
-from utils.auth import verify_token, log_auth_info
+from utils.auth import get_user_id_from_token, log_auth_info
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -16,16 +16,7 @@ vector_service = VectorService()
 
 document_bp = Blueprint('document', __name__)
 
-def get_user_id_from_token():
-    """Extract user_id from JWT token in Authorization header"""
-    auth_header = request.headers.get('Authorization')
-    if not auth_header:
-        return None
-    try:
-        token = auth_header.split(' ')[1]  # Bearer <token>
-        return verify_token(token)
-    except:
-        return None
+# get_user_id_from_token is now imported from utils.auth
 
 @document_bp.route('/document', methods=['GET'])
 def get_document():

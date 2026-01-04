@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 from models.database import ChatSessionModel, DocumentTypeModel, Database, DocumentModel, ProjectModel, ResearchDocumentModel
 from services.perplexity_service import PerplexityService
 from services.vector_service import VectorService
-from utils.auth import verify_token, log_auth_info
+from utils.auth import get_user_id_from_token, log_auth_info
 from utils.file_helpers import get_session_dir
 from utils.html_helpers import strip_html_tags
 from utils.markdown_converter import markdown_to_html
@@ -33,16 +33,7 @@ def ensure_types_initialized():
 # Initialize on import
 ensure_types_initialized()
 
-def get_user_id_from_token():
-    """Extract user_id from JWT token in Authorization header"""
-    auth_header = request.headers.get('Authorization')
-    if not auth_header:
-        return None
-    try:
-        token = auth_header.split(' ')[1]  # Bearer <token>
-        return verify_token(token)
-    except:
-        return None
+# get_user_id_from_token is now imported from utils.auth
 
 def strip_markdown_to_plain_text(text):
     """

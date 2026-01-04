@@ -6,11 +6,14 @@
   "permissions": [
     "storage",
     "activeTab",
-    "alarms"
+    "alarms",
+    "identity",
+    "identity.email"
   ],
   "host_permissions": [
     "http://localhost:5001/*",
-    "http://127.0.0.1:5001/*"
+    "http://127.0.0.1:5001/*",
+    "https://dev-e0a45vyrmttly5df.us.auth0.com/*"
   ],
   "action": {
     "default_popup": "popup.html",

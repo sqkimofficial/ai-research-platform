@@ -3,6 +3,9 @@ import { getToken } from '../utils/auth';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
 
+/**
+ * Create axios instance for API calls
+ */
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -10,13 +13,52 @@ const api = axios.create({
   },
 });
 
-// Add token to requests
+/**
+ * Token getter function - will be set by Auth0TokenProvider
+ * This allows us to use getAccessTokenSilently from Auth0
+ */
+let tokenGetter = null;
+
+/**
+ * Set the token getter function
+ * Called from a component that has access to Auth0 context
+ * 
+ * @param {Function} getter - Function that returns a promise resolving to the token
+ */
+export const setTokenGetter = (getter) => {
+  tokenGetter = getter;
+};
+
+/**
+ * Get token from storage (checks both custom token and Auth0 cache)
+ */
+const getTokenFromStorage = () => {
+  return getToken();
+};
+
+/**
+ * Request interceptor to add token to requests
+ */
 api.interceptors.request.use(
-  (config) => {
-    const token = getToken();
+  async (config) => {
+    let token = null;
+    
+    // First try to get token from our storage (handles both custom and Auth0)
+    token = getTokenFromStorage();
+    
+    // If no token in storage, try Auth0 SDK getter (for fresh tokens)
+    if (!token && tokenGetter) {
+      try {
+        token = await tokenGetter();
+      } catch (e) {
+        console.warn('Failed to get token from Auth0 SDK:', e);
+      }
+    }
+    
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
     return config;
   },
   (error) => {
@@ -24,14 +66,70 @@ api.interceptors.request.use(
   }
 );
 
-// Auth API
+/**
+ * Response interceptor for handling auth errors
+ */
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token expired or invalid
+      // The Auth0 SDK will handle refresh, but if it fails,
+      // we should redirect to login
+      console.warn('Unauthorized request - token may be expired');
+    }
+    return Promise.reject(error);
+  }
+);
+
+/**
+ * Auth API
+ * - Email/password login/register use our backend (which calls Auth0)
+ * - Social login sync uses /api/auth/sync
+ */
 export const authAPI = {
-  register: (username, password, firstName, lastName) => {
-    return api.post('/api/auth/register', { username, password, first_name: firstName, last_name: lastName });
+  /**
+   * Login with email and password
+   * Backend authenticates with Auth0 and returns token
+   */
+  login: (email, password) => {
+    return api.post('/api/auth/login', { email, password });
   },
-  login: (username, password) => {
-    return api.post('/api/auth/login', { username, password });
+  
+  /**
+   * Register with email and password
+   * Backend creates user in Auth0
+   */
+  register: (email, password, firstName = '', lastName = '') => {
+    return api.post('/api/auth/register', { 
+      email, 
+      password, 
+      first_name: firstName,
+      last_name: lastName
+    });
   },
+  
+  /**
+   * Sync user to backend after Auth0 social login
+   * Called automatically by AuthCallback component
+   */
+  syncUser: () => {
+    return api.post('/api/auth/sync');
+  },
+  
+  /**
+   * Get current user info
+   */
+  getCurrentUser: () => {
+    return api.get('/api/auth/me');
+  },
+  
+  /**
+   * Verify token is valid
+   */
+  verifyToken: () => {
+    return api.get('/api/auth/verify');
+  }
 };
 
 // Project API
@@ -224,5 +322,3 @@ export const pdfAPI = {
 };
 
 export default api;
-
-

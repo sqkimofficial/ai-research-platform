@@ -1,68 +1,127 @@
-import jwt
-import bcrypt
-from datetime import datetime, timedelta
+"""
+Authentication utilities for Auth0 integration.
+
+This module handles Auth0 token validation and user identification.
+All authentication now goes through Auth0.
+"""
+
 import os
 import sys
+from flask import request
+
 # Add parent directory to path for imports
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
-from config import Config
 
-def hash_password(password):
-    """Hash a password using bcrypt"""
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=10)).decode('utf-8')
+from utils.auth0_validator import validate_token, fetch_user_profile, Auth0Error
+from models.database import UserModel
 
-def verify_password(password, password_hash):
-    """Verify a password against a hash"""
-    return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
 
-def generate_token(user_id):
-    """Generate a JWT token for a user"""
-    payload = {
-        'user_id': user_id,
-        'exp': datetime.utcnow() + timedelta(hours=24),
-        'iat': datetime.utcnow()
-    }
-    return jwt.encode(payload, Config.JWT_SECRET, algorithm='HS256')
-
-def verify_token(token):
-    """Verify and decode a JWT token"""
-    try:
-        payload = jwt.decode(token, Config.JWT_SECRET, algorithms=['HS256'])
-        return payload.get('user_id')
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
-        return None
-
-def get_user_id_from_token():
-    """Extract user_id from JWT token in Authorization header"""
-    from flask import request
+def get_token_from_header():
+    """
+    Extract the token from the Authorization header.
+    
+    Returns:
+        str: The token string, or None if not present
+    """
     auth_header = request.headers.get('Authorization')
     if not auth_header:
         return None
+    
     try:
-        token = auth_header.split(' ')[1]  # Bearer <token>
-        return verify_token(token)
-    except:
+        # Expected format: "Bearer <token>"
+        parts = auth_header.split()
+        if len(parts) == 2 and parts[0].lower() == 'bearer':
+            return parts[1]
+    except Exception:
+        pass
+    
+    return None
+
+
+def get_user_id_from_token():
+    """
+    Extract and validate user_id from the Auth0 JWT token in Authorization header.
+    
+    This function:
+    1. Extracts the token from the Authorization header
+    2. Validates the token with Auth0
+    3. Looks up the user in MongoDB by auth0_id
+    4. Returns the internal user_id
+    
+    Returns:
+        str: The internal user_id, or None if authentication fails
+    """
+    token = get_token_from_header()
+    if not token:
         return None
+    
+    try:
+        # Validate token with Auth0
+        payload = validate_token(token)
+        auth0_id = payload.get('sub')
+        
+        if not auth0_id:
+            print("Auth0 token missing 'sub' claim")
+            return None
+        
+        # Look up user by auth0_id
+        user = UserModel.get_user_by_auth0_id(auth0_id)
+        
+        if user:
+            return user.get('user_id')
+        
+        # User not found - they need to sync first via /api/auth/sync
+        print(f"User with auth0_id {auth0_id} not found in database")
+        return None
+        
+    except Auth0Error as e:
+        print(f"Auth0 token validation failed: {str(e)}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error in token validation: {str(e)}")
+        return None
+
+
+def get_auth0_user_info():
+    """
+    Get full Auth0 user information from the current request's token.
+    
+    Returns:
+        dict: User info from Auth0 userinfo endpoint, or None if fails
+    """
+    token = get_token_from_header()
+    if not token:
+        return None
+    
+    try:
+        return fetch_user_profile(token)
+    except Auth0Error as e:
+        print(f"Failed to fetch Auth0 user info: {str(e)}")
+        return None
+
 
 def log_auth_info(project_id=None):
     """
-    Log JWT token and project ID for Chrome extension configuration.
-    This prints the information needed for the Chrome extension to authenticate.
+    Log authentication info for debugging (e.g., Chrome extension setup).
+    
+    Note: With Auth0, users get tokens from the web app after login.
     """
-    from flask import request
-    auth_header = request.headers.get('Authorization', '')
-    token = auth_header.split(' ')[1] if auth_header.startswith('Bearer ') else 'N/A'
+    token = get_token_from_header()
     
     print("=" * 60)
-    print("CHROME EXTENSION AUTH INFO:")
-    print(f"  JWT Token: {token}")
+    print("AUTH INFO (Auth0):")
+    if token:
+        print(f"  Token: {token[:50]}..." if len(token) > 50 else f"  Token: {token}")
+        try:
+            payload = validate_token(token)
+            print(f"  Auth0 ID: {payload.get('sub')}")
+        except Auth0Error:
+            print("  Token validation failed")
+    else:
+        print("  Token: Not provided")
+    
     if project_id:
         print(f"  Project ID: {project_id}")
-    else:
-        print(f"  Project ID: Not provided in this request")
     print("=" * 60)
-

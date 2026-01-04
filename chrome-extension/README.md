@@ -67,12 +67,30 @@ Then update `manifest.json` to add the icons:
 3. Click the **Save Highlight** button that appears
 4. Highlight is saved to your project!
 
-## Getting Your JWT Token
+## Getting Your Auth0 Access Token
 
-1. Log in to the AI Research Platform
+The platform now uses Auth0 for authentication. To get your access token:
+
+1. Log in to the AI Research Platform (via Google or email)
 2. Open browser DevTools (F12)
-3. Go to Application → Local Storage → your site
-4. Copy the `token` value
+3. Go to **Application → Local Storage → localhost:3000** (or your domain)
+4. Find the key that starts with `@@auth0spajs@@`
+5. Click on it to see the JSON value
+6. Copy the `access_token` from the `body` object
+
+**Example JSON structure:**
+```json
+{
+  "body": {
+    "access_token": "eyJhbGciOiJSUzI1NiIs...",  <-- Copy this value
+    "id_token": "...",
+    "expires_in": 86400,
+    ...
+  }
+}
+```
+
+**Note:** The token expires after some time. If your highlights stop saving, get a fresh token.
 
 ## Getting Project ID
 

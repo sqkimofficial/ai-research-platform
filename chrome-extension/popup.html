@@ -8,78 +8,151 @@
 </head>
 <body>
   <div class="container">
-    <header>
-      <div class="logo">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-          <path d="M2 17l10 5 10-5"/>
-          <path d="M2 12l10 5 10-5"/>
-        </svg>
-        <h1>AI Research Highlights</h1>
-      </div>
-      <div id="status-indicator" class="status disconnected">
-        <span class="dot"></span>
-        <span class="text">Disconnected</span>
-      </div>
-    </header>
-
-    <main>
-      <!-- Connection Status Section -->
-      <section class="section">
-        <h2>Configuration</h2>
-        
-        <div class="form-group">
-          <label for="api-url">API URL</label>
-          <input type="text" id="api-url" placeholder="http://localhost:5000">
+    <!-- Auth View (Login/Signup) -->
+    <div id="auth-view" class="view">
+      <header>
+        <div class="logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+          <h1>AI Research Highlights</h1>
         </div>
-        
-        <div class="form-group">
-          <label for="token">Auth Token (JWT)</label>
-          <input type="password" id="token" placeholder="Paste your JWT token">
-          <button type="button" id="toggle-token" class="btn-icon" title="Show/Hide">
+      </header>
+
+      <main>
+        <!-- Login Form -->
+        <div id="login-form" class="auth-form active">
+          <div class="form-group">
+            <label for="login-email">Email</label>
+            <input type="email" id="login-email" placeholder="your@email.com" autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password">
+          </div>
+          <button id="login-btn" class="btn btn-primary">Sign In</button>
+          <div class="social-login">
+            <div class="divider">
+              <span>or continue with</span>
+            </div>
+            <div class="social-buttons">
+              <button id="google-login" class="btn-social">
+                <svg width="18" height="18" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                Google
+              </button>
+            </div>
+          </div>
+          <p class="signup-hint">
+            Don't have an account? <a href="#" id="signup-link">Sign up on the web app</a>
+          </p>
+        </div>
+
+        <!-- Messages -->
+        <div id="auth-message" class="message hidden"></div>
+      </main>
+
+      <footer>
+        <p>Save highlights from any webpage</p>
+        <p style="margin-top: 8px; font-size: 11px; color: #64748b;">
+          New user? Sign up at <a href="http://localhost:3000/register" target="_blank" style="color: #8b5cf6;">localhost:3000/register</a>
+        </p>
+      </footer>
+    </div>
+
+    <!-- Main View (After Auth) -->
+    <div id="main-view" class="view hidden">
+      <header>
+        <div class="logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+          <h1>AI Research Highlights</h1>
+        </div>
+        <div id="status-indicator" class="status connected">
+          <span class="dot"></span>
+          <span class="text">Connected</span>
+        </div>
+      </header>
+
+      <main>
+        <!-- User Info -->
+        <div class="section user-info">
+          <div class="user-details">
+            <span id="user-email" class="user-email"></span>
+            <button id="logout-btn" class="btn-logout" title="Sign Out">Sign Out</button>
+          </div>
+        </div>
+
+        <!-- Project Selector -->
+        <div class="section">
+          <h2>Active Project</h2>
+          <div class="form-group">
+            <label for="project-select">Select Project</label>
+            <select id="project-select" class="select">
+              <option value="">Loading projects...</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- API URL Config (Advanced) -->
+        <div class="section collapsible">
+          <button class="section-toggle" id="config-toggle">
+            <span>Advanced Settings</span>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-              <circle cx="12" cy="12" r="3"/>
+              <path d="M6 9l6 6 6-6"/>
             </svg>
           </button>
+          <div class="collapsible-content hidden" id="config-content">
+            <div class="form-group">
+              <label for="api-url">API URL</label>
+              <input type="text" id="api-url" placeholder="http://localhost:5001">
+            </div>
+            <div class="form-group">
+              <label>Extension Redirect URI (for Auth0)</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" id="redirect-uri" readonly style="flex: 1; background: rgba(255,255,255,0.03); cursor: not-allowed;">
+                <button id="copy-redirect-uri" class="btn-small" style="flex: none;" title="Copy to clipboard">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                </button>
+              </div>
+              <small style="display: block; margin-top: 4px; color: #64748b; font-size: 11px;">
+                Add this URL to Auth0 Allowed Callback URLs
+              </small>
+            </div>
+          </div>
         </div>
-      </section>
 
-      <!-- Project Section -->
-      <section class="section">
-        <h2>Active Project</h2>
-        
-        <div class="form-group">
-          <label for="project-id">Project ID</label>
-          <input type="text" id="project-id" placeholder="Project UUID">
+        <!-- Queue Status -->
+        <div class="section queue-section">
+          <div class="queue-header">
+            <h2>Pending Highlights</h2>
+            <span id="queue-count" class="badge">0</span>
+          </div>
+          <button id="sync-queue" class="btn btn-small">Sync Now</button>
         </div>
-      </section>
 
-      <!-- Actions -->
-      <section class="section actions">
-        <button id="save-config" class="btn btn-primary">Save Configuration</button>
-        <button id="test-connection" class="btn btn-secondary">Test Connection</button>
-      </section>
+        <!-- Messages -->
+        <div id="message" class="message hidden"></div>
+      </main>
 
-      <!-- Queue Status -->
-      <section class="section queue-section">
-        <div class="queue-header">
-          <h2>Pending Highlights</h2>
-          <span id="queue-count" class="badge">0</span>
-        </div>
-        <button id="sync-queue" class="btn btn-small">Sync Now</button>
-      </section>
-
-      <!-- Messages -->
-      <div id="message" class="message hidden"></div>
-    </main>
-
-    <footer>
-      <p>Select text on any page to save highlights</p>
-    </footer>
+      <footer>
+        <p>Select text on any page to save highlights</p>
+      </footer>
+    </div>
   </div>
 
   <script src="popup.js"></script>
 </body>
 </html>
-

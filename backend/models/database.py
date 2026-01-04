@@ -47,7 +47,7 @@ class Database:
 class UserModel:
     @staticmethod
     def create_user(username, password_hash, first_name=None, last_name=None):
-        """Create a new user"""
+        """Create a new user (legacy - kept for compatibility)"""
         db = Database.get_db()
         user_id = str(uuid.uuid4())
         user = {
@@ -56,6 +56,7 @@ class UserModel:
             'user_id': user_id,
             'first_name': first_name,
             'last_name': last_name,
+            'auth_provider': 'email',  # Legacy email/password
             'created_at': datetime.utcnow(),
             'updated_at': datetime.utcnow()
         }
@@ -76,6 +77,130 @@ class UserModel:
         """Get user by user_id"""
         db = Database.get_db()
         return db.users.find_one({'user_id': user_id})
+    
+    @staticmethod
+    def get_user_by_auth0_id(auth0_id):
+        """Get user by Auth0 ID (sub claim)"""
+        db = Database.get_db()
+        return db.users.find_one({'auth0_id': auth0_id})
+    
+    @staticmethod
+    def get_user_by_email(email):
+        """Get user by email address"""
+        db = Database.get_db()
+        # Check both 'email' field and 'username' field (email used as username)
+        user = db.users.find_one({'email': email})
+        if not user:
+            user = db.users.find_one({'username': email})
+        return user
+    
+    @staticmethod
+    def create_or_update_auth0_user(auth0_id, email, first_name=None, last_name=None, 
+                                     picture=None, email_verified=False, auth_provider='auth0'):
+        """
+        Create or update a user from Auth0 authentication.
+        
+        If a user with this auth0_id exists, update their info.
+        If not, check if a user with this email exists and link the auth0_id.
+        If neither, create a new user.
+        
+        Args:
+            auth0_id: The Auth0 user ID (sub claim, e.g., 'auth0|123' or 'google-oauth2|456')
+            email: User's email address
+            first_name: User's first name
+            last_name: User's last name
+            picture: URL to profile picture
+            email_verified: Whether email is verified
+            auth_provider: The auth provider (e.g., 'auth0', 'google-oauth2', 'apple')
+        
+        Returns:
+            dict: The user document (with user_id)
+        """
+        db = Database.get_db()
+        
+        # First, check if user exists by auth0_id
+        existing_user = db.users.find_one({'auth0_id': auth0_id})
+        
+        if existing_user:
+            # Update existing user's info
+            update_data = {
+                'updated_at': datetime.utcnow()
+            }
+            if first_name:
+                update_data['first_name'] = first_name
+            if last_name:
+                update_data['last_name'] = last_name
+            if picture:
+                update_data['picture'] = picture
+            if email:
+                update_data['email'] = email
+            update_data['email_verified'] = email_verified
+            
+            db.users.update_one(
+                {'auth0_id': auth0_id},
+                {'$set': update_data}
+            )
+            
+            # Return updated user
+            return db.users.find_one({'auth0_id': auth0_id})
+        
+        # Check if user exists by email (link accounts)
+        if email:
+            existing_by_email = UserModel.get_user_by_email(email)
+            if existing_by_email:
+                # Link Auth0 account to existing user
+                db.users.update_one(
+                    {'user_id': existing_by_email['user_id']},
+                    {'$set': {
+                        'auth0_id': auth0_id,
+                        'auth_provider': auth_provider,
+                        'email': email,
+                        'email_verified': email_verified,
+                        'picture': picture,
+                        'first_name': first_name or existing_by_email.get('first_name'),
+                        'last_name': last_name or existing_by_email.get('last_name'),
+                        'updated_at': datetime.utcnow()
+                    }}
+                )
+                return db.users.find_one({'user_id': existing_by_email['user_id']})
+        
+        # Create new user
+        user_id = str(uuid.uuid4())
+        new_user = {
+            'user_id': user_id,
+            'auth0_id': auth0_id,
+            'auth_provider': auth_provider,
+            'email': email,
+            'username': email,  # Use email as username for Auth0 users
+            'email_verified': email_verified,
+            'first_name': first_name,
+            'last_name': last_name,
+            'picture': picture,
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
+        }
+        
+        db.users.insert_one(new_user)
+        return new_user
+    
+    @staticmethod
+    def update_user_auth0_info(user_id, auth0_id=None, picture=None, email_verified=None):
+        """Update Auth0-specific user information"""
+        db = Database.get_db()
+        update_data = {'updated_at': datetime.utcnow()}
+        
+        if auth0_id:
+            update_data['auth0_id'] = auth0_id
+        if picture:
+            update_data['picture'] = picture
+        if email_verified is not None:
+            update_data['email_verified'] = email_verified
+        
+        result = db.users.update_one(
+            {'user_id': user_id},
+            {'$set': update_data}
+        )
+        return result.modified_count > 0
 
 class ProjectModel:
     @staticmethod

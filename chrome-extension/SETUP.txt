@@ -11,30 +11,34 @@ INSTALLATION
 5. The extension icon should appear in your Chrome toolbar
 
 
-GETTING YOUR CREDENTIALS
-------------------------
-1. Start the backend server (python app.py)
-2. Open the AI Research Platform in your browser
-3. Log in to your account
-4. Select any chat session within a project
+AUTHENTICATION & SETUP
+-----------------------
+The extension now has built-in authentication! No need to manually copy tokens.
 
-5. Check the backend terminal - you will see:
-   ============================================================
-   SESSION ENTRY - Use these for Chrome Extension:
-     JWT Token: eyJhbGciOiJI... (long string)
-     Project ID: abc123-def456-... (UUID format)
-   ============================================================
-
-6. Copy these values
-
-
-CONFIGURING THE EXTENSION
--------------------------
 1. Click the extension icon in Chrome toolbar
-2. Paste your JWT Token
-3. Paste your Project ID
-4. Click "Save Configuration"
-5. Click "Test Connection" to verify it works
+2. You'll see a "Sign In" / "Sign Up" interface:
+   
+   SIGN UP (New Users):
+   - Click the "Sign Up" tab
+   - Enter your first name, last name, email, and password
+   - Click "Create Account"
+   - You'll be automatically signed in after registration
+   
+   SIGN IN (Existing Users):
+   - Enter your email and password
+   - Click "Sign In"
+   
+   SOCIAL LOGIN (Google/Apple):
+   - Click "Sign in with Google" or "Sign in with Apple"
+   - A new tab will open to complete authentication
+   - After signing in, return to the extension
+
+3. After signing in, select a project from the dropdown:
+   - Projects are automatically loaded from your account
+   - Select the project where you want to save highlights
+   - If you only have one project, it will be auto-selected
+
+4. You're ready to use the extension!
 
 
 USING THE EXTENSION
@@ -45,7 +49,7 @@ USING THE EXTENSION
    - Preview of selected text
    - Text area to add a note (optional)
 4. Click "Save Highlight"
-5. Done! Your highlight is saved to your project
+5. Done! Your highlight is saved to your selected project
 
 
 VIEWING YOUR HIGHLIGHTS
@@ -56,25 +60,61 @@ VIEWING YOUR HIGHLIGHTS
 4. Click on a URL to see all highlights from that page
 
 
+FEATURES
+--------
+- ✅ Built-in authentication (no manual token copying)
+- ✅ Project selector dropdown
+- ✅ Automatic project loading
+- ✅ Queue highlights when offline
+- ✅ Sync pending highlights manually
+- ✅ Visual feedback when saving highlights
+- ✅ Notes for context
+
+
 TIPS
 ----
-- You only need JWT Token + Project ID (no session ID needed)
-- Highlights are grouped by URL within each project
+- Your session stays active until you sign out
+- You can switch projects anytime from the dropdown
+- If you're offline, highlights are queued and synced when online
+- Press Ctrl+Enter (Cmd+Enter on Mac) to quickly save a highlight
+- Press Escape to close the highlight popup without saving
 - Add notes to remember why you saved something
-- Press Ctrl+Enter to quickly save a highlight
-- Press Escape to close the popup without saving
 
 
 TROUBLESHOOTING
 ---------------
-- "Unauthorized" error: Your JWT token may have expired. 
-  Log in again and copy a fresh token from the backend logs.
+- "Unauthorized" or "Login failed" error:
+  → Make sure the backend server is running on port 5001
+  → Check your email and password are correct
+  → For social login, complete the authentication in the new tab
 
-- Extension not appearing: Make sure Developer mode is enabled
-  and reload the extension after any changes.
+- Projects not loading:
+  → Make sure you're signed in
+  → Check your internet connection
+  → Verify the backend server is running
 
-- Highlights not saving: Check that the backend server is running
-  on port 5001.
+- Extension not appearing:
+  → Make sure Developer mode is enabled
+  → Reload the extension after any changes (click the reload icon)
+  → Check for errors in chrome://extensions/
+
+- Highlights not saving:
+  → Make sure you've selected a project
+  → Check your internet connection
+  → Verify the backend server is running on port 5001
+  → Check the browser console (F12) for errors
+
+- "Network error" messages:
+  → Ensure the backend is running: `python backend/app.py`
+  → Check the API URL in Advanced Settings matches your backend URL
+  → Default is http://localhost:5001
+
+
+ADVANCED SETTINGS
+-----------------
+Click "Advanced Settings" to configure:
+- API URL: Change if your backend runs on a different port/URL
+  (Default: http://localhost:5001)
+
 
 ===============================================
-

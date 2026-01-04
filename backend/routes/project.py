@@ -1,19 +1,10 @@
 from flask import Blueprint, request, jsonify
 from models.database import ProjectModel
-from utils.auth import verify_token, log_auth_info
+from utils.auth import get_user_id_from_token, log_auth_info
 
 project_bp = Blueprint('project', __name__)
 
-def get_user_id_from_token():
-    """Extract user_id from JWT token in Authorization header"""
-    auth_header = request.headers.get('Authorization')
-    if not auth_header:
-        return None
-    try:
-        token = auth_header.split(' ')[1]  # Bearer <token>
-        return verify_token(token)
-    except:
-        return None
+# get_user_id_from_token is now imported from utils.auth
 
 @project_bp.route('', methods=['POST'])
 def create_project():

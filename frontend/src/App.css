@@ -75,11 +75,13 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: space-between;
   min-height: 100vh;
   height: 100vh;
   width: 100%;
   margin: 0;
   padding: 0;
+  background-color: #fbf8f5;
 }
 
 /* Top Section - Logo */
@@ -138,8 +140,15 @@
   align-items: center;
   width: 100%;
   max-width: 360px;
-  margin-bottom: clamp(5vh, 20vh, 200px);
+  margin-bottom: 28vh;
   margin-top: auto;
+}
+
+
+/* Register page - center vertically */
+.auth-main-section--register {
+  margin-top: auto;
+  margin-bottom: auto;
 }
 
 /* Welcome Section */
@@ -431,6 +440,79 @@
   opacity: 0.85;
 }
 
+/* Password label row with inline Forgot Password */
+.auth-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.auth-forgot-link {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 16px;
+  color: #323232;
+  opacity: 0.5;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variation-settings: 'opsz' 14;
+  transition: opacity 0.2s ease;
+}
+
+.auth-forgot-link:hover {
+  opacity: 0.7;
+}
+
+/* Multi-line footer */
+.auth-footer-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 20px;
+  color: rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variation-settings: 'opsz' 14;
+}
+
+.auth-footer-link {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.7);
+  text-decoration: underline;
+  text-decoration-skip-ink: none;
+  text-underline-position: from-font;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+  font-variation-settings: 'opsz' 14;
+}
+
+.auth-footer-link:hover {
+  opacity: 0.85;
+}
+
+/* Form row for two columns (First Name / Last Name) */
+.auth-form-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.auth-form-group-half {
+  flex: 1;
+  min-width: 0;
+}
 
 .logout-button {
   padding: 8px 16px;

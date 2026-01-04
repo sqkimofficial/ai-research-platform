@@ -5,44 +5,82 @@ import { setToken } from '../utils/auth';
 import stitchLogo from '../assets/stitch-logo.svg';
 import '../App.css';
 
+/**
+ * LoginPassword component - Password entry page
+ * 
+ * - Receives email from LoginEmail page
+ * - Submits credentials to backend for Auth0 password grant
+ */
 const LoginPassword = () => {
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const email = location.state?.email || '';
+  
+  // Get email from navigation state
+  const email = location.state?.email;
 
+  // Redirect to email page if no email provided
   useEffect(() => {
-    // Redirect to email step if no email in state
     if (!email) {
       navigate('/login/email');
     }
   }, [email, navigate]);
 
+  /**
+   * Handle login form submission
+   */
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
+    
+    if (!password) {
+      setError('Please enter your password');
+      return;
+    }
+
+    setIsLoading(true);
+
     try {
-      // Use email as username for now (backend expects username)
       const response = await authAPI.login(email, password);
+      
+      // Store token
       setToken(response.data.token);
-      // Store user first name for account display
+      
+      // Store user first name for display
       if (response.data.first_name) {
         localStorage.setItem('userFirstName', response.data.first_name);
       }
-      // Navigate to workspace (will show project selector if needed)
+      
+      // Navigate to workspace
       const savedProjectId = localStorage.getItem('selectedProjectId');
       if (savedProjectId) {
         navigate(`/project/${savedProjectId}/workspace`);
       } else {
-        // Navigate to workspace route without projectId - will show project selector
         navigate('/workspace');
       }
-    } catch (error) {
-      setError(error.response?.data?.error || 'Invalid email or password. Please try again.');
+    } catch (err) {
+      console.error('Login error:', err);
+      const errorMessage = err.response?.data?.error || 'Login failed. Please try again.';
+      setError(errorMessage);
+    } finally {
+      setIsLoading(false);
     }
   };
+
+  /**
+   * Handle "Forgot Password" click
+   */
+  const handleForgotPassword = (e) => {
+    e.preventDefault();
+    // TODO: Implement password reset via Auth0
+    alert('Password reset will be available soon. Please contact support if you need help accessing your account.');
+  };
+
+  if (!email) {
+    return null; // Will redirect
+  }
 
   return (
     <div className="auth-container">
@@ -54,52 +92,59 @@ const LoginPassword = () => {
       
       <div className="auth-main-section">
         <div className="auth-welcome-section">
-          <h1 className="auth-welcome-title">
-            <span>Welcome </span>
-            <span className="lowercase">to</span>
-            <span> Stitch</span>
+          <h1 className="auth-welcome-title" style={{ textTransform: 'capitalize' }}>
+            Enter Your Password
           </h1>
-          <p className="auth-subtitle">Sign In to access your dashboard</p>
+          <p className="auth-subtitle">
+            Signing in as {email}{' '}
+            <a 
+              href="/login/email"
+              className="auth-footer-link"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/login/email');
+              }}
+            >
+              Change email
+            </a>
+          </p>
         </div>
         
         <div className="auth-form-container">
           <form onSubmit={handleLogin} className="auth-form-wrapper">
             {error && <div className="auth-error-text">{error}</div>}
+            
             <div className="auth-form-group">
-              <label htmlFor="password" className="auth-form-label">Password</label>
-              <div className="auth-password-wrapper">
-                <input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder=""
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setError('');
-                  }}
-                  className="auth-input"
-                  required
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  className="auth-password-toggle"
-                  onClick={() => setShowPassword(!showPassword)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+              <div className="auth-label-row">
+                <label htmlFor="password" className="auth-form-label">Password</label>
+                <a 
+                  href="/forgot-password"
+                  onClick={handleForgotPassword}
+                  className="auth-forgot-link"
                 >
-                  {showPassword ? (
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M10 3.75C5.83333 3.75 2.275 6.34167 0.833333 10C2.275 13.6583 5.83333 16.25 10 16.25C14.1667 16.25 17.725 13.6583 19.1667 10C17.725 6.34167 14.1667 3.75 10 3.75ZM10 14.1667C7.7 14.1667 5.83333 12.3 5.83333 10C5.83333 7.7 7.7 5.83333 10 5.83333C12.3 5.83333 14.1667 7.7 14.1667 10C14.1667 12.3 12.3 14.1667 10 14.1667ZM10 7.5C8.61667 7.5 7.5 8.61667 7.5 10C7.5 11.3833 8.61667 12.5 10 12.5C11.3833 12.5 12.5 11.3833 12.5 10C12.5 8.61667 11.3833 7.5 10 7.5Z" fill="rgba(0,0,0,0.5)"/>
-                    </svg>
-                  ) : (
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M2.5 2.5L17.5 17.5M8.33333 8.33333C7.89167 8.775 7.5 9.375 7.5 10C7.5 11.3833 8.61667 12.5 10 12.5C10.625 12.5 11.225 12.1083 11.6667 11.6667M5.83333 5.83333C4.25 7.08333 3.125 8.45833 2.5 10C3.94167 13.6583 7.5 16.25 11.6667 16.25C12.9167 16.25 14.0833 15.9167 15.0833 15.4167L11.6667 12M2.5 10C3.94167 6.34167 7.5 3.75 11.6667 3.75C13.0833 3.75 14.375 4.16667 15.4167 4.75L12.5 7.66667" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  )}
-                </button>
+                  Forgot Password?
+                </a>
               </div>
+              <input
+                id="password"
+                type="password"
+                placeholder=""
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                className="auth-input"
+                autoComplete="current-password"
+                autoFocus
+                disabled={isLoading}
+              />
             </div>
-            <button type="submit" className="auth-sign-in-button">Sign In</button>
+            
+            <button 
+              type="submit" 
+              className="auth-sign-in-button"
+              disabled={isLoading}
+            >
+              {isLoading ? 'Signing In...' : 'Sign In'}
+            </button>
           </form>
         </div>
 
