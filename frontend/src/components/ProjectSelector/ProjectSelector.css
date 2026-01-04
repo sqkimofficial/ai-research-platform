@@ -39,15 +39,15 @@
 }
 
 .project-selector-modal:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .project-selector-modal:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .project-selector-modal:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .project-selector-header {
@@ -127,15 +127,15 @@
 }
 
 .projects-list:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .projects-list:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .projects-list:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .empty-state {

@@ -245,15 +245,15 @@
 }
 
 .document-content:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .document-content:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .document-content:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .document-preview {
@@ -934,15 +934,15 @@
 }
 
 .document-list-content:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .document-list-content:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .document-list-content:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .create-document-section {
@@ -1068,15 +1068,15 @@
 }
 
 .document-list-view:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .document-list-view:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .document-list-view:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .document-list-header-inline {
@@ -1320,15 +1320,15 @@
 }
 
 .highlights-table-container:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .highlights-table-container:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .highlights-table-container:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .highlights-table-header {
@@ -1826,15 +1826,15 @@
 }
 
 .highlights-list-content:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .highlights-list-content:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .highlights-list-content:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .no-highlights-message-list {
@@ -2158,15 +2158,15 @@
 }
 
 .pdf-table-container:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .pdf-table-container:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .pdf-table-container:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .pdf-table-header {
@@ -2555,15 +2555,15 @@
 }
 
 .pdf-highlights-list:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .pdf-highlights-list:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .pdf-highlights-list:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .no-highlights-message-pdf {
@@ -3105,15 +3105,15 @@
 }
 
 .document-highlights-view:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .document-highlights-view:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .document-highlights-view:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .document-highlights-header {
@@ -3450,15 +3450,15 @@
 }
 
 .url-highlights-view:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .url-highlights-view:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .url-highlights-view:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .url-highlights-header {
@@ -3777,15 +3777,15 @@
 }
 
 .researchdocs-table-container:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .researchdocs-table-container:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .researchdocs-table-container:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .researchdocs-table-header {
@@ -4013,15 +4013,15 @@
 }
 
 .researchdocs-preview-content:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .researchdocs-preview-content:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .researchdocs-preview-content:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .researchdocs-preview-content .empty-doc-message {
@@ -4076,15 +4076,15 @@
 }
 
 .researchdocs-info-list:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .researchdocs-info-list:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .researchdocs-info-list:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .researchdoc-info-item {
@@ -4180,15 +4180,15 @@
 }
 
 .written-documents-view:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .written-documents-view:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .written-documents-view:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .written-documents-header {
@@ -4440,15 +4440,15 @@
 }
 
 .add-new-tab-view:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .add-new-tab-view:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .add-new-tab-view:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 /* Top Action Buttons */
@@ -4592,15 +4592,15 @@
 }
 
 .add-tab-content-grid:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 50, 98, 0.3);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .add-tab-content-grid:hover::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 50, 98, 0.5);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 .add-tab-content-grid:hover {
-  scrollbar-color: rgba(0, 50, 98, 0.3) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .add-tab-sections {

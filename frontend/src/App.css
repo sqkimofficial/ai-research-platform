@@ -56,7 +56,7 @@
 /* Resize Divider */
 .resize-divider {
   width: 1px;
-  background: var(--color-base-softer);
+  background: var(--color-border);
   cursor: col-resize;
   display: flex;
   align-items: center;
@@ -64,16 +64,6 @@
   flex-shrink: 0;
   position: relative;
   transition: all 0.15s ease;
-}
-
-.resize-divider:hover {
-  width: 4px;
-  background: var(--color-base-soft);
-}
-
-.resize-divider.resizing {
-  width: 4px;
-  background: var(--color-base-strong);
 }
 
 .resize-handle {

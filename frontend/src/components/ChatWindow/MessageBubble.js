@@ -318,7 +318,7 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
           )}
           
           {/* Action Buttons */}
-          {mode === 'write' && documentContent && !isEditing && !isInserted && (
+          {mode === 'write' && documentContent && !isEditing && (
             <div className="action-buttons-group">
               <button 
                 className="action-button copy-action-btn" 
