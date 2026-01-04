@@ -118,11 +118,22 @@ def save_document():
             else:
                 new_content = content
             
+            # Generate snapshot from HTML content
+            snapshot = None
+            try:
+                from services.snapshot_service import get_snapshot_service
+                snapshot_service = get_snapshot_service()
+                snapshot = snapshot_service.generate_snapshot(new_content)
+            except Exception as snapshot_error:
+                print(f"Warning: Failed to generate snapshot: {snapshot_error}")
+                # Continue without snapshot - document will still be saved
+            
             # Update document (storing HTML in markdown_content field for backward compatibility)
             ResearchDocumentModel.update_document(
                 document_id,
                 markdown_content=new_content,  # Actually HTML now
-                title=title
+                title=title,
+                snapshot=snapshot
             )
             
             # Index document for semantic search (will strip HTML tags in vector service)
@@ -417,6 +428,8 @@ def get_all_research_documents():
                 'document_id': doc['document_id'],
                 'title': doc.get('title', 'Untitled'),
                 'project_id': doc.get('project_id'),
+                'snapshot': doc.get('snapshot'),  # Base64 image snapshot
+                'archived': doc.get('archived', False),  # Archive flag
                 'created_at': doc.get('created_at').isoformat() if doc.get('created_at') else None,
                 'updated_at': doc.get('updated_at').isoformat() if doc.get('updated_at') else None
             })
@@ -480,6 +493,132 @@ def delete_research_document(document_id):
             return jsonify({'status': 'deleted'}), 200
         else:
             return jsonify({'error': 'Failed to delete document'}), 500
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@document_bp.route('/document/research-documents/<document_id>/archive', methods=['POST'])
+def archive_document(document_id):
+    """Archive a research document"""
+    try:
+        user_id = get_user_id_from_token()
+        if not user_id:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        document = ResearchDocumentModel.get_document(document_id)
+        if not document:
+            return jsonify({'error': 'Document not found'}), 404
+        
+        if document['user_id'] != user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        success = ResearchDocumentModel.archive_document(document_id)
+        
+        if not success:
+            return jsonify({'error': 'Failed to archive document'}), 500
+        
+        return jsonify({'status': 'ok'}), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@document_bp.route('/document/research-documents/<document_id>/unarchive', methods=['POST'])
+def unarchive_document(document_id):
+    """Unarchive a research document"""
+    try:
+        user_id = get_user_id_from_token()
+        if not user_id:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        document = ResearchDocumentModel.get_document(document_id)
+        if not document:
+            return jsonify({'error': 'Document not found'}), 404
+        
+        if document['user_id'] != user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        success = ResearchDocumentModel.unarchive_document(document_id)
+        
+        if not success:
+            return jsonify({'error': 'Failed to unarchive document'}), 500
+        
+        return jsonify({'status': 'ok'}), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@document_bp.route('/document/research-documents/<document_id>/rename', methods=['PATCH'])
+def rename_document(document_id):
+    """Rename a research document"""
+    try:
+        user_id = get_user_id_from_token()
+        if not user_id:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        data = request.get_json()
+        new_title = data.get('title')
+        
+        if not new_title or not new_title.strip():
+            return jsonify({'error': 'Title is required'}), 400
+        
+        document = ResearchDocumentModel.get_document(document_id)
+        if not document:
+            return jsonify({'error': 'Document not found'}), 404
+        
+        if document['user_id'] != user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        success = ResearchDocumentModel.rename_document(document_id, new_title.strip())
+        
+        if not success:
+            return jsonify({'error': 'Failed to rename document'}), 500
+        
+        return jsonify({'status': 'ok', 'title': new_title.strip()}), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@document_bp.route('/document/research-documents/<document_id>/generate-snapshot', methods=['POST'])
+def generate_snapshot_for_document(document_id):
+    """Generate snapshot for an existing document that doesn't have one"""
+    try:
+        user_id = get_user_id_from_token()
+        if not user_id:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        document = ResearchDocumentModel.get_document(document_id)
+        if not document:
+            return jsonify({'error': 'Document not found'}), 404
+        
+        if document['user_id'] != user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Get document content
+        html_content = document.get('markdown_content', '')
+        
+        if not html_content or not html_content.strip():
+            return jsonify({'error': 'Document has no content to generate snapshot from'}), 400
+        
+        # Generate snapshot
+        snapshot = None
+        try:
+            from services.snapshot_service import get_snapshot_service
+            snapshot_service = get_snapshot_service()
+            snapshot = snapshot_service.generate_snapshot(html_content)
+        except Exception as snapshot_error:
+            print(f"Error generating snapshot: {snapshot_error}")
+            return jsonify({'error': f'Failed to generate snapshot: {str(snapshot_error)}'}), 500
+        
+        if not snapshot:
+            return jsonify({'error': 'Failed to generate snapshot'}), 500
+        
+        # Update document with snapshot
+        ResearchDocumentModel.update_document(
+            document_id,
+            snapshot=snapshot
+        )
+        
+        return jsonify({'status': 'ok', 'snapshot': snapshot}), 200
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500

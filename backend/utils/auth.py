@@ -108,20 +108,5 @@ def log_auth_info(project_id=None):
     
     Note: With Auth0, users get tokens from the web app after login.
     """
-    token = get_token_from_header()
-    
-    print("=" * 60)
-    print("AUTH INFO (Auth0):")
-    if token:
-        print(f"  Token: {token[:50]}..." if len(token) > 50 else f"  Token: {token}")
-        try:
-            payload = validate_token(token)
-            print(f"  Auth0 ID: {payload.get('sub')}")
-        except Auth0Error:
-            print("  Token validation failed")
-    else:
-        print("  Token: Not provided")
-    
-    if project_id:
-        print(f"  Project ID: {project_id}")
-    print("=" * 60)
+    # Logging disabled
+    pass

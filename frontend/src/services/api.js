@@ -238,6 +238,15 @@ export const documentAPI = {
   deleteResearchDocument: (documentId) => {
     return api.delete(`/api/document/research-documents/${documentId}`);
   },
+  archiveDocument: (documentId) => {
+    return api.post(`/api/document/research-documents/${documentId}/archive`);
+  },
+  unarchiveDocument: (documentId) => {
+    return api.post(`/api/document/research-documents/${documentId}/unarchive`);
+  },
+  renameDocument: (documentId, newTitle) => {
+    return api.patch(`/api/document/research-documents/${documentId}/rename`, { title: newTitle });
+  },
 };
 
 // Highlights API

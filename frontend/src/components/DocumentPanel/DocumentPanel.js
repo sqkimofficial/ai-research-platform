@@ -5,6 +5,9 @@ import { getToken } from '../../utils/auth';
 // It's still used in ChatWindow.js for converting AI's Markdown output to HTML
 import RichTextEditor from './RichTextEditor';
 import AddNewTabView from './AddNewTabView';
+import DocumentCardMenu from './DocumentCardMenu';
+import CardMenu from './CardMenu';
+import SectionHeader from './SectionHeader';
 import './DocumentPanel.css';
 import { ReactComponent as CancelIconSvg } from '../../assets/cancel-icon.svg';
 import { ReactComponent as BackIconSvg } from '../../assets/back-icon.svg';
@@ -20,6 +23,10 @@ import { ReactComponent as DownloadIconSvg } from '../../assets/download-icon.sv
 import { ReactComponent as NewDocumentIconSvg } from '../../assets/newdocument-icon.svg';
 import { ReactComponent as DocumentIconSvg } from '../../assets/document-icon.svg';
 import { ReactComponent as WebIconSvg } from '../../assets/web-icon.svg';
+import { ReactComponent as SearchIconSvg } from '../../assets/search.svg';
+import { ReactComponent as ChevronMdSvg } from '../../assets/chevron-md.svg';
+import highlightsImageIcon from '../../assets/highlights-image-icon.svg';
+import highlightsPdfIcon from '../../assets/highlights-pdf-icon.svg';
 
 // Asset-based icon components
 const CloseIcon = () => <CancelIconSvg className="dp-icon" />;
@@ -246,6 +253,17 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const [editingNoteText, setEditingNoteText] = useState('');
   const [isEditingDocumentName, setIsEditingDocumentName] = useState(false);
   const [editingDocumentName, setEditingDocumentName] = useState('');
+  const [expandedTimeSections, setExpandedTimeSections] = useState({
+    nonArchived: true,
+    archive: true
+  });
+  const [expandedUrlTimeSections, setExpandedUrlTimeSections] = useState({
+    nonArchived: true,
+    archived: true
+  });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [urlSearchQuery, setUrlSearchQuery] = useState('');
+  const [pdfSearchQuery, setPdfSearchQuery] = useState('');
 
   // Ref to track if we've restored tabs from localStorage (prevents saving empty arrays on mount)
   const hasRestoredTabsRef = useRef(false);
@@ -980,40 +998,33 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     return `${month} ${getOrdinal(day)} ${year} ${hour12}:${minutes.toString().padStart(2, '0')}${ampm}`;
   };
 
-  // Group PDFs by time period (Today, Last 7 Days, Archived)
+  // Format time for cards (e.g., "Last Updated 9:15pm")
+  const formatLastUpdatedTime = (dateString) => {
+    const date = new Date(dateString);
+    // Use browser's timezone
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const ampm = hours >= 12 ? 'pm' : 'am';
+    const hour12 = hours % 12 || 12;
+    
+    return `Last Updated ${hour12}:${minutes.toString().padStart(2, '0')}${ampm}`;
+  };
+
+  // Group PDFs: sort by updated_at descending (newest first)
   const groupPdfsByTime = (pdfList) => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const sorted = [...pdfList];
     
-    const groups = {
-      today: [],
-      last7Days: [],
-      archived: []
-    };
-    
-    pdfList.forEach(pdf => {
-      const pdfDate = new Date(pdf.updated_at || pdf.created_at);
-      const pdfDateOnly = new Date(pdfDate.getFullYear(), pdfDate.getMonth(), pdfDate.getDate());
-      
-      // For now, we'll use a simple archived flag (to be implemented later)
-      // Documents older than 30 days will be considered archived for demo
-      const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-      
-      if (pdf.archived) {
-        groups.archived.push(pdf);
-      } else if (pdfDateOnly >= today) {
-        groups.today.push(pdf);
-      } else if (pdfDateOnly >= sevenDaysAgo) {
-        groups.last7Days.push(pdf);
-      } else if (pdfDateOnly < thirtyDaysAgo) {
-        groups.archived.push(pdf);
-      } else {
-        groups.last7Days.push(pdf);
-      }
+    // Sort by updated_at descending (newest first)
+    sorted.sort((a, b) => {
+      const dateA = new Date(a.updated_at || a.created_at);
+      const dateB = new Date(b.updated_at || b.created_at);
+      return dateB - dateA;
     });
     
-    return groups;
+    return {
+      nonArchived: sorted,
+      archived: []
+    };
   };
 
   // Extract domain name from URL
@@ -1042,74 +1053,64 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     }
   };
 
-  // Group URL highlights by time period (Today, Archived)
+  // Group URL highlights: sort by updated_at descending (newest first)
   const groupUrlsByTime = (urlList) => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const sorted = [...urlList];
     
-    const groups = {
-      today: [],
-      last7Days: [],
-      archived: []
-    };
-    
-    urlList.forEach(urlDoc => {
-      const urlDate = new Date(urlDoc.updated_at || urlDoc.created_at);
-      const urlDateOnly = new Date(urlDate.getFullYear(), urlDate.getMonth(), urlDate.getDate());
-      
-      // Documents older than 30 days will be considered archived for demo
-      const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-      
-      if (urlDoc.archived) {
-        groups.archived.push(urlDoc);
-      } else if (urlDateOnly >= today) {
-        groups.today.push(urlDoc);
-      } else if (urlDateOnly >= sevenDaysAgo) {
-        groups.last7Days.push(urlDoc);
-      } else if (urlDateOnly < thirtyDaysAgo) {
-        groups.archived.push(urlDoc);
-      } else {
-        groups.last7Days.push(urlDoc);
-      }
+    // Sort by updated_at descending (newest first)
+    sorted.sort((a, b) => {
+      const dateA = new Date(a.updated_at || a.created_at);
+      const dateB = new Date(b.updated_at || b.created_at);
+      return dateB - dateA;
     });
     
-    return groups;
+    return {
+      nonArchived: sorted,
+      archived: []
+    };
   };
 
-  // Group research documents by time period (Today, Last 7 Days, Archived)
+  // Toggle time section expansion
+  const toggleTimeSection = (sectionKey) => {
+    setExpandedTimeSections(prev => ({
+      ...prev,
+      [sectionKey]: !prev[sectionKey]
+    }));
+  };
+
+  // Check if time section is expanded (default to expanded)
+  const isTimeSectionExpanded = (sectionKey) => {
+    return expandedTimeSections[sectionKey] !== false;
+  };
+
+  // Toggle URL time section expansion
+  const toggleUrlTimeSection = (sectionKey) => {
+    setExpandedUrlTimeSections(prev => ({
+      ...prev,
+      [sectionKey]: !prev[sectionKey]
+    }));
+  };
+
+  // Check if URL time section is expanded (default to expanded)
+  const isUrlTimeSectionExpanded = (sectionKey) => {
+    return expandedUrlTimeSections[sectionKey] !== false;
+  };
+
+  // Group research documents: sort by updated_at descending (newest first)
   const groupDocsByTime = (docList) => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const sorted = [...docList];
     
-    const groups = {
-      today: [],
-      last7Days: [],
-      archived: []
-    };
-    
-    docList.forEach(doc => {
-      const docDate = new Date(doc.updated_at || doc.created_at);
-      const docDateOnly = new Date(docDate.getFullYear(), docDate.getMonth(), docDate.getDate());
-      
-      // Documents older than 30 days will be considered archived for demo
-      const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-      
-      if (doc.archived) {
-        groups.archived.push(doc);
-      } else if (docDateOnly >= today) {
-        groups.today.push(doc);
-      } else if (docDateOnly >= sevenDaysAgo) {
-        groups.last7Days.push(doc);
-      } else if (docDateOnly < thirtyDaysAgo) {
-        groups.archived.push(doc);
-      } else {
-        groups.last7Days.push(doc);
-      }
+    // Sort by updated_at descending (newest first)
+    sorted.sort((a, b) => {
+      const dateA = new Date(a.updated_at || a.created_at);
+      const dateB = new Date(b.updated_at || b.created_at);
+      return dateB - dateA;
     });
     
-    return groups;
+    return {
+      nonArchived: sorted,
+      archived: []
+    };
   };
 
   // Calculate word count from content (approximate)
@@ -1966,177 +1967,175 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                 </div>
               ) : (
                 <div className="url-highlights-view">
-                  {/* Header with Title */}
-                  <div className="url-highlights-header">
-                    <h2 className="url-highlights-title">URL Highlights</h2>
-                    <button
-                      type="button"
-                      className="url-open-browser-btn"
-                      onClick={() => window.open('https://app.browser', '_blank')}
-                    >
-                      <WebIcon />
-                      <span>Open Browser</span>
-                    </button>
-                  </div>
+                  {/* Header with Title, Search Bar and Create New Button */}
+                  <SectionHeader
+                    title="Web Highlights"
+                    searchQuery={urlSearchQuery}
+                    onSearchChange={setUrlSearchQuery}
+                    searchPlaceholder="Search for highlights...."
+                    ctaType="disabled"
+                    ctaText="Create New"
+                  />
                   
                   <div className="url-highlights-sections">
                     {/* Group URLs by time */}
                     {(() => {
                       const grouped = groupUrlsByTime(highlightsUrls);
+                      
+                      // Filter URLs by search query (search in highlights, page title, domain, and URL)
+                      const filterUrls = (urls) => {
+                        if (!urlSearchQuery.trim()) return urls;
+                        const query = urlSearchQuery.toLowerCase();
+                        return urls.filter(urlDoc => {
+                          // Search in page title
+                          if ((urlDoc.page_title || '').toLowerCase().includes(query)) return true;
+                          // Search in domain
+                          if (extractDomain(urlDoc.source_url).toLowerCase().includes(query)) return true;
+                          // Search in URL
+                          if ((urlDoc.source_url || '').toLowerCase().includes(query)) return true;
+                          // Search in highlight text
+                          if (urlDoc.highlights && Array.isArray(urlDoc.highlights)) {
+                            return urlDoc.highlights.some(highlight => 
+                              (highlight.text || '').toLowerCase().includes(query) ||
+                              (highlight.note || '').toLowerCase().includes(query)
+                            );
+                          }
+                          return false;
+                        });
+                      };
+
+                      // Filter grouped URLs
+                      const filteredGrouped = {
+                        nonArchived: filterUrls(grouped.nonArchived),
+                        archived: []
+                      };
+                      
+                      // Helper function to render a URL card
+                      const renderUrlCard = (urlDoc, key) => (
+                        <div 
+                          key={key}
+                          className="url-highlight-card"
+                          onClick={() => handleUrlClick(urlDoc)}
+                        >
+                          <div className="url-card-thumbnail">
+                            <div className="url-card-favicon">
+                              {getFaviconUrl(urlDoc.source_url) ? (
+                                <img 
+                                  src={getFaviconUrl(urlDoc.source_url)} 
+                                  alt={extractDomain(urlDoc.source_url)}
+                                  onError={(e) => { e.target.style.display = 'none'; }}
+                                />
+                              ) : (
+                                <div className="url-card-favicon-placeholder">
+                                  <GlobeIconCard />
+                                </div>
+                              )}
+                            </div>
+                            <div className="url-card-site-info">
+                              <p className="url-card-domain">{extractDomain(urlDoc.source_url)}</p>
+                              <p className="url-card-page-title">{urlDoc.page_title || 'Untitled Page'}</p>
+                            </div>
+                          </div>
+                          <div className="url-card-content">
+                            <div className="url-card-highlights-count">
+                              {urlDoc.highlights?.length || 0} highlight{(urlDoc.highlights?.length || 0) !== 1 ? 's' : ''}
+                            </div>
+                            <div className="url-card-date">
+                              <span>{formatLastUpdatedTime(urlDoc.updated_at)}</span>
+                            </div>
+                          </div>
+                          <CardMenu
+                            itemId={urlDoc.source_url}
+                            isArchived={urlDoc.archived || false}
+                            onRename={async () => {
+                              // URL cards don't support rename yet
+                              console.log('Rename not supported for URL cards');
+                            }}
+                            onArchive={async () => {
+                              try {
+                                // Archive URL highlight - using same pattern as documents
+                                // Note: Backend endpoint needs to be implemented
+                                const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5001'}/api/highlights/archive`, {
+                                  method: 'PUT',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${getToken()}`
+                                  },
+                                  body: JSON.stringify({
+                                    project_id: selectedProjectId,
+                                    source_url: urlDoc.source_url
+                                  })
+                                });
+                                if (!response.ok) throw new Error('Archive failed');
+                                if (selectedProjectId) {
+                                  loadHighlightsForProject(selectedProjectId);
+                                }
+                              } catch (error) {
+                                console.error('Failed to archive highlight:', error);
+                                alert('Failed to archive highlight. Please try again.');
+                              }
+                            }}
+                            onUnarchive={async () => {
+                              try {
+                                // Unarchive URL highlight - using same pattern as documents
+                                // Note: Backend endpoint needs to be implemented
+                                const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5001'}/api/highlights/unarchive`, {
+                                  method: 'PUT',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${getToken()}`
+                                  },
+                                  body: JSON.stringify({
+                                    project_id: selectedProjectId,
+                                    source_url: urlDoc.source_url
+                                  })
+                                });
+                                if (!response.ok) throw new Error('Unarchive failed');
+                                if (selectedProjectId) {
+                                  loadHighlightsForProject(selectedProjectId);
+                                }
+                              } catch (error) {
+                                console.error('Failed to unarchive highlight:', error);
+                                alert('Failed to unarchive highlight. Please try again.');
+                              }
+                            }}
+                            position={{ top: '7px', right: '6.56px' }}
+                          />
+                        </div>
+                      );
+                      
+                      // Helper function to render a collapsible section
+                      const renderSection = (label, items, sectionKey, isArchived = false) => {
+                        if (items.length === 0) return null;
+                        const isExpanded = isUrlTimeSectionExpanded(sectionKey);
+                        
+                        return (
+                          <div className={`highlights-time-section ${isArchived ? 'archived' : ''}`}>
+                            <div 
+                              className="highlights-time-section-header"
+                              onClick={() => toggleUrlTimeSection(sectionKey)}
+                            >
+                              <div className={`highlights-time-section-caret ${!isExpanded ? 'collapsed' : ''}`}>
+                                <ChevronMdSvg className="highlights-time-section-caret-icon" />
+                              </div>
+                              <p className="highlights-section-label">{label}</p>
+                            </div>
+                            {isExpanded && (
+                              <div className="highlights-cards-grid">
+                                {items.map((urlDoc, idx) => renderUrlCard(urlDoc, `${sectionKey}-${idx}`))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      };
+                      
                       return (
                         <>
-                          {/* TODAY Section */}
-                          {grouped.today.length > 0 && (
+                          {/* URLs (sorted by date, newest first) */}
+                          {filteredGrouped.nonArchived.length > 0 && (
                             <div className="highlights-time-section">
-                              <p className="highlights-section-label">TODAY</p>
                               <div className="highlights-cards-grid">
-                                {grouped.today.map((urlDoc, idx) => (
-                                  <div 
-                                    key={`today-${idx}`}
-                                    className="url-highlight-card"
-                                    onClick={() => handleUrlClick(urlDoc)}
-                                  >
-                                    <div className="url-card-thumbnail">
-                                      <div className="url-card-favicon">
-                                        {getFaviconUrl(urlDoc.source_url) ? (
-                                          <img 
-                                            src={getFaviconUrl(urlDoc.source_url)} 
-                                            alt={extractDomain(urlDoc.source_url)}
-                                            onError={(e) => { e.target.style.display = 'none'; }}
-                                          />
-                                        ) : (
-                                          <div className="url-card-favicon-placeholder">
-                                            <GlobeIconCard />
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="url-card-site-info">
-                                        <p className="url-card-domain">{extractDomain(urlDoc.source_url)}</p>
-                                        <p className="url-card-page-title">{urlDoc.page_title || 'Untitled Page'}</p>
-                                      </div>
-                                    </div>
-                                    <div className="url-card-content">
-                                      <div className="url-card-info">
-                                        <div className="url-card-icon">
-                                          <GlobeIconCard />
-                                        </div>
-                                        <div className="url-card-details">
-                                          <p className="url-card-title">{urlDoc.page_title || 'Untitled Page'}</p>
-                                          <p className="url-card-count">
-                                            {urlDoc.highlights?.length || 0} highlight{(urlDoc.highlights?.length || 0) !== 1 ? 's' : ''}
-                                          </p>
-                                        </div>
-                                      </div>
-                                      <div className="url-card-date">
-                                        <span>Added <strong>{formatHighlightDate(urlDoc.updated_at)}</strong></span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* LAST 7 DAYS Section */}
-                          {grouped.last7Days.length > 0 && (
-                            <div className="highlights-time-section">
-                              <p className="highlights-section-label">LAST 7 DAYS</p>
-                              <div className="highlights-cards-grid">
-                                {grouped.last7Days.map((urlDoc, idx) => (
-                                  <div 
-                                    key={`last7-${idx}`}
-                                    className="url-highlight-card"
-                                    onClick={() => handleUrlClick(urlDoc)}
-                                  >
-                                    <div className="url-card-thumbnail">
-                                      <div className="url-card-favicon">
-                                        {getFaviconUrl(urlDoc.source_url) ? (
-                                          <img 
-                                            src={getFaviconUrl(urlDoc.source_url)} 
-                                            alt={extractDomain(urlDoc.source_url)}
-                                            onError={(e) => { e.target.style.display = 'none'; }}
-                                          />
-                                        ) : (
-                                          <div className="url-card-favicon-placeholder">
-                                            <GlobeIconCard />
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="url-card-site-info">
-                                        <p className="url-card-domain">{extractDomain(urlDoc.source_url)}</p>
-                                        <p className="url-card-page-title">{urlDoc.page_title || 'Untitled Page'}</p>
-                                      </div>
-                                    </div>
-                                    <div className="url-card-content">
-                                      <div className="url-card-info">
-                                        <div className="url-card-icon">
-                                          <GlobeIconCard />
-                                        </div>
-                                        <div className="url-card-details">
-                                          <p className="url-card-title">{urlDoc.page_title || 'Untitled Page'}</p>
-                                          <p className="url-card-count">
-                                            {urlDoc.highlights?.length || 0} highlight{(urlDoc.highlights?.length || 0) !== 1 ? 's' : ''}
-                                          </p>
-                                        </div>
-                                      </div>
-                                      <div className="url-card-date">
-                                        <span>Added <strong>{formatHighlightDate(urlDoc.updated_at)}</strong></span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* ARCHIVED Section */}
-                          {grouped.archived.length > 0 && (
-                            <div className="highlights-time-section archived">
-                              <p className="highlights-section-label">ARCHIVED</p>
-                              <div className="highlights-cards-grid">
-                                {grouped.archived.map((urlDoc, idx) => (
-                                  <div 
-                                    key={`archived-${idx}`}
-                                    className="url-highlight-card"
-                                    onClick={() => handleUrlClick(urlDoc)}
-                                  >
-                                    <div className="url-card-thumbnail">
-                                      <div className="url-card-favicon">
-                                        {getFaviconUrl(urlDoc.source_url) ? (
-                                          <img 
-                                            src={getFaviconUrl(urlDoc.source_url)} 
-                                            alt={extractDomain(urlDoc.source_url)}
-                                            onError={(e) => { e.target.style.display = 'none'; }}
-                                          />
-                                        ) : (
-                                          <div className="url-card-favicon-placeholder">
-                                            <GlobeIconCard />
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="url-card-site-info">
-                                        <p className="url-card-domain">{extractDomain(urlDoc.source_url)}</p>
-                                        <p className="url-card-page-title">{urlDoc.page_title || 'Untitled Page'}</p>
-                                      </div>
-                                    </div>
-                                    <div className="url-card-content">
-                                      <div className="url-card-info">
-                                        <div className="url-card-icon">
-                                          <GlobeIconCard />
-                                        </div>
-                                        <div className="url-card-details">
-                                          <p className="url-card-title">{urlDoc.page_title || 'Untitled Page'}</p>
-                                          <p className="url-card-count">
-                                            {urlDoc.highlights?.length || 0} highlight{(urlDoc.highlights?.length || 0) !== 1 ? 's' : ''}
-                                          </p>
-                                        </div>
-                                      </div>
-                                      <div className="url-card-date">
-                                        <span>Added <strong>{formatHighlightDate(urlDoc.updated_at)}</strong></span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
+                                {filteredGrouped.nonArchived.map((urlDoc, idx) => renderUrlCard(urlDoc, `nonArchived-${idx}`))}
                               </div>
                             </div>
                           )}
@@ -2300,19 +2299,17 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                     style={{ display: 'none' }}
                   />
                   
-                  {/* Header with Title and Upload Button */}
-                  <div className="document-highlights-header">
-                    <h2 className="document-highlights-title">Document Highlights</h2>
-                    <button
-                      className="upload-new-button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploadingPdf}
-                      title="Upload PDF, JPG, or PNG"
-                    >
-                      <ShareUploadIcon />
-                      <span>{uploadingPdf ? 'Uploading...' : 'Upload New'}</span>
-                    </button>
-                  </div>
+                  {/* Header with Title, Search Bar and Upload Button */}
+                  <SectionHeader
+                    title="PDF Highlights"
+                    searchQuery={pdfSearchQuery}
+                    onSearchChange={setPdfSearchQuery}
+                    searchPlaceholder="Search for highlights...."
+                    ctaType="upload"
+                    ctaOnClick={() => fileInputRef.current?.click()}
+                    ctaDisabled={uploadingPdf}
+                    ctaText={uploadingPdf ? 'Uploading...' : 'Upload New'}
+                  />
                   
                   {pdfs.length === 0 ? (
                     <div className="document-highlights-empty">
@@ -2322,133 +2319,129 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                     </div>
                   ) : (
                     <div className="document-highlights-sections">
-                      {/* Group PDFs by time */}
+                      {/* Group PDFs: non-archived and archived */}
                       {(() => {
                         const grouped = groupPdfsByTime(pdfs);
+                        
+                        // Filter PDFs by search query (search in filename and highlights)
+                        const filterPdfs = (pdfList) => {
+                          if (!pdfSearchQuery.trim()) return pdfList;
+                          const query = pdfSearchQuery.toLowerCase();
+                          return pdfList.filter(pdf => {
+                            // Search in filename
+                            if ((pdf.filename || '').toLowerCase().includes(query)) return true;
+                            // Search in highlight text
+                            if (pdf.highlights && Array.isArray(pdf.highlights)) {
+                              return pdf.highlights.some(highlight => 
+                                (highlight.text || '').toLowerCase().includes(query) ||
+                                (highlight.note || '').toLowerCase().includes(query)
+                              );
+                            }
+                            return false;
+                          });
+                        };
+                        
+                        const filteredGrouped = {
+                          nonArchived: filterPdfs(grouped.nonArchived),
+                          archived: []
+                        };
+                        
+                        const renderPdfCard = (pdf, idx) => {
+                          // Determine if it's an image or PDF based on content_type
+                          const isImage = pdf.content_type && (
+                            pdf.content_type.startsWith('image/') || 
+                            pdf.content_type === 'image/jpeg' || 
+                            pdf.content_type === 'image/png' || 
+                            pdf.content_type === 'image/jpg'
+                          );
+                          const iconSrc = isImage ? highlightsImageIcon : highlightsPdfIcon;
+                          
+                          return (
+                            <div 
+                              key={`pdf-${idx}`}
+                              className="pdf-highlight-card"
+                              onClick={() => handlePdfClick(pdf)}
+                            >
+                              <div className="pdf-card-header">
+                                <div className="pdf-card-icon">
+                                  <img src={iconSrc} alt={isImage ? 'Image' : 'PDF'} />
+                                </div>
+                                <div className="pdf-card-title">
+                                  {pdf.filename}
+                                </div>
+                              </div>
+                              <div className="pdf-card-content">
+                                <div className="pdf-card-highlights-count">
+                                  {pdf.highlights?.length || 0} highlight{(pdf.highlights?.length || 0) !== 1 ? 's' : ''}
+                                </div>
+                                <div className="pdf-card-date">
+                                  <span>{formatLastUpdatedTime(pdf.updated_at || pdf.created_at)}</span>
+                                </div>
+                              </div>
+                              <CardMenu
+                                itemId={pdf.pdf_id}
+                                isArchived={pdf.archived || false}
+                                onRename={async () => {
+                                  // PDF cards don't support rename yet
+                                  console.log('Rename not supported for PDF cards');
+                                }}
+                                onArchive={async () => {
+                                  try {
+                                    const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5001'}/api/pdfs/archive`, {
+                                      method: 'PUT',
+                                      headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${getToken()}`
+                                      },
+                                      body: JSON.stringify({
+                                        project_id: selectedProjectId,
+                                        pdf_id: pdf.pdf_id
+                                      })
+                                    });
+                                    if (!response.ok) throw new Error('Archive failed');
+                                    if (selectedProjectId) {
+                                      loadPdfsForProject(selectedProjectId);
+                                    }
+                                  } catch (error) {
+                                    console.error('Failed to archive PDF:', error);
+                                    alert('Failed to archive PDF. Please try again.');
+                                  }
+                                }}
+                                onUnarchive={async () => {
+                                  try {
+                                    const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5001'}/api/pdfs/unarchive`, {
+                                      method: 'PUT',
+                                      headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${getToken()}`
+                                      },
+                                      body: JSON.stringify({
+                                        project_id: selectedProjectId,
+                                        pdf_id: pdf.pdf_id
+                                      })
+                                    });
+                                    if (!response.ok) throw new Error('Unarchive failed');
+                                    if (selectedProjectId) {
+                                      loadPdfsForProject(selectedProjectId);
+                                    }
+                                  } catch (error) {
+                                    console.error('Failed to unarchive PDF:', error);
+                                    alert('Failed to unarchive PDF. Please try again.');
+                                  }
+                                }}
+                                position={{ top: '7px', right: '6.56px' }}
+                              />
+                            </div>
+                          );
+                        };
+                        
                         return (
                           <>
-                            {/* TODAY Section */}
-                            {grouped.today.length > 0 && (
+                            {/* PDFs (sorted by date, newest first) */}
+                            {filteredGrouped.nonArchived.length > 0 && (
                               <div className="highlights-time-section">
-                                <p className="highlights-section-label">TODAY</p>
                                 <div className="highlights-cards-grid">
-                                  {grouped.today.map((pdf, idx) => (
-                                    <div 
-                                      key={`today-${idx}`}
-                                      className="highlight-doc-card"
-                                      onClick={() => handlePdfClick(pdf)}
-                                    >
-                                      <div className="highlight-card-thumbnail">
-                                        {pdf.thumbnail_url ? (
-                                          <img src={pdf.thumbnail_url} alt={pdf.filename} />
-                                        ) : (
-                                          <div className="highlight-card-thumbnail-placeholder">
-                                            <BookIconLarge />
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="highlight-card-content">
-                                        <div className="highlight-card-info">
-                                          <div className="highlight-card-icon">
-                                            <BookOpenIconCard />
-                                          </div>
-                                          <div className="highlight-card-details">
-                                            <p className="highlight-card-title">{pdf.filename}</p>
-                                            <p className="highlight-card-count">
-                                              {pdf.highlights?.length || 0} Highlight{(pdf.highlights?.length || 0) !== 1 ? 's' : ''}
-                                            </p>
-                                          </div>
-                                        </div>
-                                        <div className="highlight-card-date">
-                                          <span>Added <strong>{formatHighlightDate(pdf.updated_at || pdf.created_at)}</strong></span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                            
-                            {/* LAST 7 DAYS Section */}
-                            {grouped.last7Days.length > 0 && (
-                              <div className="highlights-time-section">
-                                <p className="highlights-section-label">LAST 7 DAYS</p>
-                                <div className="highlights-cards-grid">
-                                  {grouped.last7Days.map((pdf, idx) => (
-                                    <div 
-                                      key={`last7-${idx}`}
-                                      className="highlight-doc-card"
-                                      onClick={() => handlePdfClick(pdf)}
-                                    >
-                                      <div className="highlight-card-thumbnail">
-                                        {pdf.thumbnail_url ? (
-                                          <img src={pdf.thumbnail_url} alt={pdf.filename} />
-                                        ) : (
-                                          <div className="highlight-card-thumbnail-placeholder">
-                                            <BookIconLarge />
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="highlight-card-content">
-                                        <div className="highlight-card-info">
-                                          <div className="highlight-card-icon">
-                                            <BookOpenIconCard />
-                                          </div>
-                                          <div className="highlight-card-details">
-                                            <p className="highlight-card-title">{pdf.filename}</p>
-                                            <p className="highlight-card-count">
-                                              {pdf.highlights?.length || 0} Highlight{(pdf.highlights?.length || 0) !== 1 ? 's' : ''}
-                                            </p>
-                                          </div>
-                                        </div>
-                                        <div className="highlight-card-date">
-                                          <span>Added <strong>{formatHighlightDate(pdf.updated_at || pdf.created_at)}</strong></span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                            
-                            {/* ARCHIVED Section */}
-                            {grouped.archived.length > 0 && (
-                              <div className="highlights-time-section archived">
-                                <p className="highlights-section-label">ARCHIVED</p>
-                                <div className="highlights-cards-grid">
-                                  {grouped.archived.map((pdf, idx) => (
-                                    <div 
-                                      key={`archived-${idx}`}
-                                      className="highlight-doc-card"
-                                      onClick={() => handlePdfClick(pdf)}
-                                    >
-                                      <div className="highlight-card-thumbnail">
-                                        {pdf.thumbnail_url ? (
-                                          <img src={pdf.thumbnail_url} alt={pdf.filename} />
-                                        ) : (
-                                          <div className="highlight-card-thumbnail-placeholder">
-                                            <BookIconLarge />
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="highlight-card-content">
-                                        <div className="highlight-card-info">
-                                          <div className="highlight-card-icon">
-                                            <BookOpenIconCard />
-                                          </div>
-                                          <div className="highlight-card-details">
-                                            <p className="highlight-card-title">{pdf.filename}</p>
-                                            <p className="highlight-card-count">
-                                              {pdf.highlights?.length || 0} Highlight{(pdf.highlights?.length || 0) !== 1 ? 's' : ''}
-                                            </p>
-                                          </div>
-                                        </div>
-                                        <div className="highlight-card-date">
-                                          <span>Added <strong>{formatHighlightDate(pdf.updated_at || pdf.created_at)}</strong></span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
+                                  {filteredGrouped.nonArchived.map((pdf, idx) => renderPdfCard(pdf, idx))}
                                 </div>
                               </div>
                             )}
@@ -2474,19 +2467,17 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
               </div>
             ) : (
               <div className="written-documents-view">
-                {/* Header with Title and Create New Button */}
-                <div className="written-documents-header">
-                  <h2 className="written-documents-title">Written Documents</h2>
-                  <button
-                    className="create-new-button"
-                    onClick={handleCreateNewDocument}
-                    disabled={!selectedProjectId}
-                    title="Create new research document"
-                  >
-                    <NewDocumentIconSvg className="create-new-icon" />
-                    Create New
-                  </button>
-                </div>
+                {/* Header with Title, Search Bar and Create New Button */}
+                <SectionHeader
+                  title="Research Documents"
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  searchPlaceholder="Search for documents...."
+                  ctaType="create"
+                  ctaOnClick={handleCreateNewDocument}
+                  ctaDisabled={!selectedProjectId}
+                  ctaText="Create New"
+                />
                 
                 {availableDocuments.length === 0 ? (
                   <div className="written-documents-empty">
@@ -2499,124 +2490,121 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                     {/* Group Documents by time */}
                     {(() => {
                       const grouped = groupDocsByTime(availableDocuments);
+                      
+                      // Helper function to render a document card
+                      const renderDocumentCard = (doc, key) => (
+                        <div 
+                          key={key}
+                          className="written-doc-card"
+                          onClick={() => handleResearchDocClick(doc)}
+                        >
+                          <div className="written-card-thumbnail">
+                            {doc.snapshot ? (
+                              <img src={doc.snapshot} alt={doc.title} className="written-card-snapshot" />
+                            ) : (
+                              <div className="written-card-thumbnail-placeholder">
+                                <span className="txt-placeholder">TXT</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="written-card-content">
+                            <div className="written-card-title-section">
+                              <p className="written-card-title">{doc.title || 'Untitled Document'}</p>
+                            </div>
+                            <div className="written-card-date">
+                              <span>{formatLastUpdatedTime(doc.updated_at || doc.created_at)}</span>
+                            </div>
+                          </div>
+                          <CardMenu
+                            itemId={doc.document_id}
+                            isArchived={doc.archived || false}
+                            onRename={async () => {
+                              const newTitle = prompt('Enter new title:', doc.title);
+                              if (newTitle && newTitle.trim() && newTitle !== doc.title) {
+                                try {
+                                  await documentAPI.renameDocument(doc.document_id, newTitle);
+                                  if (selectedProjectId) {
+                                    loadAvailableDocuments(selectedProjectId);
+                                  }
+                                } catch (error) {
+                                  console.error('Failed to rename document:', error);
+                                  alert('Failed to rename document. Please try again.');
+                                }
+                              }
+                            }}
+                            onArchive={async () => {
+                              try {
+                                await documentAPI.archiveDocument(doc.document_id);
+                                if (selectedProjectId) {
+                                  loadAvailableDocuments(selectedProjectId);
+                                }
+                              } catch (error) {
+                                console.error('Failed to archive document:', error);
+                                alert('Failed to archive document. Please try again.');
+                              }
+                            }}
+                            onUnarchive={async () => {
+                              try {
+                                await documentAPI.unarchiveDocument(doc.document_id);
+                                if (selectedProjectId) {
+                                  loadAvailableDocuments(selectedProjectId);
+                                }
+                              } catch (error) {
+                                console.error('Failed to unarchive document:', error);
+                                alert('Failed to unarchive document. Please try again.');
+                              }
+                            }}
+                          />
+                        </div>
+                      );
+                      
+                      // Filter documents by search query
+                      const filterDocuments = (docs) => {
+                        if (!searchQuery.trim()) return docs;
+                        const query = searchQuery.toLowerCase();
+                        return docs.filter(doc => 
+                          (doc.title || '').toLowerCase().includes(query)
+                        );
+                      };
+
+                      // Filter grouped documents
+                      const filteredGrouped = {
+                        nonArchived: filterDocuments(grouped.nonArchived),
+                        archived: []
+                      };
+                      
+                      // Helper function to render a collapsible section
+                      const renderSection = (label, items, sectionKey, isArchived = false) => {
+                        if (items.length === 0) return null;
+                        const isExpanded = isTimeSectionExpanded(sectionKey);
+                        
+                        return (
+                          <div className={`highlights-time-section ${isArchived ? 'archived' : ''}`}>
+                            <div 
+                              className="highlights-time-section-header"
+                              onClick={() => toggleTimeSection(sectionKey)}
+                            >
+                              <div className={`highlights-time-section-caret ${!isExpanded ? 'collapsed' : ''}`}>
+                                <ChevronMdSvg className="highlights-time-section-caret-icon" />
+                              </div>
+                              {label && <p className="highlights-section-label">{label}</p>}
+                            </div>
+                            {isExpanded && (
+                              <div className="highlights-cards-grid">
+                                {items.map((doc, idx) => renderDocumentCard(doc, `${sectionKey}-${idx}`))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      };
+                      
                       return (
                         <>
-                          {/* TODAY Section */}
-                          {grouped.today.length > 0 && (
+                          {/* Documents (sorted by date, newest first) */}
+                          {filteredGrouped.nonArchived.length > 0 && (
                             <div className="highlights-time-section">
-                              <p className="highlights-section-label">TODAY</p>
                               <div className="highlights-cards-grid">
-                                {grouped.today.map((doc, idx) => (
-                                  <div 
-                                    key={`today-${idx}`}
-                                    className="written-doc-card"
-                                    onClick={() => handleResearchDocClick(doc)}
-                                  >
-                                    <div className="written-card-thumbnail">
-                                      <div className="written-card-thumbnail-placeholder">
-                                        <span className="txt-placeholder">TXT</span>
-                                      </div>
-                                    </div>
-                                    <div className="written-card-content">
-                                      <div className="written-card-info">
-                                        <div className="written-card-icon">
-                                          <FileDocumentIconCard />
-                                        </div>
-                                        <div className="written-card-details">
-                                          <p className="written-card-title">{doc.title || 'Untitled Document'}</p>
-                                          <p className="written-card-count">
-                                            {documentWordCounts[doc.document_id] !== undefined 
-                                              ? `${documentWordCounts[doc.document_id]} words` 
-                                              : 'Loading...'}
-                                          </p>
-                                        </div>
-                                      </div>
-                                      <div className="written-card-date">
-                                        <span>Added <strong>{formatHighlightDate(doc.updated_at || doc.created_at)}</strong></span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* LAST 7 DAYS Section */}
-                          {grouped.last7Days.length > 0 && (
-                            <div className="highlights-time-section">
-                              <p className="highlights-section-label">LAST 7 DAYS</p>
-                              <div className="highlights-cards-grid">
-                                {grouped.last7Days.map((doc, idx) => (
-                                  <div 
-                                    key={`last7-${idx}`}
-                                    className="written-doc-card"
-                                    onClick={() => handleResearchDocClick(doc)}
-                                  >
-                                    <div className="written-card-thumbnail">
-                                      <div className="written-card-thumbnail-placeholder">
-                                        <span className="txt-placeholder">TXT</span>
-                                      </div>
-                                    </div>
-                                    <div className="written-card-content">
-                                      <div className="written-card-info">
-                                        <div className="written-card-icon">
-                                          <FileDocumentIconCard />
-                                        </div>
-                                        <div className="written-card-details">
-                                          <p className="written-card-title">{doc.title || 'Untitled Document'}</p>
-                                          <p className="written-card-count">
-                                            {documentWordCounts[doc.document_id] !== undefined 
-                                              ? `${documentWordCounts[doc.document_id]} words` 
-                                              : 'Loading...'}
-                                          </p>
-                                        </div>
-                                      </div>
-                                      <div className="written-card-date">
-                                        <span>Added <strong>{formatHighlightDate(doc.updated_at || doc.created_at)}</strong></span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* ARCHIVED Section */}
-                          {grouped.archived.length > 0 && (
-                            <div className="highlights-time-section archived">
-                              <p className="highlights-section-label">ARCHIVED</p>
-                              <div className="highlights-cards-grid">
-                                {grouped.archived.map((doc, idx) => (
-                                  <div 
-                                    key={`archived-${idx}`}
-                                    className="written-doc-card"
-                                    onClick={() => handleResearchDocClick(doc)}
-                                  >
-                                    <div className="written-card-thumbnail">
-                                      <div className="written-card-thumbnail-placeholder">
-                                        <span className="txt-placeholder">TXT</span>
-                                      </div>
-                                    </div>
-                                    <div className="written-card-content">
-                                      <div className="written-card-info">
-                                        <div className="written-card-icon">
-                                          <FileDocumentIconCard />
-                                        </div>
-                                        <div className="written-card-details">
-                                          <p className="written-card-title">{doc.title || 'Untitled Document'}</p>
-                                          <p className="written-card-count">
-                                            {documentWordCounts[doc.document_id] !== undefined 
-                                              ? `${documentWordCounts[doc.document_id]} words` 
-                                              : 'Loading...'}
-                                          </p>
-                                        </div>
-                                      </div>
-                                      <div className="written-card-date">
-                                        <span>Added <strong>{formatHighlightDate(doc.updated_at || doc.created_at)}</strong></span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
+                                {filteredGrouped.nonArchived.map((doc, idx) => renderDocumentCard(doc, `nonArchived-${idx}`))}
                               </div>
                             </div>
                           )}
@@ -2693,6 +2681,11 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                   setTimeout(() => {
                     fileInputRef.current?.click();
                   }, 100);
+                }}
+                onRefreshDocuments={() => {
+                  if (selectedProjectId) {
+                    loadAvailableDocuments(selectedProjectId);
+                  }
                 }}
               />
             )}

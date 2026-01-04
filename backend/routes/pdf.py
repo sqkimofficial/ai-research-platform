@@ -437,3 +437,85 @@ def reextract_highlights(pdf_id):
         'message': 'Highlight re-extraction started'
     }), 200
 
+
+@pdf_bp.route('/archive', methods=['PUT'])
+def archive_pdf():
+    """
+    Archive a PDF document.
+    
+    Body: {
+        pdf_id: string (required),
+        project_id: string (optional, for validation)
+    }
+    
+    Returns: { success: true, message: string }
+    """
+    user_id = get_user_id_from_token()
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    pdf_id = data.get('pdf_id')
+    if not pdf_id:
+        return jsonify({'error': 'pdf_id is required'}), 400
+    
+    # Verify PDF belongs to user
+    pdf = PDFDocumentModel.get_pdf_document(pdf_id)
+    if not pdf or pdf.get('user_id') != user_id:
+        return jsonify({'error': 'PDF not found or access denied'}), 404
+    
+    # Archive PDF
+    success = PDFDocumentModel.archive_pdf_document(pdf_id)
+    
+    if success:
+        return jsonify({
+            'success': True,
+            'message': 'PDF archived successfully'
+        }), 200
+    else:
+        return jsonify({'error': 'Failed to archive PDF'}), 500
+
+
+@pdf_bp.route('/unarchive', methods=['PUT'])
+def unarchive_pdf():
+    """
+    Unarchive a PDF document.
+    
+    Body: {
+        pdf_id: string (required),
+        project_id: string (optional, for validation)
+    }
+    
+    Returns: { success: true, message: string }
+    """
+    user_id = get_user_id_from_token()
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    pdf_id = data.get('pdf_id')
+    if not pdf_id:
+        return jsonify({'error': 'pdf_id is required'}), 400
+    
+    # Verify PDF belongs to user
+    pdf = PDFDocumentModel.get_pdf_document(pdf_id)
+    if not pdf or pdf.get('user_id') != user_id:
+        return jsonify({'error': 'PDF not found or access denied'}), 404
+    
+    # Unarchive PDF
+    success = PDFDocumentModel.unarchive_pdf_document(pdf_id)
+    
+    if success:
+        return jsonify({
+            'success': True,
+            'message': 'PDF unarchived successfully'
+        }), 200
+    else:
+        return jsonify({'error': 'Failed to unarchive PDF'}), 500
+

@@ -111,3 +111,4 @@ def _escape_html(text):
     text = text.replace("'", '&#39;')
     return text
 
+

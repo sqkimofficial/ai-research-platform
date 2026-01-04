@@ -410,6 +410,8 @@ class ResearchDocumentModel:
             'title': title or f'Research Document {datetime.utcnow().strftime("%Y-%m-%d %H:%M")}',
             'markdown_content': '',
             'structure': [],  # Document structure tree (flat list)
+            'snapshot': None,  # Base64 encoded image snapshot
+            'archived': False,  # Archive flag (only true when user manually archives)
             'created_at': datetime.utcnow(),
             'updated_at': datetime.utcnow()
         }
@@ -424,17 +426,19 @@ class ResearchDocumentModel:
     
     @staticmethod
     def get_all_documents(user_id, project_id=None):
-        """Get all research documents for a user, optionally filtered by project_id"""
+        """Get all research documents for a user, optionally filtered by project_id (excludes archived)"""
         db = Database.get_db()
         query = {'user_id': user_id}
         if project_id:
             query['project_id'] = project_id
+        # Exclude archived items: archived is not True (includes False, None, or missing field)
+        query['archived'] = {'$ne': True}
         documents = list(db.research_documents.find(query).sort('updated_at', -1))
         return documents
     
     @staticmethod
-    def update_document(document_id, markdown_content=None, structure=None, title=None):
-        """Update document content, structure, and/or title"""
+    def update_document(document_id, markdown_content=None, structure=None, title=None, snapshot=None, archived=None):
+        """Update document content, structure, title, snapshot, and/or archived status"""
         db = Database.get_db()
         update_data = {'updated_at': datetime.utcnow()}
         
@@ -444,6 +448,10 @@ class ResearchDocumentModel:
             update_data['structure'] = structure
         if title is not None:
             update_data['title'] = title
+        if snapshot is not None:
+            update_data['snapshot'] = snapshot
+        if archived is not None:
+            update_data['archived'] = archived
         
         db.research_documents.update_one(
             {'document_id': document_id},
@@ -464,6 +472,36 @@ class ResearchDocumentModel:
         db = Database.get_db()
         result = db.research_documents.delete_one({'document_id': document_id})
         return result.deleted_count > 0
+    
+    @staticmethod
+    def archive_document(document_id):
+        """Archive a research document"""
+        db = Database.get_db()
+        result = db.research_documents.update_one(
+            {'document_id': document_id},
+            {'$set': {'archived': True, 'updated_at': datetime.utcnow()}}
+        )
+        return result.modified_count > 0
+    
+    @staticmethod
+    def unarchive_document(document_id):
+        """Unarchive a research document"""
+        db = Database.get_db()
+        result = db.research_documents.update_one(
+            {'document_id': document_id},
+            {'$set': {'archived': False, 'updated_at': datetime.utcnow()}}
+        )
+        return result.modified_count > 0
+    
+    @staticmethod
+    def rename_document(document_id, new_title):
+        """Rename a research document"""
+        db = Database.get_db()
+        result = db.research_documents.update_one(
+            {'document_id': document_id},
+            {'$set': {'title': new_title, 'updated_at': datetime.utcnow()}}
+        )
+        return result.modified_count > 0
 
 class DocumentModel:
     @staticmethod
@@ -665,6 +703,7 @@ class HighlightModel:
                 'source_url': source_url,
                 'page_title': page_title,
                 'highlights': [highlight_obj],
+                'archived': False,  # Archive flag (only true when user manually archives)
                 'created_at': datetime.utcnow(),
                 'updated_at': datetime.utcnow()
             }
@@ -674,11 +713,12 @@ class HighlightModel:
     
     @staticmethod
     def get_highlights_by_project(user_id, project_id):
-        """Get all highlights for a project"""
+        """Get all highlights for a project (excludes archived)"""
         db = Database.get_db()
         return list(db.highlights.find({
             'user_id': user_id,
-            'project_id': project_id
+            'project_id': project_id,
+            'archived': {'$ne': True}  # Excludes archived=True, includes False, None, or missing
         }).sort('updated_at', -1))
     
     @staticmethod
@@ -705,6 +745,34 @@ class HighlightModel:
                 '$pull': {'highlights': {'highlight_id': highlight_id}},
                 '$set': {'updated_at': datetime.utcnow()}
             }
+        )
+        return result.modified_count > 0
+    
+    @staticmethod
+    def archive_highlight(user_id, project_id, source_url):
+        """Archive a web highlight document"""
+        db = Database.get_db()
+        result = db.highlights.update_one(
+            {
+                'user_id': user_id,
+                'project_id': project_id,
+                'source_url': source_url
+            },
+            {'$set': {'archived': True, 'updated_at': datetime.utcnow()}}
+        )
+        return result.modified_count > 0
+    
+    @staticmethod
+    def unarchive_highlight(user_id, project_id, source_url):
+        """Unarchive a web highlight document"""
+        db = Database.get_db()
+        result = db.highlights.update_one(
+            {
+                'user_id': user_id,
+                'project_id': project_id,
+                'source_url': source_url
+            },
+            {'$set': {'archived': False, 'updated_at': datetime.utcnow()}}
         )
         return result.modified_count > 0
 
@@ -798,6 +866,7 @@ class PDFDocumentModel:
             'content_type': content_type,
             'highlights': [],  # Will be populated by AI extraction
             'extraction_status': 'pending',  # pending, processing, completed, failed
+            'archived': False,  # Archive flag (only true when user manually archives)
             'created_at': datetime.utcnow(),
             'updated_at': datetime.utcnow()
         }
@@ -813,20 +882,27 @@ class PDFDocumentModel:
     
     @staticmethod
     def get_pdf_documents_by_project(user_id, project_id):
-        """Get all PDF documents for a project (without file data for performance)"""
+        """Get all PDF documents for a project (without file data for performance, excludes archived)"""
         db = Database.get_db()
         # Exclude file_data for listing to improve performance
         return list(db.pdf_documents.find(
-            {'user_id': user_id, 'project_id': project_id},
+            {
+                'user_id': user_id,
+                'project_id': project_id,
+                'archived': {'$ne': True}  # Excludes archived=True, includes False, None, or missing
+            },
             {'file_data': 0}
         ).sort('updated_at', -1))
     
     @staticmethod
     def get_all_pdf_documents(user_id):
-        """Get all PDF documents for a user (without file data)"""
+        """Get all PDF documents for a user (without file data, excludes archived)"""
         db = Database.get_db()
         return list(db.pdf_documents.find(
-            {'user_id': user_id},
+            {
+                'user_id': user_id,
+                'archived': {'$ne': True}  # Excludes archived=True, includes False, None, or missing
+            },
             {'file_data': 0}
         ).sort('updated_at', -1))
     
@@ -934,6 +1010,26 @@ class PDFDocumentModel:
                     'updated_at': datetime.utcnow()
                 }
             }
+        )
+        return result.modified_count > 0
+    
+    @staticmethod
+    def archive_pdf_document(pdf_id):
+        """Archive a PDF document"""
+        db = Database.get_db()
+        result = db.pdf_documents.update_one(
+            {'pdf_id': pdf_id},
+            {'$set': {'archived': True, 'updated_at': datetime.utcnow()}}
+        )
+        return result.modified_count > 0
+    
+    @staticmethod
+    def unarchive_pdf_document(pdf_id):
+        """Unarchive a PDF document"""
+        db = Database.get_db()
+        result = db.pdf_documents.update_one(
+            {'pdf_id': pdf_id},
+            {'$set': {'archived': False, 'updated_at': datetime.utcnow()}}
         )
         return result.modified_count > 0
     

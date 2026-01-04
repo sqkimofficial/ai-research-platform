@@ -5,6 +5,9 @@ import { ReactComponent as WebIconSvg } from '../../assets/web-icon.svg';
 import { ReactComponent as PdfIconSvg } from '../../assets/pdf-icon.svg';
 import dropdownIcon from '../../assets/dropdown-icon.svg';
 import plusIcon from '../../assets/plus-icon.svg';
+import { ReactComponent as PlusIconSvg } from '../../assets/plus-icon.svg';
+import DocumentCardMenu from './DocumentCardMenu';
+import { documentAPI } from '../../services/api';
 
 // Search icon for search bar
 const SearchIcon = () => <img src={researchIcon} alt="" className="add-tab-search-img" />;
@@ -58,31 +61,27 @@ const AddNewTabView = ({
   onOpenDocument,
   onOpenUrlHighlight,
   onOpenPdfDocument,
-  onUploadPdf
+  onUploadPdf,
+  onRefreshDocuments
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedGroups, setExpandedGroups] = useState({});
+  const [expandedTimeSections, setExpandedTimeSections] = useState({
+    nonArchived: true,
+    archive: true
+  });
   const [failedFavicons, setFailedFavicons] = useState(new Set());
   
-  // Format date for cards (e.g., "Nov 30th 2025 9:15pm")
-  const formatHighlightDate = (dateString) => {
+  // Format time for cards (e.g., "Last Updated 9:15pm")
+  const formatLastUpdatedTime = (dateString) => {
     const date = new Date(dateString);
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const month = months[date.getMonth()];
-    const day = date.getDate();
-    const year = date.getFullYear();
+    // Use browser's timezone
     const hours = date.getHours();
     const minutes = date.getMinutes();
     const ampm = hours >= 12 ? 'pm' : 'am';
     const hour12 = hours % 12 || 12;
     
-    const getOrdinal = (n) => {
-      const s = ['th', 'st', 'nd', 'rd'];
-      const v = n % 100;
-      return n + (s[(v - 20) % 10] || s[v] || s[0]);
-    };
-    
-    return `${month} ${getOrdinal(day)} ${year} ${hour12}:${minutes.toString().padStart(2, '0')}${ampm}`;
+    return `Last Updated ${hour12}:${minutes.toString().padStart(2, '0')}${ampm}`;
   };
 
   // Extract domain name from URL
@@ -121,6 +120,8 @@ const AddNewTabView = ({
         title: doc.title || 'Untitled Document',
         subtitle: `${documentWordCounts[doc.document_id] !== undefined ? documentWordCounts[doc.document_id] + ' words' : 'Loading...'}`,
         date: doc.updated_at || doc.created_at,
+        snapshot: doc.snapshot || null,
+        archived: doc.archived || false,
         data: doc
       });
     });
@@ -165,37 +166,17 @@ const AddNewTabView = ({
     );
   }, [getAllItems, searchQuery]);
 
-  // Group items by time period
+  // Group items: sort by date descending (newest first)
   const groupedItems = useMemo(() => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const sorted = [...filteredItems];
     
-    const groups = {
-      today: [],
-      last7Days: [],
+    // Sort by date descending (newest first)
+    sorted.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    return {
+      nonArchived: sorted,
       archived: []
     };
-    
-    filteredItems.forEach(item => {
-      const itemDate = new Date(item.date);
-      const itemDateOnly = new Date(itemDate.getFullYear(), itemDate.getMonth(), itemDate.getDate());
-      
-      if (itemDateOnly >= today) {
-        groups.today.push(item);
-      } else if (itemDateOnly >= sevenDaysAgo) {
-        groups.last7Days.push(item);
-      } else {
-        groups.archived.push(item);
-      }
-    });
-    
-    // Sort each group by date (newest first)
-    Object.keys(groups).forEach(key => {
-      groups[key].sort((a, b) => new Date(b.date) - new Date(a.date));
-    });
-    
-    return groups;
   }, [filteredItems]);
 
   // Toggle group expansion
@@ -209,6 +190,19 @@ const AddNewTabView = ({
   // Check if group is expanded (default to expanded)
   const isGroupExpanded = (groupKey) => {
     return expandedGroups[groupKey] !== false;
+  };
+
+  // Toggle time section expansion
+  const toggleTimeSection = (sectionKey) => {
+    setExpandedTimeSections(prev => ({
+      ...prev,
+      [sectionKey]: !prev[sectionKey]
+    }));
+  };
+
+  // Check if time section is expanded (default to expanded)
+  const isTimeSectionExpanded = (sectionKey) => {
+    return expandedTimeSections[sectionKey] !== false;
   };
 
   // Handle item click based on type
@@ -244,24 +238,56 @@ const AddNewTabView = ({
           onClick={() => handleItemClick(item)}
         >
           <div className="written-card-thumbnail">
-            <div className="written-card-thumbnail-placeholder">
-              <span className="txt-placeholder">TXT</span>
-            </div>
+            {item.snapshot ? (
+              <img src={item.snapshot} alt={item.title} className="written-card-snapshot" />
+            ) : (
+              <div className="written-card-thumbnail-placeholder">
+                <span className="txt-placeholder">TXT</span>
+              </div>
+            )}
           </div>
           <div className="written-card-content">
-            <div className="written-card-info">
-              <div className="written-card-icon">
-                <FileDocumentIconCard />
-              </div>
-              <div className="written-card-details">
-                <p className="written-card-title">{item.title}</p>
-                <p className="written-card-count">{item.subtitle}</p>
-              </div>
+            <div className="written-card-title-section">
+              <p className="written-card-title">{item.title}</p>
             </div>
             <div className="written-card-date">
-              <span>Added <strong>{formatHighlightDate(item.date)}</strong></span>
+              <span>{formatLastUpdatedTime(item.date)}</span>
             </div>
           </div>
+          <DocumentCardMenu
+            documentId={item.id}
+            isArchived={item.archived}
+            onRename={async () => {
+              const newTitle = prompt('Enter new title:', item.title);
+              if (newTitle && newTitle.trim() && newTitle !== item.title) {
+                try {
+                  await documentAPI.renameDocument(item.id, newTitle);
+                  onRefreshDocuments?.();
+                } catch (error) {
+                  console.error('Failed to rename document:', error);
+                  alert('Failed to rename document. Please try again.');
+                }
+              }
+            }}
+            onArchive={async () => {
+              try {
+                await documentAPI.archiveDocument(item.id);
+                onRefreshDocuments?.();
+              } catch (error) {
+                console.error('Failed to archive document:', error);
+                alert('Failed to archive document. Please try again.');
+              }
+            }}
+            onUnarchive={async () => {
+              try {
+                await documentAPI.unarchiveDocument(item.id);
+                onRefreshDocuments?.();
+              } catch (error) {
+                console.error('Failed to unarchive document:', error);
+                alert('Failed to unarchive document. Please try again.');
+              }
+            }}
+          />
         </div>
       );
     }
@@ -297,19 +323,24 @@ const AddNewTabView = ({
             </div>
           </div>
           <div className="url-card-content">
-            <div className="url-card-info">
-              <div className="url-card-icon">
-                <GlobeIconCard />
-              </div>
-              <div className="url-card-details">
-                <p className="url-card-title">{item.title}</p>
-                <p className="url-card-count">{item.subtitle}</p>
-              </div>
-            </div>
+            <div className="url-card-highlights-count">{item.subtitle}</div>
             <div className="url-card-date">
-              <span>Added <strong>{formatHighlightDate(item.date)}</strong></span>
+              <span>{formatLastUpdatedTime(item.date)}</span>
             </div>
           </div>
+          <DocumentCardMenu
+            documentId={item.id}
+            isArchived={false}
+            onRename={async () => {
+              // URL cards don't support rename yet
+              console.log('Rename not supported for URL cards');
+            }}
+            onArchive={async () => {
+              // URL cards don't support archive yet
+              console.log('Archive not supported for URL cards');
+            }}
+            position={{ top: '7px', right: '6.56px' }}
+          />
         </div>
       );
     }
@@ -342,7 +373,7 @@ const AddNewTabView = ({
               </div>
             </div>
             <div className="highlight-card-date">
-              <span>Added <strong>{formatHighlightDate(item.date)}</strong></span>
+              <span>{formatLastUpdatedTime(item.date)}</span>
             </div>
           </div>
         </div>
@@ -352,77 +383,92 @@ const AddNewTabView = ({
     return null;
   };
 
-  // Render a time section with collapsible groups
-  const renderTimeSection = (label, items, sectionKey) => {
+  // Render a section with collapsible groups
+  const renderSection = (label, items, sectionKey, isArchived = false) => {
     if (items.length === 0) return null;
     
     // Group items by type for the collapsible display
     const entriesInSection = items.filter(i => i.type === 'entry');
     const urlsInSection = items.filter(i => i.type === 'url');
     const pdfsInSection = items.filter(i => i.type === 'pdf');
+    const isExpanded = isTimeSectionExpanded(sectionKey);
     
     return (
-      <div className={`highlights-time-section ${sectionKey === 'archived' ? 'archived' : ''}`}>
-        <p className="highlights-section-label">{label}</p>
-        
-        {/* Entries group */}
-        {entriesInSection.length > 0 && (
-          <div className="highlights-document-group">
-            <div 
-              className="highlights-group-header"
-              onClick={() => toggleGroup(`${sectionKey}-entries`)}
-            >
-              <div className={`highlights-group-caret ${!isGroupExpanded(`${sectionKey}-entries`) ? 'collapsed' : ''}`}>
-                <CaretDownIcon />
-              </div>
-              <span className="highlights-group-title">Research Documents ({entriesInSection.length})</span>
+      <div className={`highlights-time-section ${isArchived ? 'archived' : ''}`}>
+        {label && (
+          <div 
+            className="highlights-time-section-header"
+            onClick={() => toggleTimeSection(sectionKey)}
+          >
+            <div className={`highlights-time-section-caret ${!isExpanded ? 'collapsed' : ''}`}>
+              <CaretDownIcon />
             </div>
-            {isGroupExpanded(`${sectionKey}-entries`) && (
-              <div className="highlights-cards-grid">
-                {entriesInSection.map(item => renderCard(item))}
-              </div>
-            )}
+            <p className="highlights-section-label">{label}</p>
           </div>
         )}
         
-        {/* URLs group */}
-        {urlsInSection.length > 0 && (
-          <div className="highlights-document-group">
-            <div 
-              className="highlights-group-header"
-              onClick={() => toggleGroup(`${sectionKey}-urls`)}
-            >
-              <div className={`highlights-group-caret ${!isGroupExpanded(`${sectionKey}-urls`) ? 'collapsed' : ''}`}>
-                <CaretDownIcon />
-              </div>
-              <span className="highlights-group-title">Web Sources ({urlsInSection.length})</span>
-            </div>
-            {isGroupExpanded(`${sectionKey}-urls`) && (
-              <div className="highlights-cards-grid">
-                {urlsInSection.map(item => renderCard(item))}
-              </div>
-            )}
-          </div>
-        )}
-        
-        {/* PDFs group */}
-        {pdfsInSection.length > 0 && (
-          <div className="highlights-document-group">
-            <div 
-              className="highlights-group-header"
-              onClick={() => toggleGroup(`${sectionKey}-pdfs`)}
-            >
-              <div className={`highlights-group-caret ${!isGroupExpanded(`${sectionKey}-pdfs`) ? 'collapsed' : ''}`}>
-                <CaretDownIcon />
-              </div>
-              <span className="highlights-group-title">Physical Sources ({pdfsInSection.length})</span>
-            </div>
-            {isGroupExpanded(`${sectionKey}-pdfs`) && (
-              <div className="highlights-cards-grid">
-                {pdfsInSection.map(item => renderCard(item))}
+        {(!label || isExpanded) && (
+          <>
+            {/* Entries group */}
+            {entriesInSection.length > 0 && (
+              <div className="highlights-document-group">
+                <div 
+                  className="highlights-group-header"
+                  onClick={() => toggleGroup(`${sectionKey}-entries`)}
+                >
+                  <div className={`highlights-group-caret ${!isGroupExpanded(`${sectionKey}-entries`) ? 'collapsed' : ''}`}>
+                    <CaretDownIcon />
+                  </div>
+                  <span className="highlights-group-title">Research Documents ({entriesInSection.length})</span>
+                </div>
+                {isGroupExpanded(`${sectionKey}-entries`) && (
+                  <div className="highlights-cards-grid">
+                    {entriesInSection.map(item => renderCard(item))}
+                  </div>
+                )}
               </div>
             )}
-          </div>
+            
+            {/* URLs group */}
+            {urlsInSection.length > 0 && (
+              <div className="highlights-document-group">
+                <div 
+                  className="highlights-group-header"
+                  onClick={() => toggleGroup(`${sectionKey}-urls`)}
+                >
+                  <div className={`highlights-group-caret ${!isGroupExpanded(`${sectionKey}-urls`) ? 'collapsed' : ''}`}>
+                    <CaretDownIcon />
+                  </div>
+                  <span className="highlights-group-title">Web Sources ({urlsInSection.length})</span>
+                </div>
+                {isGroupExpanded(`${sectionKey}-urls`) && (
+                  <div className="highlights-cards-grid">
+                    {urlsInSection.map(item => renderCard(item))}
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* PDFs group */}
+            {pdfsInSection.length > 0 && (
+              <div className="highlights-document-group">
+                <div 
+                  className="highlights-group-header"
+                  onClick={() => toggleGroup(`${sectionKey}-pdfs`)}
+                >
+                  <div className={`highlights-group-caret ${!isGroupExpanded(`${sectionKey}-pdfs`) ? 'collapsed' : ''}`}>
+                    <CaretDownIcon />
+                  </div>
+                  <span className="highlights-group-title">Physical Sources ({pdfsInSection.length})</span>
+                </div>
+                {isGroupExpanded(`${sectionKey}-pdfs`) && (
+                  <div className="highlights-cards-grid">
+                    {pdfsInSection.map(item => renderCard(item))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
     );
@@ -463,6 +509,17 @@ const AddNewTabView = ({
         </div>
       </div>
       
+      {/* Create New Button */}
+      <div className="add-tab-create-new-wrapper">
+        <button 
+          className="add-tab-create-new-button"
+          onClick={onCreateNewDocument}
+        >
+          <PlusIconSvg className="add-tab-create-new-icon" />
+          <span className="add-tab-create-new-text">Create New</span>
+        </button>
+      </div>
+      
       {/* Search Bar */}
       <div className="add-tab-search-bar">
         <div className="add-tab-search-icon">
@@ -486,9 +543,70 @@ const AddNewTabView = ({
           </div>
         ) : (
           <div className="add-tab-sections">
-            {renderTimeSection('TODAY', groupedItems.today, 'today')}
-            {renderTimeSection('LAST 7 DAYS', groupedItems.last7Days, 'last7Days')}
-            {renderTimeSection('ARCHIVED', groupedItems.archived, 'archived')}
+            {/* Items (sorted by date, newest first) */}
+            {groupedItems.nonArchived.length > 0 && (
+              <div className="highlights-time-section">
+                {/* Entries group */}
+                {groupedItems.nonArchived.filter(i => i.type === 'entry').length > 0 && (
+                  <div className="highlights-document-group">
+                    <div 
+                      className="highlights-group-header"
+                      onClick={() => toggleGroup('nonArchived-entries')}
+                    >
+                      <div className={`highlights-group-caret ${!isGroupExpanded('nonArchived-entries') ? 'collapsed' : ''}`}>
+                        <CaretDownIcon />
+                      </div>
+                      <span className="highlights-group-title">Research Documents ({groupedItems.nonArchived.filter(i => i.type === 'entry').length})</span>
+                    </div>
+                    {isGroupExpanded('nonArchived-entries') && (
+                      <div className="highlights-cards-grid">
+                        {groupedItems.nonArchived.filter(i => i.type === 'entry').map(item => renderCard(item))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* URLs group */}
+                {groupedItems.nonArchived.filter(i => i.type === 'url').length > 0 && (
+                  <div className="highlights-document-group">
+                    <div 
+                      className="highlights-group-header"
+                      onClick={() => toggleGroup('nonArchived-urls')}
+                    >
+                      <div className={`highlights-group-caret ${!isGroupExpanded('nonArchived-urls') ? 'collapsed' : ''}`}>
+                        <CaretDownIcon />
+                      </div>
+                      <span className="highlights-group-title">Web Sources ({groupedItems.nonArchived.filter(i => i.type === 'url').length})</span>
+                    </div>
+                    {isGroupExpanded('nonArchived-urls') && (
+                      <div className="highlights-cards-grid">
+                        {groupedItems.nonArchived.filter(i => i.type === 'url').map(item => renderCard(item))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* PDFs group */}
+                {groupedItems.nonArchived.filter(i => i.type === 'pdf').length > 0 && (
+                  <div className="highlights-document-group">
+                    <div 
+                      className="highlights-group-header"
+                      onClick={() => toggleGroup('nonArchived-pdfs')}
+                    >
+                      <div className={`highlights-group-caret ${!isGroupExpanded('nonArchived-pdfs') ? 'collapsed' : ''}`}>
+                        <CaretDownIcon />
+                      </div>
+                      <span className="highlights-group-title">Physical Sources ({groupedItems.nonArchived.filter(i => i.type === 'pdf').length})</span>
+                    </div>
+                    {isGroupExpanded('nonArchived-pdfs') && (
+                      <div className="highlights-cards-grid">
+                        {groupedItems.nonArchived.filter(i => i.type === 'pdf').map(item => renderCard(item))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

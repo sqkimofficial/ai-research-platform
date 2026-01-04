@@ -11,6 +11,7 @@
   --color-white: #ffffff;
   --color-border: #e1e1e1;
   --color-icon-dark: #4d4d4d;
+  --color-background-secondary: #FBF8F5;
 
   /* Derived tokens using only palette hues */
   --color-base-weak: rgba(0, 50, 98, 0.12);

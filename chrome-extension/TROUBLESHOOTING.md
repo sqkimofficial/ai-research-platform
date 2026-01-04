@@ -62,3 +62,4 @@ https://abcdefghijklmnopqrstuvwxyz123456.chromiumapp.org/
 - For production, publish to Chrome Web Store for a permanent ID
 - Or use a fixed Extension ID via `key` field in manifest.json
 
+
