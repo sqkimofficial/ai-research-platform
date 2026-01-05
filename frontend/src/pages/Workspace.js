@@ -26,9 +26,9 @@ const Workspace = () => {
   const [attachedSections, setAttachedSections] = useState([]);
   const [attachedHighlights, setAttachedHighlights] = useState([]);
   const [activeDocumentId, setActiveDocumentId] = useState(null);
-  const [highlightsTabTrigger, setHighlightsTabTrigger] = useState(0);
   const [pdfTabTrigger, setPdfTabTrigger] = useState(0);
   const [researchDocsTabTrigger, setResearchDocsTabTrigger] = useState(0);
+  const [uploadTrigger, setUploadTrigger] = useState(0);  // Trigger to auto-click upload button
   const [showProjectSelector, setShowProjectSelector] = useState(false);
   const [currentProjectName, setCurrentProjectName] = useState('');
   
@@ -265,6 +265,16 @@ const Workspace = () => {
     return false;
   }, []);
 
+  // Handle navigation to sources with auto-upload trigger
+  const handleNavigateToSources = useCallback(() => {
+    // First switch to the PDF/Sources tab
+    setPdfTabTrigger(prev => prev + 1);
+    // Then trigger the upload button click (with a small delay to ensure tab switch completes)
+    setTimeout(() => {
+      setUploadTrigger(prev => prev + 1);
+    }, 100);
+  }, []);
+
   // Show project selector modal if needed
   if (showProjectSelector) {
     return (
@@ -288,7 +298,7 @@ const Workspace = () => {
           currentProjectName={currentProjectName}
           onChangeProject={handleChangeProject}
           isChatActive={isChatsPanelOpen}
-          onHighlightsClick={() => setHighlightsTabTrigger(prev => prev + 1)}
+          onHighlightsClick={() => {}} // No-op: web highlights are now shown in PDF tab
           onPDFsClick={() => setPdfTabTrigger(prev => prev + 1)}
           onResearchDocsClick={() => setResearchDocsTabTrigger(prev => prev + 1)}
           tabOrder={tabData.tabOrder}
@@ -340,9 +350,10 @@ const Workspace = () => {
               onDocumentNameUpdate={() => {
                 setDocumentNameRefreshTrigger(prev => prev + 1);
               }}
-              highlightsTabTrigger={highlightsTabTrigger}
+              highlightsTabTrigger={0}
               pdfTabTrigger={pdfTabTrigger}
               researchDocsTabTrigger={researchDocsTabTrigger}
+              uploadTrigger={uploadTrigger}
               onEditorReady={handleEditorReady}
               onTabDataChange={setTabData}
             />
@@ -378,6 +389,7 @@ const Workspace = () => {
               onActiveDocumentChange={(documentId) => {
                 setActiveDocumentId(documentId);
               }}
+              onNavigateToSources={handleNavigateToSources}
             />
           </div>
         </div>

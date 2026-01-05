@@ -4,7 +4,7 @@ import { ReactComponent as WebIcon } from '../../assets/web-icon.svg';
 import { ReactComponent as PdfIcon } from '../../assets/pdf-icon.svg';
 import { ReactComponent as DocumentIcon } from '../../assets/document-icon.svg';
 import { ReactComponent as PlusIcon } from '../../assets/plus-icon.svg';
-import { ReactComponent as CancelIcon } from '../../assets/cancel-icon.svg';
+import { ReactComponent as CloseIcon } from '../../assets/close-icon.svg';
 import { ReactComponent as DropdownIcon } from '../../assets/dropdown-icon.svg';
 import { ReactComponent as StarIcon } from '../../assets/star.svg';
 import { ReactComponent as StarToggledIcon } from '../../assets/star-toggled.svg';
@@ -364,20 +364,12 @@ const LeftSidebar = ({
               {isExpanded && <span className="panel-label">Research Documents</span>}
             </button>
             <button 
-              className={`panel-button ${activeTabType === 'highlights' ? 'active' : ''}`}
-              onClick={onHighlightsClick}
-              title="Web Highlights"
-            >
-              <WebIcon className="panel-icon" />
-              {isExpanded && <span className="panel-label">Web Highlights</span>}
-            </button>
-            <button 
               className={`panel-button ${activeTabType === 'pdf' ? 'active' : ''}`}
               onClick={onPDFsClick}
-              title="PDF Highlights"
+              title="Highlights"
             >
               <PdfIcon className="panel-icon" />
-              {isExpanded && <span className="panel-label">PDF Highlights</span>}
+              {isExpanded && <span className="panel-label">Highlights</span>}
             </button>
           </div>
         </div>
@@ -446,7 +438,7 @@ const LeftSidebar = ({
                                   }}
                                   title="Close tab"
                                 >
-                                  <CancelIcon className="close-icon" />
+                                  <CloseIcon className="close-icon" />
                                 </button>
                               )}
                             </div>
@@ -503,7 +495,7 @@ const LeftSidebar = ({
                             }}
                             title="Close tab"
                           >
-                            <CancelIcon className="close-icon" />
+                            <CloseIcon className="close-icon" />
                           </button>
                         )}
                       </div>

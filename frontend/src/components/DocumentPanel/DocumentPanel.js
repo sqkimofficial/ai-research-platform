@@ -200,7 +200,7 @@ const FileDocumentIconLarge = () => (
   </svg>
 );
 
-const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, onDocumentNameUpdate, highlightsTabTrigger, pdfTabTrigger, researchDocsTabTrigger, onEditorReady, onTabDataChange }) => {
+const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, onDocumentNameUpdate, highlightsTabTrigger, pdfTabTrigger, researchDocsTabTrigger, uploadTrigger, onEditorReady, onTabDataChange }) => {
   const [documents, setDocuments] = useState([]); // All open documents
   const [activeDocumentId, setActiveDocumentId] = useState(null); // Currently active tab
   const [content, setContent] = useState(''); // Markdown content (storage format)
@@ -264,6 +264,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const [searchQuery, setSearchQuery] = useState('');
   const [urlSearchQuery, setUrlSearchQuery] = useState('');
   const [pdfSearchQuery, setPdfSearchQuery] = useState('');
+  const [visibleRowsCount, setVisibleRowsCount] = useState(15); // Lazy loading: start with 15 rows
+  const tableScrollRef = useRef(null);
 
   // Ref to track if we've restored tabs from localStorage (prevents saving empty arrays on mount)
   const hasRestoredTabsRef = useRef(false);
@@ -559,14 +561,17 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
 
   // Show pending highlights view when trigger changes (no tab created yet)
+  // NOTE: This is now handled by pdfTabTrigger - web highlights are shown in PDF tab
+  // Keeping this for backward compatibility but redirecting to PDF tab
   useEffect(() => {
     if (highlightsTabTrigger > 0) {
-      // Just show the pending view - don't create a tab yet
-      setPendingNewTabType('highlights');
+      // Redirect to PDF tab which now shows both PDF and web highlights
+      setPendingNewTabType('pdf');
       setActiveTabId(null);
-      setActiveTabType('highlights');
+      setActiveTabType('pdf');
       
       if (selectedProjectId) {
+        loadPdfsForProject(selectedProjectId);
         loadHighlightsForProject(selectedProjectId);
       }
     }
@@ -582,9 +587,18 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       
       if (selectedProjectId) {
         loadPdfsForProject(selectedProjectId);
+        loadHighlightsForProject(selectedProjectId); // Also load web highlights
       }
     }
   }, [pdfTabTrigger]);
+
+  // Auto-trigger upload dialog when uploadTrigger changes (from @ mention "Add New Source")
+  useEffect(() => {
+    if (uploadTrigger > 0 && fileInputRef.current) {
+      // Trigger file input click to open upload dialog
+      fileInputRef.current.click();
+    }
+  }, [uploadTrigger]);
 
   // Show pending Research Docs view when trigger changes (no tab created yet)
   useEffect(() => {
@@ -922,20 +936,15 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       highlights: urlDoc.highlights || []
     };
     
-    // If we're in pending state (no tab created yet), create a new tab with the selected data
-    if (pendingNewTabType === 'highlights') {
-      const newTabId = `highlights-${Date.now()}`;
-      const newTab = { id: newTabId, selectedUrlData: selectedData, createdAt: Date.now() };
-      setHighlightsTabs(prev => [...prev, newTab]);
-      setTabOrder(prev => [...prev, { id: newTabId, type: 'highlights' }]);
-      setActiveTabId(newTabId);
-      setPendingNewTabType(null); // Clear pending state
-    } else {
-      // Update the selectedUrlData for the active highlights tab
-      setHighlightsTabs(prev => prev.map(tab => 
-        tab.id === activeTabId ? { ...tab, selectedUrlData: selectedData } : tab
-      ));
-    }
+    // Always create a new highlights tab when clicking a URL card
+    // (highlights tabs are now only created automatically, not manually accessible)
+    const newTabId = `highlights-${Date.now()}`;
+    const newTab = { id: newTabId, selectedUrlData: selectedData, createdAt: Date.now() };
+    setHighlightsTabs(prev => [...prev, newTab]);
+    setTabOrder(prev => [...prev, { id: newTabId, type: 'highlights' }]);
+    setActiveTabId(newTabId);
+    setActiveTabType('highlights');
+    setPendingNewTabType(null); // Clear pending state
   };
 
   const handleBackToTable = () => {
@@ -1009,6 +1018,48 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     
     return `Last Updated ${hour12}:${minutes.toString().padStart(2, '0')}${ampm}`;
   };
+
+  // Format date for table (e.g., "30 Jan, 2025" or "9:15pm")
+  const formatTableDate = (dateString) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const itemDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    
+    // If same day, show time
+    if (itemDate.getTime() === today.getTime()) {
+      const hours = date.getHours();
+      const minutes = date.getMinutes();
+      const ampm = hours >= 12 ? 'pm' : 'am';
+      const hour12 = hours % 12 || 12;
+      return `${hour12}:${minutes.toString().padStart(2, '0')}${ampm}`;
+    }
+    
+    // Otherwise show date
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const day = date.getDate();
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day} ${month}, ${year}`;
+  };
+
+  // Handle table scroll for lazy loading
+  const handleTableScroll = useCallback((e) => {
+    const container = e.target;
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+    
+    // When scrolled to 80% of the way down, load more rows
+    if (scrollTop + clientHeight >= scrollHeight * 0.8) {
+      setVisibleRowsCount(prev => prev + 15);
+    }
+  }, []);
+
+  // Reset visible rows count when search changes
+  useEffect(() => {
+    setVisibleRowsCount(15);
+  }, [pdfSearchQuery]);
 
   // Group PDFs: sort by updated_at descending (newest first)
   const groupPdfsByTime = (pdfList) => {
@@ -1845,14 +1896,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                   <div className="highlights-web-view-section">
                     {/* Browser Toolbar */}
                     <div className="browser-toolbar">
-                      <button 
-                        className="back-to-list-btn"
-                        onClick={handleBackToTable}
-                        title="Back to URL list"
-                      >
-                        <ArrowLeftIcon />
-                        <span>Back to URLs</span>
-                      </button>
                       <div className="browser-nav-buttons">
                         <button 
                           className="browser-nav-btn"
@@ -2156,16 +2199,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
               /* Split View: PDF Viewer (70%) + Highlights List (30%) */
               <div className="pdf-split-view">
                 <div className="pdf-viewer-section">
-                  {/* PDF Toolbar - simple style with back button */}
+                  {/* PDF Toolbar */}
                   <div className="doc-viewer-toolbar">
-                    <button 
-                      className="back-to-list-btn"
-                      onClick={handleBackToPdfTable}
-                      title="Back to documents"
-                    >
-                      <ArrowLeftIcon />
-                      <span>Back to Documents</span>
-                    </button>
                     <div className="doc-viewer-filename">
                       <span>{getSelectedPdfData().pdf.filename}</span>
                     </div>
@@ -2299,38 +2334,59 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                     style={{ display: 'none' }}
                   />
                   
-                  {/* Header with Title, Search Bar and Upload Button */}
-                  <SectionHeader
-                    title="PDF Highlights"
-                    searchQuery={pdfSearchQuery}
-                    onSearchChange={setPdfSearchQuery}
-                    searchPlaceholder="Search for highlights...."
-                    ctaType="upload"
-                    ctaOnClick={() => fileInputRef.current?.click()}
-                    ctaDisabled={uploadingPdf}
-                    ctaText={uploadingPdf ? 'Uploading...' : 'Upload New'}
-                  />
+                  {/* Upload button - right aligned in separate div */}
+                  <div className="highlights-upload-section">
+                    <button
+                      className="highlights-upload-button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingPdf}
+                      title="Upload PDF, JPG, or PNG"
+                    >
+                      <ShareUploadIcon />
+                      <span>{uploadingPdf ? 'Uploading...' : 'Upload New'}</span>
+                    </button>
+                  </div>
                   
-                  {pdfs.length === 0 ? (
-                    <div className="document-highlights-empty">
-                      <BookIconLarge />
-                      <p>No documents uploaded yet.</p>
-                      <p className="empty-hint">Click "Upload New" to add a PDF, JPG, or PNG file.</p>
+                  {/* Sources title, search bar, and table in separate div */}
+                  <div className="highlights-content-section">
+                    <div className="highlights-title-search">
+                      <h2 className="highlights-title">Sources</h2>
+                      <div className="highlights-search-container">
+                        <div className="highlights-search-bar">
+                          <SearchIconSvg className="highlights-search-icon" />
+                          <input
+                            type="text"
+                            className="highlights-search-input"
+                            placeholder="Search...."
+                            value={pdfSearchQuery || ''}
+                            onChange={(e) => setPdfSearchQuery(e.target.value)}
+                          />
+                        </div>
+                      </div>
                     </div>
-                  ) : (
-                    <div className="document-highlights-sections">
-                      {/* Group PDFs: non-archived and archived */}
+                  
+                    {(pdfs.length === 0 && highlightsUrls.length === 0) ? (
+                      <div className="document-highlights-empty">
+                        <BookIconLarge />
+                        <p>No highlights saved yet.</p>
+                        <p className="empty-hint">Click "Upload New" to add a PDF, JPG, or PNG file, or use the browser extension to highlight text on web pages.</p>
+                      </div>
+                    ) : (
+                      <div 
+                        className="highlights-table-container"
+                        ref={tableScrollRef}
+                        onScroll={handleTableScroll}
+                      >
                       {(() => {
-                        const grouped = groupPdfsByTime(pdfs);
+                        const groupedPdfs = groupPdfsByTime(pdfs);
+                        const groupedUrls = groupUrlsByTime(highlightsUrls);
                         
-                        // Filter PDFs by search query (search in filename and highlights)
+                        // Filter PDFs by search query
                         const filterPdfs = (pdfList) => {
                           if (!pdfSearchQuery.trim()) return pdfList;
                           const query = pdfSearchQuery.toLowerCase();
                           return pdfList.filter(pdf => {
-                            // Search in filename
                             if ((pdf.filename || '').toLowerCase().includes(query)) return true;
-                            // Search in highlight text
                             if (pdf.highlights && Array.isArray(pdf.highlights)) {
                               return pdf.highlights.some(highlight => 
                                 (highlight.text || '').toLowerCase().includes(query) ||
@@ -2341,115 +2397,122 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                           });
                         };
                         
-                        const filteredGrouped = {
-                          nonArchived: filterPdfs(grouped.nonArchived),
-                          archived: []
+                        // Filter URLs by search query
+                        const filterUrls = (urlList) => {
+                          if (!pdfSearchQuery.trim()) return urlList;
+                          const query = pdfSearchQuery.toLowerCase();
+                          return urlList.filter(urlDoc => {
+                            if ((urlDoc.page_title || '').toLowerCase().includes(query)) return true;
+                            if (extractDomain(urlDoc.source_url).toLowerCase().includes(query)) return true;
+                            if ((urlDoc.source_url || '').toLowerCase().includes(query)) return true;
+                            if (urlDoc.highlights && Array.isArray(urlDoc.highlights)) {
+                              return urlDoc.highlights.some(highlight => 
+                                (highlight.text || '').toLowerCase().includes(query) ||
+                                (highlight.note || '').toLowerCase().includes(query)
+                              );
+                            }
+                            return false;
+                          });
                         };
                         
-                        const renderPdfCard = (pdf, idx) => {
-                          // Determine if it's an image or PDF based on content_type
-                          const isImage = pdf.content_type && (
-                            pdf.content_type.startsWith('image/') || 
-                            pdf.content_type === 'image/jpeg' || 
-                            pdf.content_type === 'image/png' || 
-                            pdf.content_type === 'image/jpg'
-                          );
-                          const iconSrc = isImage ? highlightsImageIcon : highlightsPdfIcon;
-                          
-                          return (
-                            <div 
-                              key={`pdf-${idx}`}
-                              className="pdf-highlight-card"
-                              onClick={() => handlePdfClick(pdf)}
-                            >
-                              <div className="pdf-card-header">
-                                <div className="pdf-card-icon">
-                                  <img src={iconSrc} alt={isImage ? 'Image' : 'PDF'} />
-                                </div>
-                                <div className="pdf-card-title">
-                                  {pdf.filename}
-                                </div>
-                              </div>
-                              <div className="pdf-card-content">
-                                <div className="pdf-card-highlights-count">
-                                  {pdf.highlights?.length || 0} highlight{(pdf.highlights?.length || 0) !== 1 ? 's' : ''}
-                                </div>
-                                <div className="pdf-card-date">
-                                  <span>{formatLastUpdatedTime(pdf.updated_at || pdf.created_at)}</span>
-                                </div>
-                              </div>
-                              <CardMenu
-                                itemId={pdf.pdf_id}
-                                isArchived={pdf.archived || false}
-                                onRename={async () => {
-                                  // PDF cards don't support rename yet
-                                  console.log('Rename not supported for PDF cards');
-                                }}
-                                onArchive={async () => {
-                                  try {
-                                    const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5001'}/api/pdfs/archive`, {
-                                      method: 'PUT',
-                                      headers: {
-                                        'Content-Type': 'application/json',
-                                        'Authorization': `Bearer ${getToken()}`
-                                      },
-                                      body: JSON.stringify({
-                                        project_id: selectedProjectId,
-                                        pdf_id: pdf.pdf_id
-                                      })
-                                    });
-                                    if (!response.ok) throw new Error('Archive failed');
-                                    if (selectedProjectId) {
-                                      loadPdfsForProject(selectedProjectId);
-                                    }
-                                  } catch (error) {
-                                    console.error('Failed to archive PDF:', error);
-                                    alert('Failed to archive PDF. Please try again.');
-                                  }
-                                }}
-                                onUnarchive={async () => {
-                                  try {
-                                    const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5001'}/api/pdfs/unarchive`, {
-                                      method: 'PUT',
-                                      headers: {
-                                        'Content-Type': 'application/json',
-                                        'Authorization': `Bearer ${getToken()}`
-                                      },
-                                      body: JSON.stringify({
-                                        project_id: selectedProjectId,
-                                        pdf_id: pdf.pdf_id
-                                      })
-                                    });
-                                    if (!response.ok) throw new Error('Unarchive failed');
-                                    if (selectedProjectId) {
-                                      loadPdfsForProject(selectedProjectId);
-                                    }
-                                  } catch (error) {
-                                    console.error('Failed to unarchive PDF:', error);
-                                    alert('Failed to unarchive PDF. Please try again.');
-                                  }
-                                }}
-                                position={{ top: '7px', right: '6.56px' }}
-                              />
-                            </div>
-                          );
-                        };
+                        const filteredPdfs = filterPdfs(groupedPdfs.nonArchived);
+                        const filteredUrls = filterUrls(groupedUrls.nonArchived);
+                        
+                        // Combine and sort all items by date (newest first)
+                        const allItems = [
+                          ...filteredPdfs.map(pdf => ({ type: 'pdf', data: pdf, date: new Date(pdf.updated_at || pdf.created_at) })),
+                          ...filteredUrls.map(url => ({ type: 'url', data: url, date: new Date(url.updated_at) }))
+                        ].sort((a, b) => b.date - a.date);
+                        
+                        // Get visible items for lazy loading
+                        const visibleItems = allItems.slice(0, visibleRowsCount);
                         
                         return (
-                          <>
-                            {/* PDFs (sorted by date, newest first) */}
-                            {filteredGrouped.nonArchived.length > 0 && (
-                              <div className="highlights-time-section">
-                                <div className="highlights-cards-grid">
-                                  {filteredGrouped.nonArchived.map((pdf, idx) => renderPdfCard(pdf, idx))}
-                                </div>
-                              </div>
-                            )}
-                          </>
+                          <table className="highlights-table">
+                            <thead>
+                              <tr className="highlights-table-header-row">
+                                <th className="highlights-table-header-cell highlights-table-number-cell"></th>
+                                <th className="highlights-table-header-cell highlights-table-name-cell">Name</th>
+                                <th className="highlights-table-header-cell highlights-table-highlights-cell">Highlights</th>
+                                <th className="highlights-table-header-cell highlights-table-used-in-cell">Used In</th>
+                                <th className="highlights-table-header-cell highlights-table-date-cell">Last Updated</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {visibleItems.map((item, idx) => {
+                                const isPdf = item.type === 'pdf';
+                                const data = item.data;
+                                const isImage = isPdf && data.content_type && (
+                                  data.content_type.startsWith('image/') || 
+                                  data.content_type === 'image/jpeg' || 
+                                  data.content_type === 'image/png' || 
+                                  data.content_type === 'image/jpg'
+                                );
+                                
+                                return (
+                                  <tr 
+                                    key={`${item.type}-${idx}`}
+                                    className="highlights-table-row"
+                                    onClick={() => isPdf ? handlePdfClick(data) : handleUrlClick(data)}
+                                  >
+                                    <td className="highlights-table-cell highlights-table-number-cell">
+                                      {idx + 1}.
+                                    </td>
+                                    <td className="highlights-table-cell highlights-table-name-cell">
+                                      <div className="highlights-table-name-content">
+                                        {isPdf ? (
+                                          <img 
+                                            src={isImage ? highlightsImageIcon : highlightsPdfIcon} 
+                                            alt={isImage ? 'Image' : 'PDF'}
+                                            className="highlights-table-icon"
+                                          />
+                                        ) : (
+                                          <div className="highlights-table-icon">
+                                            {getFaviconUrl(data.source_url) ? (
+                                              <img 
+                                                src={getFaviconUrl(data.source_url)} 
+                                                alt={extractDomain(data.source_url)}
+                                                onError={(e) => { e.target.style.display = 'none'; }}
+                                              />
+                                            ) : (
+                                              <GlobeIconCard />
+                                            )}
+                                          </div>
+                                        )}
+                                        <div className="highlights-table-name-text">
+                                          {isPdf ? (
+                                            <span className="highlights-table-name-bold">{data.filename}</span>
+                                          ) : (
+                                            <>
+                                              <span className="highlights-table-name-domain">{extractDomain(data.source_url)} </span>
+                                              <span className="highlights-table-name-bold">{data.page_title || 'Untitled Page'}</span>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td className="highlights-table-cell highlights-table-highlights-cell">
+                                      {data.highlights?.length || 0}
+                                    </td>
+                                    <td className="highlights-table-cell highlights-table-used-in-cell">
+                                      <div className="highlights-table-used-in-content">
+                                        <span className="highlights-table-used-in-text">Document_Name with max limit</span>
+                                        <span className="highlights-table-used-in-badge">+3</span>
+                                      </div>
+                                    </td>
+                                    <td className="highlights-table-cell highlights-table-date-cell">
+                                      {formatTableDate(data.updated_at || data.created_at)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         );
                       })()}
-                    </div>
-                  )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )
             )}

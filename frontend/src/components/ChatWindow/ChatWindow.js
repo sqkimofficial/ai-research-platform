@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { chatAPI } from '../../services/api';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { chatAPI, highlightsAPI, pdfAPI } from '../../services/api';
 import { getSessionId, setSessionId } from '../../utils/auth';
 import { markdownToHtml } from '../../utils/markdownConverter';
 import MessageBubble from './MessageBubble';
@@ -17,7 +17,53 @@ import { ReactComponent as DeleteIcon } from '../../assets/delete-icon.svg';
 import { ReactComponent as DocumentIcon } from '../../assets/document-icon.svg';
 import { ReactComponent as AttachIcon } from '../../assets/attach-icon.svg';
 import { ReactComponent as PlusIcon } from '../../assets/plus-icon.svg';
+import { ReactComponent as ArrowSubIcon } from '../../assets/arrow-sub.svg';
+import highlightsImageIcon from '../../assets/highlights-image-icon.svg';
+import highlightsPdfIcon from '../../assets/highlights-pdf-icon.svg';
 import { documentAPI } from '../../services/api';
+
+// Simple search - substring match only (same as DocumentPanel sources search)
+const searchMatch = (query, text) => {
+  if (!query) return true;
+  return (text || '').toLowerCase().includes(query.toLowerCase());
+};
+
+// Get favicon URL for a given URL
+const getFaviconUrl = (url) => {
+  try {
+    const urlObj = new URL(url);
+    return `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=128`;
+  } catch {
+    return null;
+  }
+};
+
+// Globe icon (16px) for URL favicon fallback
+const GlobeIconCard = () => (
+  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className="globe-icon">
+    <path 
+      d="M10 18.333C14.6024 18.333 18.333 14.6024 18.333 10C18.333 5.39763 14.6024 1.66699 10 1.66699C5.39763 1.66699 1.66699 5.39763 1.66699 10C1.66699 14.6024 5.39763 18.333 10 18.333Z" 
+      stroke="currentColor" 
+      strokeWidth="1.5" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    />
+    <path 
+      d="M1.66699 10H18.333" 
+      stroke="currentColor" 
+      strokeWidth="1.5" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    />
+    <path 
+      d="M10 1.66699C12.0844 3.94863 13.269 6.91003 13.333 9.99999C13.269 13.09 12.0844 16.0514 10 18.333C7.91557 16.0514 6.73098 13.09 6.66699 9.99999C6.73098 6.91003 7.91557 3.94863 10 1.66699Z" 
+      stroke="currentColor" 
+      strokeWidth="1.5" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 const ChatWindow = ({ 
   sessionId: propSessionId, 
@@ -33,7 +79,8 @@ const ChatWindow = ({
   onClearAttachedHighlights,
   onRemoveAttachedHighlight,
   onInsertContentAtCursor,  // New: callback for cursor-aware insertion (Google Docs-like behavior)
-  onActiveDocumentChange  // New: callback to change active document
+  onActiveDocumentChange,  // New: callback to change active document
+  onNavigateToSources  // New: callback to navigate to sources tab and trigger upload
 }) => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -59,6 +106,15 @@ const ChatWindow = ({
   const [chatSessions, setChatSessions] = useState([]);
   const [currentChatTitle, setCurrentChatTitle] = useState('Untitled');
   const [isChatDropdownOpen, setIsChatDropdownOpen] = useState(false);
+  
+  // @ mention state
+  const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionStartIndex, setMentionStartIndex] = useState(null);
+  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
+  const [urlHighlights, setUrlHighlights] = useState([]);
+  const [pdfDocuments, setPdfDocuments] = useState([]);
+  
   const modeMenuRef = useRef(null);
   const commandsMenuRef = useRef(null);
   const sortMenuRef = useRef(null);
@@ -66,6 +122,7 @@ const ChatWindow = ({
   const documentDropdownRef = useRef(null);
   const chatDropdownRef = useRef(null);
   const textareaRef = useRef(null);
+  const mentionDropdownRef = useRef(null);
   
   // Update attached sections when prop changes
   useEffect(() => {
@@ -195,6 +252,28 @@ const ChatWindow = ({
     }
   }, [messages.length, selectedProjectId, sessionId]);
 
+  // Fetch URL highlights and PDF documents for @ mention feature
+  useEffect(() => {
+    const fetchSourcesForMention = async () => {
+      if (selectedProjectId) {
+        try {
+          // Fetch URL highlights (web sources)
+          const highlightsResponse = await highlightsAPI.getHighlights(selectedProjectId);
+          setUrlHighlights(highlightsResponse.data.highlights || []);
+          
+          // Fetch PDF documents
+          const pdfsResponse = await pdfAPI.getPDFs(selectedProjectId);
+          setPdfDocuments(pdfsResponse.data.pdfs || []);
+        } catch (error) {
+          console.error('Failed to fetch sources for mention:', error);
+          setUrlHighlights([]);
+          setPdfDocuments([]);
+        }
+      }
+    };
+    fetchSourcesForMention();
+  }, [selectedProjectId]);
+
   // Auto-resize textarea
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -236,6 +315,267 @@ const ChatWindow = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Extract domain name from URL
+  const extractDomain = useCallback((url) => {
+    try {
+      const urlObj = new URL(url);
+      let domain = urlObj.hostname;
+      if (domain.startsWith('www.')) {
+        domain = domain.substring(4);
+      }
+      return domain.charAt(0).toUpperCase() + domain.slice(1);
+    } catch {
+      return 'Website';
+    }
+  }, []);
+
+  // Build mention dropdown items based on search query
+  const mentionItems = useMemo(() => {
+    const items = [];
+    const query = mentionQuery.toLowerCase();
+    
+    // Process URL highlights (web sources)
+    urlHighlights.forEach(urlDoc => {
+      const sourceName = urlDoc.page_title || extractDomain(urlDoc.source_url);
+      const sourceMatches = !query || searchMatch(query, sourceName) || searchMatch(query, urlDoc.source_url);
+      
+      // Check if source matches or any highlight matches
+      const matchingHighlights = (urlDoc.highlights || []).filter(h => 
+        searchMatch(query, h.text) || searchMatch(query, h.note || '')
+      );
+      
+      if (sourceMatches || matchingHighlights.length > 0) {
+        // Add source item
+        items.push({
+          type: 'source',
+          sourceType: 'web',
+          id: `web-${urlDoc.source_url}`,
+          title: sourceName,
+          sourceUrl: urlDoc.source_url,
+          data: urlDoc,
+          highlights: urlDoc.highlights || []
+        });
+        
+        // Add highlight items under this source (either matching highlights or all if source matches)
+        const highlightsToShow = query && !sourceMatches ? matchingHighlights : (urlDoc.highlights || []);
+        highlightsToShow.forEach(highlight => {
+          items.push({
+            type: 'highlight',
+            sourceType: 'web',
+            id: `web-highlight-${highlight.highlight_id || highlight.text.substring(0, 20)}`,
+            parentId: `web-${urlDoc.source_url}`,
+            title: highlight.text,
+            note: highlight.note,
+            sourceTitle: sourceName,
+            sourceUrl: urlDoc.source_url,
+            data: highlight
+          });
+        });
+      }
+    });
+    
+    // Process PDF documents
+    pdfDocuments.forEach(pdf => {
+      const sourceName = pdf.filename;
+      const sourceMatches = !query || searchMatch(query, sourceName);
+      
+      // Check if source matches or any highlight matches
+      const matchingHighlights = (pdf.highlights || []).filter(h => 
+        searchMatch(query, h.text) || searchMatch(query, h.note || '')
+      );
+      
+      if (sourceMatches || matchingHighlights.length > 0) {
+        // Add source item
+        items.push({
+          type: 'source',
+          sourceType: 'pdf',
+          id: `pdf-${pdf.pdf_id}`,
+          title: sourceName,
+          pdfId: pdf.pdf_id,
+          data: pdf,
+          highlights: pdf.highlights || []
+        });
+        
+        // Add highlight items under this source
+        const highlightsToShow = query && !sourceMatches ? matchingHighlights : (pdf.highlights || []);
+        highlightsToShow.forEach(highlight => {
+          items.push({
+            type: 'highlight',
+            sourceType: 'pdf',
+            id: `pdf-highlight-${highlight.highlight_id || highlight.text.substring(0, 20)}`,
+            parentId: `pdf-${pdf.pdf_id}`,
+            title: highlight.text,
+            note: highlight.note,
+            sourceTitle: sourceName,
+            pdfId: pdf.pdf_id,
+            data: highlight
+          });
+        });
+      }
+    });
+    
+    return items;
+  }, [mentionQuery, urlHighlights, pdfDocuments, extractDomain]);
+
+  // Reset selected index when items change
+  useEffect(() => {
+    setMentionSelectedIndex(0);
+  }, [mentionItems.length]);
+
+  // Close mention dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutsideMention = (event) => {
+      if (mentionDropdownRef.current && !mentionDropdownRef.current.contains(event.target) && 
+          textareaRef.current && !textareaRef.current.contains(event.target)) {
+        setShowMentionDropdown(false);
+      }
+    };
+    if (showMentionDropdown) {
+      document.addEventListener('mousedown', handleClickOutsideMention);
+      return () => document.removeEventListener('mousedown', handleClickOutsideMention);
+    }
+  }, [showMentionDropdown]);
+
+  // Handle selecting a mention item (source or highlight)
+  const handleMentionSelect = useCallback((item) => {
+    if (item.type === 'add-new') {
+      // User wants to add a new source - trigger navigation to sources page with upload
+      setShowMentionDropdown(false);
+      setMentionQuery('');
+      setMentionStartIndex(null);
+      
+      // Remove the @query text from input
+      if (mentionStartIndex !== null) {
+        const beforeMention = inputMessage.substring(0, mentionStartIndex);
+        const afterMention = inputMessage.substring(textareaRef.current?.selectionEnd || inputMessage.length);
+        setInputMessage(beforeMention + afterMention);
+      }
+      
+      // Navigate to sources and trigger upload
+      if (onNavigateToSources) {
+        onNavigateToSources();
+      }
+      return;
+    }
+    
+    // Create highlight object to attach
+    const highlightToAttach = {
+      id: item.id,
+      text: item.type === 'source' 
+        ? `[Entire source: ${item.title}]` 
+        : item.title,
+      type: item.sourceType,
+      sourceTitle: item.type === 'source' ? item.title : item.sourceTitle,
+      source: item.sourceUrl || item.pdfId,
+      note: item.note || '',
+      colorTag: item.data?.color || 'default'
+    };
+    
+    // Add to attached highlights
+    setCurrentAttachedHighlights(prev => {
+      if (prev.some(h => h.id === highlightToAttach.id)) return prev;
+      return [...prev, highlightToAttach];
+    });
+    
+    // Remove the @query text from input
+    if (mentionStartIndex !== null) {
+      const beforeMention = inputMessage.substring(0, mentionStartIndex);
+      const afterMention = inputMessage.substring(textareaRef.current?.selectionEnd || inputMessage.length);
+      setInputMessage(beforeMention + afterMention);
+    }
+    
+    // Close dropdown
+    setShowMentionDropdown(false);
+    setMentionQuery('');
+    setMentionStartIndex(null);
+    
+    // Focus back on textarea
+    textareaRef.current?.focus();
+  }, [inputMessage, mentionStartIndex, onNavigateToSources]);
+
+  // Handle input change for @ mention detection
+  const handleInputChange = useCallback((e) => {
+    const value = e.target.value;
+    const cursorPos = e.target.selectionStart;
+    
+    setInputMessage(value);
+    
+    // Check for @ mention trigger
+    // Look backwards from cursor to find @
+    let atIndex = -1;
+    for (let i = cursorPos - 1; i >= 0; i--) {
+      const char = value[i];
+      if (char === '@') {
+        // Check if @ is at start or preceded by space/newline
+        if (i === 0 || /\s/.test(value[i - 1])) {
+          atIndex = i;
+          break;
+        }
+      } else if (/\s/.test(char)) {
+        // Hit whitespace before finding @, no mention
+        break;
+      }
+    }
+    
+    if (atIndex !== -1) {
+      // Extract the query after @
+      const query = value.substring(atIndex + 1, cursorPos);
+      // Only show if no space in query (closed mention)
+      if (!query.includes(' ')) {
+        setShowMentionDropdown(true);
+        setMentionQuery(query);
+        setMentionStartIndex(atIndex);
+        return;
+      }
+    }
+    
+    // No active mention
+    setShowMentionDropdown(false);
+    setMentionQuery('');
+    setMentionStartIndex(null);
+  }, []);
+
+  // Handle keyboard navigation in mention dropdown
+  const handleMentionKeyDown = useCallback((e) => {
+    if (!showMentionDropdown) return false;
+    
+    const totalItems = mentionItems.length + 1; // +1 for "Add New Source"
+    
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setMentionSelectedIndex(prev => (prev + 1) % totalItems);
+      return true;
+    }
+    
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setMentionSelectedIndex(prev => (prev - 1 + totalItems) % totalItems);
+      return true;
+    }
+    
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // Select current item
+      if (mentionSelectedIndex < mentionItems.length) {
+        handleMentionSelect(mentionItems[mentionSelectedIndex]);
+      } else {
+        // "Add New Source" is selected
+        handleMentionSelect({ type: 'add-new' });
+      }
+      return true;
+    }
+    
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowMentionDropdown(false);
+      setMentionQuery('');
+      setMentionStartIndex(null);
+      return true;
+    }
+    
+    return false;
+  }, [showMentionDropdown, mentionItems, mentionSelectedIndex, handleMentionSelect]);
 
   const initializeSession = async () => {
     // If it's a new chat, don't create session yet - wait for first message
@@ -299,6 +639,11 @@ const ChatWindow = ({
   };
 
   const handleKeyDown = (e) => {
+    // First, check if mention dropdown should handle this key
+    if (handleMentionKeyDown(e)) {
+      return;
+    }
+    
     // If Enter is pressed without Shift, send the message
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -732,16 +1077,89 @@ const ChatWindow = ({
               )}
             </div>
           )}
-            <textarea
-              ref={textareaRef}
-              className="chat-input"
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask Anything..."
-              disabled={loading}
-              rows={1}
-            />
+            <div className="chat-input-wrapper">
+              <textarea
+                ref={textareaRef}
+                className="chat-input"
+                value={inputMessage}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask Anything..."
+                disabled={loading}
+                rows={1}
+              />
+              
+              {/* @ Mention Dropdown */}
+              {showMentionDropdown && (
+                <div className="mention-dropdown" ref={mentionDropdownRef}>
+                  <div className="mention-dropdown-items">
+                    {mentionItems.map((item, index) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`mention-item ${item.type === 'highlight' ? 'mention-item-highlight' : 'mention-item-source'} ${index === mentionSelectedIndex ? 'selected' : ''}`}
+                        onClick={() => handleMentionSelect(item)}
+                        onMouseEnter={() => setMentionSelectedIndex(index)}
+                      >
+                        {item.type === 'source' ? (
+                          <>
+                            {item.sourceType === 'web' ? (
+                              // Use favicon for web sources (same as sources table)
+                              <div className="mention-item-icon">
+                                {getFaviconUrl(item.sourceUrl) ? (
+                                  <img 
+                                    src={getFaviconUrl(item.sourceUrl)} 
+                                    alt={item.title}
+                                    onError={(e) => { e.target.style.display = 'none'; }}
+                                  />
+                                ) : (
+                                  <GlobeIconCard />
+                                )}
+                              </div>
+                            ) : (
+                              // Use PDF/image icon for PDFs (same as sources table)
+                              <div className="mention-item-icon">
+                                {(() => {
+                                  const isImage = item.data?.content_type && (
+                                    item.data.content_type.startsWith('image/') || 
+                                    item.data.content_type === 'image/jpeg' || 
+                                    item.data.content_type === 'image/png' || 
+                                    item.data.content_type === 'image/jpg'
+                                  );
+                                  return (
+                                    <img 
+                                      src={isImage ? highlightsImageIcon : highlightsPdfIcon} 
+                                      alt={isImage ? 'Image' : 'PDF'}
+                                    />
+                                  );
+                                })()}
+                              </div>
+                            )}
+                            <span className="mention-item-title">{item.title}</span>
+                          </>
+                        ) : (
+                          <>
+                            <ArrowSubIcon className="mention-item-icon mention-sub-icon" />
+                            <span className="mention-item-title">{item.title.length > 50 ? item.title.substring(0, 50) + '...' : item.title}</span>
+                          </>
+                        )}
+                      </button>
+                    ))}
+                    
+                    {/* Add New Source option */}
+                    <button
+                      type="button"
+                      className={`mention-item mention-item-add-new ${mentionSelectedIndex === mentionItems.length ? 'selected' : ''}`}
+                      onClick={() => handleMentionSelect({ type: 'add-new' })}
+                      onMouseEnter={() => setMentionSelectedIndex(mentionItems.length)}
+                    >
+                      <PlusIcon className="mention-item-icon" />
+                      <span className="mention-item-title">Add New Source</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Bottom Section: Mode Dropdown and Send Button */}

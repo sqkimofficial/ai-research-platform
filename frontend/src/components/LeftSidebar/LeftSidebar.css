@@ -436,7 +436,7 @@
 .tab-actions {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 8px;
   margin-left: auto;
   flex-shrink: 0;
   opacity: 0;
