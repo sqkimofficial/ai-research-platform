@@ -26,6 +26,14 @@ except ImportError:
     PYMUPDF_AVAILABLE = False
     print("Warning: PyMuPDF not installed. Install with: pip install pymupdf")
 
+# Try to import PIL for image processing
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    print("Warning: Pillow not installed. Install with: pip install pillow")
+
 
 class HighlightExtractionService:
     """Service for extracting highlights from PDFs and images using OpenAI GPT-4o mini."""
@@ -69,11 +77,15 @@ class HighlightExtractionService:
             # Decode base64 to bytes
             pdf_bytes = base64.b64decode(pdf_base64_data)
             
+            # Open the PDF document for position detection and preview generation
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            
             # Convert PDF pages to images
             images = self._pdf_to_images(pdf_bytes)
             
             if not images:
                 print("No images extracted from PDF")
+                doc.close()
                 return []
             
             # Process each page and collect highlights
@@ -82,8 +94,29 @@ class HighlightExtractionService:
             for page_num, image_base64 in enumerate(images, start=1):
                 print(f"Processing page {page_num}...")
                 page_highlights = self._extract_highlights_from_image(image_base64, page_num)
+                
+                # Add position and preview for each highlight
+                for idx, highlight in enumerate(page_highlights, 1):
+                    bbox = self._find_highlight_position(doc, highlight['text'], page_num)
+                    if bbox:
+                        highlight['bounding_box'] = bbox
+                        preview_image = self._generate_preview_image(doc, page_num, bbox)
+                        highlight['preview_image'] = preview_image
+                        if preview_image:
+                            preview_size_kb = len(base64.b64decode(preview_image)) / 1024
+                            print(f"  Highlight {idx}: Position found, preview size: {preview_size_kb:.1f} KB")
+                    else:
+                        # Fallback: use page center if text not found
+                        # This is normal - GPT-4o extracts from images, but text search may fail due to formatting differences
+                        preview_image = self._generate_page_preview(doc, page_num)
+                        highlight['preview_image'] = preview_image
+                        if preview_image:
+                            preview_size_kb = len(base64.b64decode(preview_image)) / 1024
+                            print(f"  Highlight {idx}: Text position not found (using centered preview), preview size: {preview_size_kb:.1f} KB")
+                
                 all_highlights.extend(page_highlights)
             
+            doc.close()
             return all_highlights
             
         except Exception as e:
@@ -96,6 +129,13 @@ class HighlightExtractionService:
             # For images, we process directly - no conversion needed
             print("Processing image...")
             highlights = self._extract_highlights_from_image(image_base64_data, page_number=1, content_type=content_type)
+            
+            # Generate preview images for each highlight
+            # For images, we use a centered preview since we don't have precise text positions
+            for highlight in highlights:
+                # Generate a centered preview (we don't have OCR position detection for images yet)
+                highlight['preview_image'] = self._generate_image_preview(image_base64_data)
+            
             return highlights
             
         except Exception as e:
@@ -304,6 +344,224 @@ Now analyze the image carefully and extract ALL highlights with their correct co
                 result.append(char)
         
         return ''.join(result)
+    
+    def _find_highlight_position(self, doc, highlight_text, page_number):
+        """
+        Use PyMuPDF's text search to find highlight bounding box.
+        Returns normalized coordinates (0-1 range) or None if not found.
+        
+        Args:
+            doc: PyMuPDF document object
+            highlight_text: Text to search for
+            page_number: 1-indexed page number
+        
+        Returns:
+            dict with x0, y0, x1, y1 normalized coordinates, or None
+        """
+        if not PYMUPDF_AVAILABLE:
+            return None
+        
+        try:
+            page = doc[page_number - 1]
+            
+            # Search for text - try progressively shorter prefixes
+            # PyMuPDF search can be sensitive to exact whitespace/formatting
+            search_lengths = [100, 75, 50, 30, 20]
+            
+            for search_len in search_lengths:
+                search_text = highlight_text[:search_len].strip()
+                if not search_text:
+                    continue
+                    
+                rects = page.search_for(search_text)
+                
+                if rects:
+                    # Use the first match
+                    rect = rects[0]
+                    page_rect = page.rect
+                    
+                    return {
+                        'x0': rect.x0 / page_rect.width,
+                        'y0': rect.y0 / page_rect.height,
+                        'x1': rect.x1 / page_rect.width,
+                        'y1': rect.y1 / page_rect.height
+                    }
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error finding highlight position: {e}")
+            return None
+    
+    def _generate_preview_image(self, doc, page_number, bbox, width=600, height=320):
+        """
+        Generate a cropped preview image centered on the highlight.
+        Includes context above and below the highlight.
+        
+        Args:
+            doc: PyMuPDF document object
+            page_number: 1-indexed page number
+            bbox: Normalized bounding box dict with x0, y0, x1, y1
+            width: Target width in pixels
+            height: Target height in pixels
+        
+        Returns:
+            Base64 encoded PNG string
+        """
+        if not PYMUPDF_AVAILABLE or not PIL_AVAILABLE:
+            return None
+        
+        try:
+            page = doc[page_number - 1]
+            page_rect = page.rect
+            
+            # Calculate the center of the highlight
+            highlight_center_y = (bbox['y0'] + bbox['y1']) / 2 * page_rect.height
+            
+            # Determine crop region with context
+            # Calculate how much page height we need for the aspect ratio
+            aspect_ratio = width / height
+            crop_width = page_rect.width
+            crop_height = crop_width / aspect_ratio
+            
+            # Center the crop on the highlight
+            crop_top = max(0, highlight_center_y - crop_height / 2)
+            crop_bottom = crop_top + crop_height
+            
+            # Adjust if we go beyond page bounds
+            if crop_bottom > page_rect.height:
+                crop_bottom = page_rect.height
+                crop_top = max(0, crop_bottom - crop_height)
+            
+            # Render at higher DPI for quality
+            clip = fitz.Rect(0, crop_top, page_rect.width, crop_bottom)
+            mat = fitz.Matrix(2, 2)  # 2x scale for better quality
+            pix = page.get_pixmap(matrix=mat, clip=clip)
+            
+            # Convert to PIL Image and resize
+            img_bytes = pix.tobytes("png")
+            img = Image.open(io.BytesIO(img_bytes))
+            img = img.resize((width, height), Image.LANCZOS)
+            
+            # Save as optimized PNG
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG', optimize=True)
+            
+            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+        except Exception as e:
+            print(f"Error generating preview image: {e}")
+            return None
+    
+    def _generate_page_preview(self, doc, page_number, width=600, height=320):
+        """
+        Generate a centered preview of the page (fallback when text position not found).
+        
+        Args:
+            doc: PyMuPDF document object
+            page_number: 1-indexed page number
+            width: Target width in pixels
+            height: Target height in pixels
+        
+        Returns:
+            Base64 encoded PNG string
+        """
+        if not PYMUPDF_AVAILABLE or not PIL_AVAILABLE:
+            return None
+        
+        try:
+            page = doc[page_number - 1]
+            page_rect = page.rect
+            
+            # Calculate center crop
+            aspect_ratio = width / height
+            crop_width = page_rect.width
+            crop_height = crop_width / aspect_ratio
+            
+            # Center on page
+            crop_top = max(0, (page_rect.height - crop_height) / 2)
+            crop_bottom = min(page_rect.height, crop_top + crop_height)
+            
+            # Render at higher DPI
+            clip = fitz.Rect(0, crop_top, page_rect.width, crop_bottom)
+            mat = fitz.Matrix(2, 2)
+            pix = page.get_pixmap(matrix=mat, clip=clip)
+            
+            # Convert to PIL Image and resize
+            img_bytes = pix.tobytes("png")
+            img = Image.open(io.BytesIO(img_bytes))
+            img = img.resize((width, height), Image.LANCZOS)
+            
+            # Save as optimized PNG
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG', optimize=True)
+            
+            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+        except Exception as e:
+            print(f"Error generating page preview: {e}")
+            return None
+    
+    def _generate_image_preview(self, image_base64, bbox=None, width=600, height=320):
+        """
+        Generate a cropped preview from an image (for standalone images, not PDFs).
+        
+        Args:
+            image_base64: Base64 encoded image
+            bbox: Optional normalized bounding box dict with x0, y0, x1, y1
+            width: Target width in pixels
+            height: Target height in pixels
+        
+        Returns:
+            Base64 encoded PNG string
+        """
+        if not PIL_AVAILABLE:
+            return None
+        
+        try:
+            img_bytes = base64.b64decode(image_base64)
+            img = Image.open(io.BytesIO(img_bytes))
+            img_width, img_height = img.size
+            
+            # Calculate crop area
+            aspect_ratio = width / height
+            
+            if bbox:
+                # Center on the highlight bounding box
+                center_x = (bbox['x0'] + bbox['x1']) / 2 * img_width
+                center_y = (bbox['y0'] + bbox['y1']) / 2 * img_height
+            else:
+                # Center on image
+                center_x = img_width / 2
+                center_y = img_height / 2
+            
+            # Calculate crop dimensions
+            crop_width = min(img_width, img_width * 0.8)  # Max 80% of image width
+            crop_height = crop_width / aspect_ratio
+            
+            if crop_height > img_height:
+                crop_height = img_height
+                crop_width = crop_height * aspect_ratio
+            
+            # Calculate crop bounds centered on target point
+            left = max(0, min(img_width - crop_width, center_x - crop_width / 2))
+            top = max(0, min(img_height - crop_height, center_y - crop_height / 2))
+            right = left + crop_width
+            bottom = top + crop_height
+            
+            # Crop and resize
+            cropped = img.crop((left, top, right, bottom))
+            cropped = cropped.resize((width, height), Image.LANCZOS)
+            
+            # Save as optimized PNG
+            buffer = io.BytesIO()
+            cropped.save(buffer, format='PNG', optimize=True)
+            
+            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+        except Exception as e:
+            print(f"Error generating image preview: {e}")
+            return None
 
 
 # Singleton instance

@@ -519,3 +519,32 @@ def unarchive_pdf():
     else:
         return jsonify({'error': 'Failed to unarchive PDF'}), 500
 
+
+@pdf_bp.route('/highlight-preview/<pdf_id>/<highlight_id>', methods=['GET'])
+def get_highlight_preview(pdf_id, highlight_id):
+    """
+    Get preview image for a specific highlight.
+    
+    Returns the base64 encoded preview image centered on the highlight text.
+    
+    Returns: { preview_image: string (base64 PNG) }
+    """
+    user_id = get_user_id_from_token()
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # Get PDF document
+    pdf = PDFDocumentModel.get_pdf_document(pdf_id)
+    if not pdf or pdf.get('user_id') != user_id:
+        return jsonify({'error': 'PDF not found or access denied'}), 404
+    
+    # Find the specific highlight
+    for highlight in pdf.get('highlights', []):
+        if highlight.get('highlight_id') == highlight_id:
+            preview = highlight.get('preview_image')
+            if preview:
+                return jsonify({'preview_image': preview}), 200
+            return jsonify({'error': 'No preview available for this highlight'}), 404
+    
+    return jsonify({'error': 'Highlight not found'}), 404
+

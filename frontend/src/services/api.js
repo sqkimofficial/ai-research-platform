@@ -303,6 +303,10 @@ export const pdfAPI = {
   getHighlights: (pdfId) => {
     return api.get(`/api/pdfs/highlights/${pdfId}`);
   },
+  // Get preview image for a specific highlight
+  getHighlightPreview: (pdfId, highlightId) => {
+    return api.get(`/api/pdfs/highlight-preview/${pdfId}/${highlightId}`);
+  },
   // Add a highlight to a document
   addHighlight: (pdfId, text, color = 'yellow', pageNumber = null, note = null) => {
     return api.post(`/api/pdfs/highlights/${pdfId}`, {

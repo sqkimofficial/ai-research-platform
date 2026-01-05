@@ -22,7 +22,7 @@
 .main-content {
   display: flex;
   flex: 1;
-  overflow: hidden;
+  overflow: visible; /* Allow preview panel to extend outside chat-section */
   margin-left: 52px; /* Account for fixed left sidebar (collapsed width) */
   transition: margin-left 0.2s ease;
 }
@@ -30,7 +30,7 @@
 .chat-section {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible; /* Allow preview panel to extend outside */
   min-width: 250px;
   flex-shrink: 0;
   background: var(--color-white);

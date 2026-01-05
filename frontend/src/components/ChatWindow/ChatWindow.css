@@ -953,6 +953,7 @@
 /* Chat Input Area */
 .chat-input-area {
   padding: 8px 12px 12px 12px;
+  overflow: visible; /* Allow dropdown/preview to extend outside */
 }
 
 .chat-input-container {
@@ -963,6 +964,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow: visible; /* Allow dropdown/preview to extend outside */
 }
 
 /* Top Section: Document Selector and Bookmark */
@@ -2065,6 +2067,7 @@
 .chat-input-wrapper {
   position: relative;
   width: 100%;
+  overflow: visible; /* Allow dropdown/preview to extend outside */
 }
 
 .mention-dropdown {
@@ -2072,43 +2075,43 @@
   bottom: calc(100% + 8px);
   left: 0;
   width: 240px;
-  max-height: 280px;
-  overflow-y: auto;
   background: var(--color-white);
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 16px;
   padding: 8px;
-  box-shadow: 0px 1px 2px rgba(16, 24, 40, 0.05);
-  z-index: 100;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-
-.mention-dropdown::-webkit-scrollbar {
-  width: 6px;
-}
-
-.mention-dropdown::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.mention-dropdown::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 3px;
-}
-
-.mention-dropdown:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-}
-
-.mention-dropdown:hover {
-  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+  box-shadow: 4px 4px 4px rgba(0, 0, 0, 0.08);
+  z-index: 1000;
 }
 
 .mention-dropdown-items {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.mention-dropdown-items::-webkit-scrollbar {
+  width: 6px;
+}
+
+.mention-dropdown-items::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mention-dropdown-items::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.mention-dropdown-items:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.mention-dropdown-items:hover {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
 .mention-item {
@@ -2214,4 +2217,81 @@
   text-align: center;
   font-size: 13px;
   color: rgba(0, 0, 0, 0.5);
+}
+
+/* Mention Dropdown Container with Preview Panel */
+.mention-dropdown-container {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 1000;
+}
+
+/* Preview Panel Styles - absolutely positioned to the LEFT of the dropdown */
+.mention-preview-panel {
+  position: absolute;
+  right: calc(100% + 8px); /* Position to the LEFT of dropdown with 8px gap */
+  bottom: 0; /* Bottom-aligned with dropdown */
+  width: 600px;
+  max-width: 40vw;
+  height: 310px;
+  max-height: 50vh;
+  background: var(--color-white);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 16px;
+  padding: 8px;
+  box-shadow: 4px 4px 8px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  z-index: 1001;
+}
+
+.mention-preview-panel img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 1px solid white;
+  border-radius: 8px;
+}
+
+.preview-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.preview-loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(0, 0, 0, 0.1);
+  border-top-color: rgba(0, 0, 0, 0.5);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Responsive: hide preview on small screens */
+@media (max-width: 900px) {
+  .mention-preview-panel {
+    display: none;
+  }
+}
+
+/* Adjust mention dropdown when inside container - serves as positioning anchor for preview */
+.mention-dropdown-container .mention-dropdown {
+  position: relative;
+  bottom: auto;
+  left: auto;
+  z-index: 1000;
+  overflow: visible; /* Allow preview to extend outside */
 }

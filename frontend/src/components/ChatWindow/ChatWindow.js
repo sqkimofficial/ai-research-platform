@@ -115,6 +115,10 @@ const ChatWindow = ({
   const [urlHighlights, setUrlHighlights] = useState([]);
   const [pdfDocuments, setPdfDocuments] = useState([]);
   
+  // Preview panel state
+  const [previewImage, setPreviewImage] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  
   const modeMenuRef = useRef(null);
   const commandsMenuRef = useRef(null);
   const sortMenuRef = useRef(null);
@@ -123,6 +127,7 @@ const ChatWindow = ({
   const chatDropdownRef = useRef(null);
   const textareaRef = useRef(null);
   const mentionDropdownRef = useRef(null);
+  const mentionContainerRef = useRef(null);
   
   // Update attached sections when prop changes
   useEffect(() => {
@@ -423,6 +428,42 @@ const ChatWindow = ({
     setMentionSelectedIndex(0);
   }, [mentionItems.length]);
 
+  // Fetch preview when selection changes (for highlights with previews)
+  useEffect(() => {
+    const fetchPreview = async () => {
+      if (!showMentionDropdown) {
+        setPreviewImage(null);
+        return;
+      }
+      
+      const selectedItem = mentionItems[mentionSelectedIndex];
+      
+      // Only fetch preview for PDF highlights (they have preview images)
+      if (selectedItem?.type === 'highlight' && selectedItem?.sourceType === 'pdf' && selectedItem?.pdfId) {
+        setPreviewLoading(true);
+        try {
+          const response = await pdfAPI.getHighlightPreview(
+            selectedItem.pdfId, 
+            selectedItem.data.highlight_id
+          );
+          if (response.data?.preview_image) {
+            setPreviewImage(response.data.preview_image);
+          } else {
+            setPreviewImage(null);
+          }
+        } catch (error) {
+          console.error('Failed to fetch highlight preview:', error);
+          setPreviewImage(null);
+        }
+        setPreviewLoading(false);
+      } else {
+        setPreviewImage(null);
+      }
+    };
+    
+    fetchPreview();
+  }, [mentionSelectedIndex, mentionItems, showMentionDropdown]);
+
   // Close mention dropdown when clicking outside
   useEffect(() => {
     const handleClickOutsideMention = (event) => {
@@ -436,6 +477,32 @@ const ChatWindow = ({
       return () => document.removeEventListener('mousedown', handleClickOutsideMention);
     }
   }, [showMentionDropdown]);
+
+  // Position dropdown container: ensure dropdown doesn't overflow right edge
+  // Only reposition when dropdown opens, NOT when preview changes
+  useEffect(() => {
+    if (showMentionDropdown && mentionContainerRef.current && mentionDropdownRef.current) {
+      const container = mentionContainerRef.current;
+      const dropdown = mentionDropdownRef.current;
+      
+      // Reset any previous adjustments first
+      container.style.transform = '';
+      
+      // Force reflow to get accurate position
+      void container.offsetHeight;
+      
+      // Check if dropdown would overflow right edge (24px min margin)
+      const viewportWidth = window.innerWidth;
+      const dropdownRect = dropdown.getBoundingClientRect();
+      const minRightMargin = 24;
+      const rightOverflow = dropdownRect.right - (viewportWidth - minRightMargin);
+      
+      if (rightOverflow > 0) {
+        // Shift container left by the overflow amount
+        container.style.transform = `translateX(-${rightOverflow}px)`;
+      }
+    }
+  }, [showMentionDropdown]); // Only run when dropdown opens/closes, NOT when preview changes
 
   // Handle selecting a mention item (source or highlight)
   const handleMentionSelect = useCallback((item) => {
@@ -862,7 +929,7 @@ const ChatWindow = ({
   
   // Fallback to backend insertion (appends to end of document)
   const fallbackToBackendInsertion = async (pendingContentId, editedContent) => {
-    const response = await chatAPI.directInsertContent(sessionId, pendingContentId, editedContent, activeDocumentId);
+    await chatAPI.directInsertContent(sessionId, pendingContentId, editedContent, activeDocumentId);
     
     // Update message status (keep document_content so it can be shown when expanded)
     setMessages((prev) => prev.map(msg => 
@@ -1089,73 +1156,93 @@ const ChatWindow = ({
                 rows={1}
               />
               
-              {/* @ Mention Dropdown */}
+              {/* @ Mention Dropdown with Preview Panel */}
               {showMentionDropdown && (
-                <div className="mention-dropdown" ref={mentionDropdownRef}>
-                  <div className="mention-dropdown-items">
-                    {mentionItems.map((item, index) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className={`mention-item ${item.type === 'highlight' ? 'mention-item-highlight' : 'mention-item-source'} ${index === mentionSelectedIndex ? 'selected' : ''}`}
-                        onClick={() => handleMentionSelect(item)}
-                        onMouseEnter={() => setMentionSelectedIndex(index)}
-                      >
-                        {item.type === 'source' ? (
-                          <>
-                            {item.sourceType === 'web' ? (
-                              // Use favicon for web sources (same as sources table)
-                              <div className="mention-item-icon">
-                                {getFaviconUrl(item.sourceUrl) ? (
-                                  <img 
-                                    src={getFaviconUrl(item.sourceUrl)} 
-                                    alt={item.title}
-                                    onError={(e) => { e.target.style.display = 'none'; }}
-                                  />
-                                ) : (
-                                  <GlobeIconCard />
-                                )}
-                              </div>
-                            ) : (
-                              // Use PDF/image icon for PDFs (same as sources table)
-                              <div className="mention-item-icon">
-                                {(() => {
-                                  const isImage = item.data?.content_type && (
-                                    item.data.content_type.startsWith('image/') || 
-                                    item.data.content_type === 'image/jpeg' || 
-                                    item.data.content_type === 'image/png' || 
-                                    item.data.content_type === 'image/jpg'
-                                  );
-                                  return (
-                                    <img 
-                                      src={isImage ? highlightsImageIcon : highlightsPdfIcon} 
-                                      alt={isImage ? 'Image' : 'PDF'}
-                                    />
-                                  );
-                                })()}
-                              </div>
-                            )}
-                            <span className="mention-item-title">{item.title}</span>
-                          </>
+                <div className="mention-dropdown-container" ref={mentionContainerRef}>
+                  <div className="mention-dropdown" ref={mentionDropdownRef}>
+                    {/* Preview Panel - positioned to LEFT of dropdown via CSS */}
+                    {(previewImage || previewLoading) && (
+                      <div className="mention-preview-panel">
+                        {previewLoading ? (
+                          <div className="preview-loading">
+                            <div className="preview-loading-spinner"></div>
+                            <span>Loading preview...</span>
+                          </div>
                         ) : (
-                          <>
-                            <ArrowSubIcon className="mention-item-icon mention-sub-icon" />
-                            <span className="mention-item-title">{item.title.length > 50 ? item.title.substring(0, 50) + '...' : item.title}</span>
-                          </>
+                          <img 
+                            src={`data:image/png;base64,${previewImage}`} 
+                            alt="Highlight context preview" 
+                          />
                         )}
-                      </button>
-                    ))}
+                      </div>
+                    )}
                     
-                    {/* Add New Source option */}
-                    <button
-                      type="button"
-                      className={`mention-item mention-item-add-new ${mentionSelectedIndex === mentionItems.length ? 'selected' : ''}`}
-                      onClick={() => handleMentionSelect({ type: 'add-new' })}
-                      onMouseEnter={() => setMentionSelectedIndex(mentionItems.length)}
-                    >
-                      <PlusIcon className="mention-item-icon" />
-                      <span className="mention-item-title">Add New Source</span>
-                    </button>
+                    {/* Dropdown items */}
+                    <div className="mention-dropdown-items">
+                      {mentionItems.map((item, index) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`mention-item ${item.type === 'highlight' ? 'mention-item-highlight' : 'mention-item-source'} ${index === mentionSelectedIndex ? 'selected' : ''}`}
+                          onClick={() => handleMentionSelect(item)}
+                          onMouseEnter={() => setMentionSelectedIndex(index)}
+                        >
+                          {item.type === 'source' ? (
+                            <>
+                              {item.sourceType === 'web' ? (
+                                // Use favicon for web sources (same as sources table)
+                                <div className="mention-item-icon">
+                                  {getFaviconUrl(item.sourceUrl) ? (
+                                    <img 
+                                      src={getFaviconUrl(item.sourceUrl)} 
+                                      alt={item.title}
+                                      onError={(e) => { e.target.style.display = 'none'; }}
+                                    />
+                                  ) : (
+                                    <GlobeIconCard />
+                                  )}
+                                </div>
+                              ) : (
+                                // Use PDF/image icon for PDFs (same as sources table)
+                                <div className="mention-item-icon">
+                                  {(() => {
+                                    const isImage = item.data?.content_type && (
+                                      item.data.content_type.startsWith('image/') || 
+                                      item.data.content_type === 'image/jpeg' || 
+                                      item.data.content_type === 'image/png' || 
+                                      item.data.content_type === 'image/jpg'
+                                    );
+                                    return (
+                                      <img 
+                                        src={isImage ? highlightsImageIcon : highlightsPdfIcon} 
+                                        alt={isImage ? 'Image' : 'PDF'}
+                                      />
+                                    );
+                                  })()}
+                                </div>
+                              )}
+                              <span className="mention-item-title">{item.title}</span>
+                            </>
+                          ) : (
+                            <>
+                              <ArrowSubIcon className="mention-item-icon mention-sub-icon" />
+                              <span className="mention-item-title">{item.title.length > 50 ? item.title.substring(0, 50) + '...' : item.title}</span>
+                            </>
+                          )}
+                        </button>
+                      ))}
+                      
+                      {/* Add New Source option */}
+                      <button
+                        type="button"
+                        className={`mention-item mention-item-add-new ${mentionSelectedIndex === mentionItems.length ? 'selected' : ''}`}
+                        onClick={() => handleMentionSelect({ type: 'add-new' })}
+                        onMouseEnter={() => setMentionSelectedIndex(mentionItems.length)}
+                      >
+                        <PlusIcon className="mention-item-icon" />
+                        <span className="mention-item-title">Add New Source</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
