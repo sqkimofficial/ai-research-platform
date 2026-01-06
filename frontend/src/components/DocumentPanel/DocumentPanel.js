@@ -200,7 +200,7 @@ const FileDocumentIconLarge = () => (
   </svg>
 );
 
-const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, onDocumentNameUpdate, highlightsTabTrigger, pdfTabTrigger, researchDocsTabTrigger, uploadTrigger, onEditorReady, onTabDataChange }) => {
+const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectId, currentProjectName: propCurrentProjectName, onAttachSections, onAttachHighlight, onActiveDocumentChange, onDocumentNameUpdate, highlightsTabTrigger, pdfTabTrigger, researchDocsTabTrigger, uploadTrigger, onEditorReady, onTabDataChange, isChatCollapsed = false }) => {
   const [documents, setDocuments] = useState([]); // All open documents
   const [activeDocumentId, setActiveDocumentId] = useState(null); // Currently active tab
   const [content, setContent] = useState(''); // Markdown content (storage format)
@@ -2348,7 +2348,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                   </div>
                   
                   {/* Sources title, search bar, and table in separate div */}
-                  <div className="highlights-content-section">
+                  <div className={`highlights-content-section ${isChatCollapsed && activeTabType === 'pdf' ? 'chat-collapsed' : ''}`}>
                     <div className="highlights-title-search">
                       <h2 className="highlights-title">Sources</h2>
                       <div className="highlights-search-container">
@@ -2532,7 +2532,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
               <div className="written-documents-view">
                 {/* Header with Title, Search Bar and Create New Button */}
                 <SectionHeader
-                  title="Research Documents"
+                  title="All Documents"
                   searchQuery={searchQuery}
                   onSearchChange={setSearchQuery}
                   searchPlaceholder="Search for documents...."

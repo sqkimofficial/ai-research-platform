@@ -358,18 +358,18 @@ const LeftSidebar = ({
             <button 
               className={`panel-button ${activeTabType === 'researchdocs' ? 'active' : ''}`}
               onClick={onResearchDocsClick}
-              title="Research Documents"
+              title="All Documents"
             >
               <DocumentIcon className="panel-icon" />
-              {isExpanded && <span className="panel-label">Research Documents</span>}
+              {isExpanded && <span className="panel-label">All Documents</span>}
             </button>
             <button 
               className={`panel-button ${activeTabType === 'pdf' ? 'active' : ''}`}
               onClick={onPDFsClick}
-              title="Highlights"
+              title="Sources"
             >
               <PdfIcon className="panel-icon" />
-              {isExpanded && <span className="panel-label">Highlights</span>}
+              {isExpanded && <span className="panel-label">Sources</span>}
             </button>
           </div>
         </div>

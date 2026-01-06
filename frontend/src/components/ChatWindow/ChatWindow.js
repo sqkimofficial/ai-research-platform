@@ -18,6 +18,9 @@ import { ReactComponent as DocumentIcon } from '../../assets/document-icon.svg';
 import { ReactComponent as AttachIcon } from '../../assets/attach-icon.svg';
 import { ReactComponent as PlusIcon } from '../../assets/plus-icon.svg';
 import { ReactComponent as ArrowSubIcon } from '../../assets/arrow-sub.svg';
+import { ReactComponent as SearchIcon } from '../../assets/search.svg';
+import { ReactComponent as CollapseIcon } from '../../assets/collapse-icon.svg';
+import { ReactComponent as ChatIcon } from '../../assets/chat-icon.svg';
 import highlightsImageIcon from '../../assets/highlights-image-icon.svg';
 import highlightsPdfIcon from '../../assets/highlights-pdf-icon.svg';
 import { documentAPI } from '../../services/api';
@@ -80,7 +83,10 @@ const ChatWindow = ({
   onRemoveAttachedHighlight,
   onInsertContentAtCursor,  // New: callback for cursor-aware insertion (Google Docs-like behavior)
   onActiveDocumentChange,  // New: callback to change active document
-  onNavigateToSources  // New: callback to navigate to sources tab and trigger upload
+  onNavigateToSources,  // New: callback to navigate to sources tab and trigger upload
+  isCollapsed = false,  // Whether chat is collapsed
+  onToggleCollapse,  // Callback to toggle collapsed state
+  viewContext = 'document'  // 'document' | 'allDocuments' | 'sources' - affects default state
 }) => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -1470,6 +1476,19 @@ const ChatWindow = ({
       </div>
   );
 
+  // Render collapsed state - floating button
+  if (isCollapsed) {
+    return (
+      <button 
+        className="chat-collapsed-button"
+        onClick={onToggleCollapse}
+        aria-label="Open chat"
+      >
+        <ChatIcon className="chat-collapsed-icon" />
+      </button>
+    );
+  }
+
   return (
     <div className="chat-window">
       {/* Chat Header - Always visible with dropdown, filter, and add button */}
@@ -1519,6 +1538,14 @@ const ChatWindow = ({
           <div className="chat-header-actions">
             <button
               type="button"
+              className="search-button"
+              aria-label="Search chat"
+              onClick={() => {/* Dummy button - functionality to be added later */}}
+            >
+              <SearchIcon className="search-icon" />
+            </button>
+            <button
+              type="button"
               className={`filter-button ${isFilterActive ? 'active' : ''}`}
               aria-label="Filter questions"
               aria-pressed={isFilterActive}
@@ -1526,6 +1553,7 @@ const ChatWindow = ({
             >
               <FilterIcon className="filter-icon" />
             </button>
+            <div className="header-separator-dot" />
             <button
               type="button"
               className="add-chat-button"
@@ -1533,6 +1561,15 @@ const ChatWindow = ({
               onClick={handleNewChat}
             >
               <PlusIcon className="add-chat-icon" />
+            </button>
+            <div className="header-separator-dot" />
+            <button
+              type="button"
+              className="collapse-button"
+              aria-label={isCollapsed ? "Expand chat" : "Collapse chat"}
+              onClick={onToggleCollapse}
+            >
+              <CollapseIcon className="collapse-icon" />
             </button>
           </div>
           {isFilterActive && (

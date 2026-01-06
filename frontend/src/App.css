@@ -17,16 +17,22 @@
   flex: 1;
   overflow: hidden;
   position: relative;
+  height: 100%;
+  min-height: 0; /* Allow flex item to shrink */
 }
 
 .main-content {
   display: flex;
   flex: 1;
-  overflow: visible; /* Allow preview panel to extend outside chat-section */
+  overflow: hidden; /* Prevent overflow when height is reduced */
   margin-left: 52px; /* Account for fixed left sidebar (collapsed width) */
   transition: margin-left 0.2s ease;
+  position: relative; /* Allow floating chat to position relative to this */
+  height: 100%;
+  min-height: 0; /* Allow flex item to shrink below content size */
 }
 
+/* Legacy chat-section - kept for compatibility but no longer used */
 .chat-section {
   display: flex;
   flex-direction: column;
@@ -36,6 +42,53 @@
   background: var(--color-white);
 }
 
+/* Floating chat container - pushes content when expanded */
+.chat-floating-container {
+  flex-shrink: 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  z-index: 100;
+  box-sizing: border-box;
+  min-width: 250px;
+  max-width: 100%; /* Prevent extending beyond parent */
+  height: auto;
+  overflow: hidden;
+  align-items: stretch;
+  background-color: var(--color-background-secondary);
+}
+
+/* Document edit view: chat floats, top bar stays full width */
+.chat-floating-container.document-edit-view {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin-top: 49px;
+  bottom: 0;
+  left: auto; /* Ensure it's anchored to right, not left */
+  pointer-events: none; /* Allow clicking through padding area */
+  max-width: 100%; /* Prevent extending beyond viewport */
+  box-sizing: border-box;
+}
+
+.chat-floating-container.document-edit-view > * {
+  pointer-events: auto; /* Re-enable pointer events for chat window */
+}
+
+.chat-floating-container.document-edit-view .chat-window {
+  height: 100%;
+  max-height: 100%;
+}
+
+/* List views: chat pushes content, everything shrinks */
+.chat-floating-container.list-view {
+  position: relative;
+  height: 100%;
+  max-height: 100%;
+  margin-left: auto; /* Push to right side in flex container */
+}
+
 .document-section {
   display: flex;
   flex-direction: column;
@@ -43,6 +96,18 @@
   min-width: 250px;
   flex-shrink: 0;
   background: var(--color-document-bg);
+  height: 100%;
+  min-height: 0; /* Allow flex item to shrink below content size */
+}
+
+/* Document edit view: content area shrinks, top bar stays full width */
+.document-section.document-edit-view {
+  position: relative;
+}
+
+/* List views: everything shrinks */
+.document-section.list-view {
+  position: relative;
 }
 
 .right-panel-section {
@@ -55,8 +120,7 @@
 
 /* Resize Divider */
 .resize-divider {
-  width: 1px;
-  background: var(--color-border);
+  width: 2px;
   cursor: col-resize;
   display: flex;
   align-items: center;
@@ -64,6 +128,8 @@
   flex-shrink: 0;
   position: relative;
   transition: all 0.15s ease;
+  margin: 0;
+  padding: 0;
 }
 
 .resize-handle {

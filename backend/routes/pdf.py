@@ -219,14 +219,21 @@ def get_pdf_file(pdf_id):
     if not user_id:
         token = request.args.get('token')
         if token:
-            import jwt
-            from config import Config
+            # Validate Auth0 token from query parameter
+            from utils.auth0_validator import validate_token, Auth0Error
+            from models.database import UserModel
             try:
-                payload = jwt.decode(token, Config.JWT_SECRET, algorithms=['HS256'])
-                user_id = payload.get('user_id')
-            except jwt.ExpiredSignatureError:
-                return jsonify({'error': 'Token expired'}), 401
-            except jwt.InvalidTokenError:
+                payload = validate_token(token)
+                auth0_id = payload.get('sub')
+                
+                if auth0_id:
+                    # Look up user by auth0_id
+                    user = UserModel.get_user_by_auth0_id(auth0_id)
+                    if user:
+                        user_id = user.get('user_id')
+            except Auth0Error as e:
+                return jsonify({'error': f'Token validation failed: {str(e)}'}), 401
+            except Exception as e:
                 return jsonify({'error': 'Invalid token'}), 401
     
     if not user_id:

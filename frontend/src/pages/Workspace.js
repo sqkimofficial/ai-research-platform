@@ -51,15 +51,82 @@ const Workspace = () => {
   // Editor methods for cursor-aware content insertion
   const editorMethodsRef = useRef(null);
   
-  // Resizable panel state
-  const [chatWidth, setChatWidth] = useState(30);
-  const [isResizing, setIsResizing] = useState(false);
+  // Main content ref
   const mainContentRef = useRef(null);
+  
+  // Resizable panel state
+  const [chatWidth, setChatWidth] = useState(30); // Default 30% of viewport
+  const [isResizing, setIsResizing] = useState(false);
+  
+  // Chat collapsed state - default based on view context
+  const [isChatCollapsed, setIsChatCollapsed] = useState(false);
+  
+  // Track previous tab type to determine if we're navigating from a document
+  const previousTabTypeRef = useRef(null);
+  const previousActiveDocumentIdRef = useRef(null);
   
   // Left sidebar state
   const [isChatsPanelOpen, setIsChatsPanelOpen] = useState(false);
   const [isChatsButtonHover, setIsChatsButtonHover] = useState(false);
   const [isChatsPanelHover, setIsChatsPanelHover] = useState(false);
+  
+  // Determine if we're in document edit view (has activeDocumentId and activeTabType is 'document')
+  const isDocumentEditView = activeDocumentId && tabData.activeTabType === 'document';
+  
+  // Automatically adjust chat window collapse state based on navigation
+  useEffect(() => {
+    const currentTabType = tabData.activeTabType;
+    const currentActiveDocumentId = tabData.activeDocumentId;
+    const previousTabType = previousTabTypeRef.current;
+    const previousActiveDocumentId = previousActiveDocumentIdRef.current;
+    
+    // Skip on initial mount (when refs are null)
+    if (previousTabType === null && previousActiveDocumentId === null) {
+      // Initialize refs and set initial state based on current view
+      previousTabTypeRef.current = currentTabType;
+      previousActiveDocumentIdRef.current = currentActiveDocumentId;
+      
+      // Set initial collapse state
+      if (currentTabType === 'document' && currentActiveDocumentId) {
+        setIsChatCollapsed(false);
+      } else if (currentTabType === 'pdf' || currentTabType === 'researchdocs' || currentTabType === 'highlights') {
+        setIsChatCollapsed(true);
+      }
+      return;
+    }
+    
+    // Only auto-adjust if tab type or active document changed (navigation occurred)
+    if (currentTabType !== previousTabType || currentActiveDocumentId !== previousActiveDocumentId) {
+      // Determine if we're navigating from a document
+      const wasInDocument = previousTabType === 'document' && previousActiveDocumentId;
+      
+      // Apply auto-collapse/expand logic
+      if (currentTabType === 'document' && currentActiveDocumentId) {
+        // Document editor → maximize
+        setIsChatCollapsed(false);
+      } else if (currentTabType === 'pdf') {
+        // Sources page → always minimize
+        setIsChatCollapsed(true);
+      } else if (currentTabType === 'researchdocs') {
+        // Research documents page → minimize
+        setIsChatCollapsed(true);
+      } else if (currentTabType === 'highlights') {
+        // Highlights page → if coming from document, stay expanded; otherwise minimize
+        if (wasInDocument) {
+          setIsChatCollapsed(false);
+        } else {
+          setIsChatCollapsed(true);
+        }
+      } else if (!currentActiveDocumentId && !tabData.activeTabId) {
+        // New tab (no active tab) → minimize
+        setIsChatCollapsed(true);
+      }
+      
+      // Update refs for next comparison
+      previousTabTypeRef.current = currentTabType;
+      previousActiveDocumentIdRef.current = currentActiveDocumentId;
+    }
+  }, [tabData.activeTabType, tabData.activeTabId, tabData.activeDocumentId]);
 
   // Handle resize drag
   const handleMouseMove = useCallback((e) => {
@@ -70,12 +137,11 @@ const Workspace = () => {
     const availableWidth = containerRect.width;
     const mouseX = e.clientX - containerRect.left;
     
-    // Calculate document width percentage (left side)
-    let documentPercentage = (mouseX / availableWidth) * 100;
-    documentPercentage = Math.max(20, Math.min(80, documentPercentage));
+    // Calculate chat width percentage based on distance from right edge
+    // mouseX is from left, so distance from right = availableWidth - mouseX
+    let chatPercentage = ((availableWidth - mouseX) / availableWidth) * 100;
+    chatPercentage = Math.max(20, Math.min(80, chatPercentage)); // Limit between 20% and 80%
     
-    // Chat width is the remainder (right side)
-    const chatPercentage = 100 - documentPercentage;
     setChatWidth(chatPercentage);
   }, [isResizing]);
 
@@ -275,6 +341,11 @@ const Workspace = () => {
     }, 100);
   }, []);
 
+  // Toggle chat collapsed state
+  const handleToggleChatCollapse = useCallback(() => {
+    setIsChatCollapsed(prev => !prev);
+  }, []);
+
   // Show project selector modal if needed
   if (showProjectSelector) {
     return (
@@ -326,9 +397,12 @@ const Workspace = () => {
           onHoverEnd={handleChatsPanelHoverEnd}
         />
         <div className="main-content" ref={mainContentRef}>
+          {/* Document section - width adjusts based on chat state and view context */}
           <div 
-            className="document-section"
-            style={{ width: `${100 - chatWidth}%` }}
+            className={`document-section ${isDocumentEditView ? 'document-edit-view' : 'list-view'}`}
+            style={{ 
+              width: isChatCollapsed ? '100%' : `${100 - chatWidth}%`
+            }}
           >
             <DocumentPanel 
               refreshTrigger={documentRefreshTrigger}
@@ -356,18 +430,52 @@ const Workspace = () => {
               uploadTrigger={uploadTrigger}
               onEditorReady={handleEditorReady}
               onTabDataChange={setTabData}
+              isChatCollapsed={isChatCollapsed}
             />
           </div>
-          <div 
-            className={`resize-divider ${isResizing ? 'resizing' : ''}`}
-            onMouseDown={handleMouseDown}
-          >
-            <div className="resize-handle" />
-          </div>
-          <div 
-            className="chat-section"
-            style={{ width: `${chatWidth}%` }}
-          >
+          {/* Floating chat window - pushes content when expanded */}
+          {!isChatCollapsed && (
+            <div 
+              className={`chat-floating-container ${isDocumentEditView ? 'document-edit-view' : 'list-view'}`}
+              style={{ width: `${chatWidth}%` }}
+            >
+              {/* Resize divider - inside container, on left side */}
+              <div 
+                className={`resize-divider ${isResizing ? 'resizing' : ''}`}
+                onMouseDown={handleMouseDown}
+              >
+                <div className="resize-handle" />
+              </div>
+              <ChatWindow 
+                sessionId={currentSessionId}
+                isNewChat={isNewChat}
+                selectedProjectId={selectedProjectId}
+                onSessionCreated={handleSessionCreated}
+                onSwitchSession={handleSwitchSession}
+                activeDocumentId={activeDocumentId}
+                documentNameRefreshTrigger={documentNameRefreshTrigger}
+                onAIMessage={(message) => {
+                  setDocumentRefreshTrigger(prev => prev + 1);
+                }}
+                attachedSections={attachedSections}
+                attachedHighlights={attachedHighlights}
+                onClearAttachedHighlights={() => setAttachedHighlights([])}
+                onRemoveAttachedHighlight={(highlightId) => {
+                  setAttachedHighlights(prev => prev.filter(h => h.id !== highlightId));
+                }}
+                onInsertContentAtCursor={handleInsertContentAtCursor}
+                onActiveDocumentChange={(documentId) => {
+                  setActiveDocumentId(documentId);
+                }}
+                onNavigateToSources={handleNavigateToSources}
+                isCollapsed={false}
+                onToggleCollapse={handleToggleChatCollapse}
+                viewContext={isDocumentEditView ? "document" : "list"}
+              />
+            </div>
+          )}
+          {/* Collapsed chat button */}
+          {isChatCollapsed && (
             <ChatWindow 
               sessionId={currentSessionId}
               isNewChat={isNewChat}
@@ -390,8 +498,11 @@ const Workspace = () => {
                 setActiveDocumentId(documentId);
               }}
               onNavigateToSources={handleNavigateToSources}
+              isCollapsed={true}
+              onToggleCollapse={handleToggleChatCollapse}
+              viewContext={isDocumentEditView ? "document" : "list"}
             />
-          </div>
+          )}
         </div>
       </div>
     </div>

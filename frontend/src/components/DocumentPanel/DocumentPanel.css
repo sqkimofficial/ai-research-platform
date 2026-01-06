@@ -3144,10 +3144,14 @@
 .document-highlights-view {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 24px 16px 24px;
+  padding: 0;
   background-color: var(--color-background-secondary);
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .document-highlights-view::-webkit-scrollbar {
@@ -3350,7 +3354,7 @@
 /* Cards Grid */
 .highlights-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 220px));
+  grid-template-columns: repeat(3, 1fr);
   row-gap: 16px;
   column-gap: 16px;
   justify-content: center;
@@ -3358,12 +3362,37 @@
 
 /* URL Highlights Grid - Override for URL cards to allow 280px max width */
 .url-highlights-view .highlights-cards-grid {
-  grid-template-columns: repeat(auto-fill, minmax(180px, 280px));
+  grid-template-columns: repeat(3, 1fr);
 }
 
 /* PDF Highlights Grid - Override for PDF cards to match URL cards (280px max width) */
 .document-highlights-view .highlights-cards-grid {
-  grid-template-columns: repeat(auto-fill, minmax(180px, 280px));
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* Responsive breakpoints for document card grid */
+/* 1200px - 1440px: 4 cards */
+@media (min-width: 1200px) and (max-width: 1439px) {
+  .highlights-cards-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  
+  .url-highlights-view .highlights-cards-grid,
+  .document-highlights-view .highlights-cards-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* 1440px and above: 5 cards */
+@media (min-width: 1440px) {
+  .highlights-cards-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  
+  .url-highlights-view .highlights-cards-grid,
+  .document-highlights-view .highlights-cards-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
 }
 
 /* Document Highlight Card */
@@ -3724,7 +3753,6 @@
   cursor: pointer;
   transition: border-color 0.2s;
   position: relative;
-  max-width: 280px;
   width: 100%;
   box-sizing: border-box;
 }
@@ -3741,7 +3769,6 @@
   padding: 8px;
   gap: 10px;
   overflow: hidden;
-  max-width: 280px;
   width: 100%;
   box-sizing: border-box;
 }
@@ -3897,7 +3924,6 @@
   cursor: pointer;
   transition: border-color 0.2s;
   position: relative;
-  max-width: 280px;
   width: 100%;
   box-sizing: border-box;
 }
@@ -3995,7 +4021,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background-color: white;
+  background-color: var(--color-background-secondary);
 }
 
 .researchdocs-content .empty-state {
@@ -4431,10 +4457,12 @@
 .written-documents-view {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 24px;
+  padding: 24px 0px;
   background-color: var(--color-background-secondary);
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
+  width: 80vw;
+  align-self: center;
 }
 
 .written-documents-view::-webkit-scrollbar {
@@ -4625,7 +4653,6 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  max-width: 220px;
   width: 100%;
   box-sizing: border-box;
 }
@@ -4637,7 +4664,6 @@
 /* Written Card Thumbnail Area - Snapshot preview */
 .written-card-thumbnail {
   width: 100%;
-  max-width: 220px;
   background-color: #FFFFFF;
   display: flex;
   align-items: flex-start;
@@ -5252,16 +5278,32 @@
   justify-content: flex-end;
   align-items: center;
   width: 100%;
+  position: fixed;
+  top: 0;
+  right: 0;
+  padding: 24px 24px 16px 24px;
+  background-color: var(--color-background-secondary);
+  z-index: 10;
 }
 
 /* Content section - Sources title, search, and table */
 .highlights-content-section {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 64px;
-  padding: 0 40px;
-  width: 100%;
+  width: 80vw;
+  align-items: center;
+  padding-top: 50vh;
+  margin-top: 60px; /* Space for fixed upload section */
+}
+
+/* When chat is collapsed, center content vertically and horizontally with 80vw width */
+.highlights-content-section.chat-collapsed {
+  width: 80vw;
+  flex: 1;
+  justify-content: center;
+  align-self: center;
+  margin-top: 60px; /* Space for fixed upload section */
 }
 
 .highlights-title-search {
@@ -5271,6 +5313,16 @@
   gap: 16px;
   width: 100%;
   padding-top: 16vh;
+}
+
+/* Remove top padding when chat is collapsed to allow proper centering */
+.highlights-content-section.chat-collapsed .highlights-title-search {
+  padding-top: 0;
+}
+
+/* Remove top padding when chat is collapsed to allow proper centering */
+.highlights-content-section.chat-collapsed .highlights-title-search {
+  padding-top: 0;
 }
 
 .highlights-title {
