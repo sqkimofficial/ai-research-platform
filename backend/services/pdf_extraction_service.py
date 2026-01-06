@@ -34,6 +34,14 @@ except ImportError:
     PIL_AVAILABLE = False
     print("Warning: Pillow not installed. Install with: pip install pillow")
 
+# Try to import OCR position service for image text location
+try:
+    from services.ocr_position_service import get_ocr_position_service
+    OCR_SERVICE_AVAILABLE = True
+except ImportError:
+    OCR_SERVICE_AVAILABLE = False
+    print("Warning: OCR position service not available.")
+
 
 class HighlightExtractionService:
     """Service for extracting highlights from PDFs and images using OpenAI GPT-4o mini."""
@@ -130,11 +138,37 @@ class HighlightExtractionService:
             print("Processing image...")
             highlights = self._extract_highlights_from_image(image_base64_data, page_number=1, content_type=content_type)
             
+            # Initialize OCR service for finding text positions
+            ocr_service = None
+            if OCR_SERVICE_AVAILABLE:
+                try:
+                    ocr_service = get_ocr_position_service()
+                    if not ocr_service.available:
+                        ocr_service = None
+                        print("OCR service not available - using centered previews")
+                except Exception as e:
+                    print(f"Failed to initialize OCR service: {e}")
+                    ocr_service = None
+            
             # Generate preview images for each highlight
-            # For images, we use a centered preview since we don't have precise text positions
-            for highlight in highlights:
-                # Generate a centered preview (we don't have OCR position detection for images yet)
-                highlight['preview_image'] = self._generate_image_preview(image_base64_data)
+            for idx, highlight in enumerate(highlights, 1):
+                bbox = None
+                
+                # Try to find the highlight text position using OCR
+                if ocr_service:
+                    bbox = ocr_service.find_text_position(image_base64_data, highlight['text'])
+                    if bbox:
+                        highlight['bounding_box'] = bbox
+                        print(f"  Highlight {idx}: Found position via OCR")
+                    else:
+                        print(f"  Highlight {idx}: Text position not found via OCR (using centered preview)")
+                
+                # Generate preview image (centered on bbox if found, otherwise centered on image)
+                highlight['preview_image'] = self._generate_image_preview(image_base64_data, bbox=bbox)
+                
+                if highlight['preview_image']:
+                    preview_size_kb = len(base64.b64decode(highlight['preview_image'])) / 1024
+                    print(f"  Highlight {idx}: Preview generated, size: {preview_size_kb:.1f} KB")
             
             return highlights
             

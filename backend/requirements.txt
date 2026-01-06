@@ -17,5 +17,6 @@ reportlab==4.0.7
 pillow>=10.0.0
 pymupdf>=1.23.0
 html2image>=2.0.0
+pytesseract>=0.3.10
 
 
