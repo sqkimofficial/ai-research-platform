@@ -2335,7 +2335,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                   />
                   
                   {/* Upload button - right aligned in separate div */}
-                  <div className="highlights-upload-section">
+                  <div className={`highlights-upload-section ${isChatCollapsed && activeTabType === 'pdf' ? 'chat-collapsed' : ''}`}>
                     <button
                       className="highlights-upload-button"
                       onClick={() => fileInputRef.current?.click()}

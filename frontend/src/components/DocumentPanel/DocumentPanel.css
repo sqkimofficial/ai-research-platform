@@ -3151,7 +3151,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .document-highlights-view::-webkit-scrollbar {
@@ -3352,45 +3352,79 @@
 }
 
 /* Cards Grid */
+/* Base: 960px and below - Chat collapsed: 3 cols, Chat expanded: 2 cols */
 .highlights-cards-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   row-gap: 16px;
   column-gap: 16px;
   justify-content: center;
 }
 
-/* URL Highlights Grid - Override for URL cards to allow 280px max width */
-.url-highlights-view .highlights-cards-grid {
+/* When chat is collapsed, use 3 cols at base breakpoint */
+.document-section:not(.chat-expanded) .highlights-cards-grid {
   grid-template-columns: repeat(3, 1fr);
 }
 
-/* PDF Highlights Grid - Override for PDF cards to match URL cards (280px max width) */
+/* URL Highlights Grid - Override for URL cards */
+.url-highlights-view .highlights-cards-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.document-section:not(.chat-expanded) .url-highlights-view .highlights-cards-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* PDF Highlights Grid - Override for PDF cards */
 .document-highlights-view .highlights-cards-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.document-section:not(.chat-expanded) .document-highlights-view .highlights-cards-grid {
   grid-template-columns: repeat(3, 1fr);
 }
 
 /* Responsive breakpoints for document card grid */
-/* 1200px - 1440px: 4 cards */
+/* 1200px - 1440px: Chat collapsed: 4 cols, Chat expanded: 3 cols */
 @media (min-width: 1200px) and (max-width: 1439px) {
   .highlights-cards-grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
   
   .url-highlights-view .highlights-cards-grid,
   .document-highlights-view .highlights-cards-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  
+  /* When chat is collapsed, use 4 cols */
+  .document-section:not(.chat-expanded) .highlights-cards-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  
+  .document-section:not(.chat-expanded) .url-highlights-view .highlights-cards-grid,
+  .document-section:not(.chat-expanded) .document-highlights-view .highlights-cards-grid {
     grid-template-columns: repeat(4, 1fr);
   }
 }
 
-/* 1440px and above: 5 cards */
+/* 1440px and above: Chat collapsed: 5 cols, Chat expanded: 4 cols */
 @media (min-width: 1440px) {
   .highlights-cards-grid {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(4, 1fr);
   }
   
   .url-highlights-view .highlights-cards-grid,
   .document-highlights-view .highlights-cards-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  
+  /* When chat is collapsed, use 5 cols */
+  .document-section:not(.chat-expanded) .highlights-cards-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  
+  .document-section:not(.chat-expanded) .url-highlights-view .highlights-cards-grid,
+  .document-section:not(.chat-expanded) .document-highlights-view .highlights-cards-grid {
     grid-template-columns: repeat(5, 1fr);
   }
 }
@@ -4461,8 +4495,13 @@
   background-color: var(--color-background-secondary);
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
-  width: 80vw;
+  width: calc(90vw - var(--chat-width-vw, 0vw));
   align-self: center;
+}
+
+/* When chat is collapsed, use full 80vw width */
+.document-section:not(.chat-expanded) .written-documents-view {
+  width: 80vw;
 }
 
 .written-documents-view::-webkit-scrollbar {
@@ -5277,13 +5316,20 @@
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  width: 100%;
+  width: calc(100% - var(--chat-width-vw, 0vw));
   position: fixed;
   top: 0;
   right: 0;
+  margin-right: var(--chat-width-vw, 0vw);
   padding: 24px 24px 16px 24px;
   background-color: var(--color-background-secondary);
   z-index: 10;
+}
+
+/* When chat is collapsed, use full width and no margin */
+.highlights-upload-section.chat-collapsed {
+  width: 100%;
+  margin-right: 0;
 }
 
 /* Content section - Sources title, search, and table */
@@ -5291,19 +5337,19 @@
   display: flex;
   flex-direction: column;
   gap: 64px;
-  width: 80vw;
+  width: calc(90vw - var(--chat-width-vw, 0vw));
   align-items: center;
-  padding-top: 50vh;
-  margin-top: 60px; /* Space for fixed upload section */
+  padding-top: 24vh;
+  padding-bottom: 40px;
+  position: relative;
 }
 
 /* When chat is collapsed, center content vertically and horizontally with 80vw width */
 .highlights-content-section.chat-collapsed {
   width: 80vw;
   flex: 1;
-  justify-content: center;
+  justify-content: flex-start;
   align-self: center;
-  margin-top: 60px; /* Space for fixed upload section */
 }
 
 .highlights-title-search {
@@ -5312,18 +5358,12 @@
   align-items: center;
   gap: 16px;
   width: 100%;
-  padding-top: 16vh;
+  top: 0;
+  background-color: var(--color-background-secondary);
+  padding-bottom: 16px;
+  flex-shrink: 0;
 }
 
-/* Remove top padding when chat is collapsed to allow proper centering */
-.highlights-content-section.chat-collapsed .highlights-title-search {
-  padding-top: 0;
-}
-
-/* Remove top padding when chat is collapsed to allow proper centering */
-.highlights-content-section.chat-collapsed .highlights-title-search {
-  padding-top: 0;
-}
 
 .highlights-title {
   font-family: 'DM Sans', sans-serif;
@@ -5417,6 +5457,7 @@
   padding: 0;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+  flex-shrink: 0;
 }
 
 .highlights-table-container::-webkit-scrollbar {
@@ -5446,6 +5487,13 @@
   border: 1px solid #e2dfdc;
   border-radius: 8px;
   overflow: hidden;
+}
+
+/* Make table header sticky */
+.highlights-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 15;
 }
 
 /* Header Row */

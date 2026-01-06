@@ -399,9 +399,10 @@ const Workspace = () => {
         <div className="main-content" ref={mainContentRef}>
           {/* Document section - width adjusts based on chat state and view context */}
           <div 
-            className={`document-section ${isDocumentEditView ? 'document-edit-view' : 'list-view'}`}
+            className={`document-section ${isDocumentEditView ? 'document-edit-view' : 'list-view'} ${!isChatCollapsed ? 'chat-expanded' : ''}`}
             style={{ 
-              width: isChatCollapsed ? '100%' : `${100 - chatWidth}%`
+              width: isChatCollapsed ? '100%' : `${100 - chatWidth}%`,
+              '--chat-width-vw': isChatCollapsed ? '0vw' : `${chatWidth}vw`
             }}
           >
             <DocumentPanel 
