@@ -267,6 +267,10 @@ export const highlightsAPI = {
       }
     });
   },
+  // Get preview image for a web highlight
+  getHighlightPreview: (highlightId, projectId, sourceUrl) => {
+    return api.get(`/api/highlights/preview/${highlightId}?project_id=${projectId}&source_url=${encodeURIComponent(sourceUrl)}`);
+  },
 };
 
 // Highlight Documents API (PDF, JPG, PNG)

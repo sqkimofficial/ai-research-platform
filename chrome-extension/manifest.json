@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Research Platform Highlights",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Save text highlights from any webpage to your AI Research Platform project",
   "permissions": [
     "storage",
@@ -11,6 +11,7 @@
     "identity.email"
   ],
   "host_permissions": [
+    "<all_urls>",
     "http://localhost:5001/*",
     "http://127.0.0.1:5001/*",
     "https://dev-e0a45vyrmttly5df.us.auth0.com/*"

@@ -657,10 +657,20 @@ class HighlightModel:
     """Model for managing web highlights from Chrome extension"""
     
     @staticmethod
-    def save_highlight(user_id, project_id, source_url, page_title, highlight_text, note=None, tags=None):
+    def save_highlight(user_id, project_id, source_url, page_title, highlight_text, note=None, tags=None, preview_image=None):
         """
         Save a highlight. If document for this URL already exists, append to highlights array.
         Otherwise create new document.
+        
+        Args:
+            user_id: User ID
+            project_id: Project ID
+            source_url: URL of the page
+            page_title: Title of the page
+            highlight_text: The highlighted text
+            note: Optional note
+            tags: Optional list of tags
+            preview_image: Optional base64 encoded JPEG preview (1:2 aspect ratio, typically 1200x600)
         
         Returns: highlight_id
         """
@@ -672,7 +682,8 @@ class HighlightModel:
             'text': highlight_text,
             'timestamp': datetime.utcnow(),
             'note': note,
-            'tags': tags or []
+            'tags': tags or [],
+            'preview_image': preview_image  # Base64 encoded JPEG (1:2 aspect ratio, typically 1200x600)
         }
         
         # Check if document exists for this user+project+url combination

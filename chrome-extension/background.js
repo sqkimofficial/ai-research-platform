@@ -103,7 +103,9 @@ async function saveHighlightToAPI(highlightData, config) {
       page_title: highlightData.page_title,
       text: highlightData.text,
       note: highlightData.note || null,
-      tags: highlightData.tags || []
+      tags: highlightData.tags || [],
+      // NEW: Include preview data for screenshot cropping on backend
+      preview_data: highlightData.preview_data || null
     })
   });
   
@@ -164,7 +166,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   
   if (message.action === 'saveHighlight') {
-    handleSaveHighlight(message.data)
+    // Pass sender.tab.id for screenshot capture
+    const tabId = sender.tab ? sender.tab.id : null;
+    handleSaveHighlight(message.data, tabId)
       .then(sendResponse)
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true; // Keep channel open for async response
@@ -198,8 +202,66 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Capture and crop screenshot centered on selection
+async function captureHighlightPreview(tabId, selectionRect) {
+  if (!selectionRect) {
+    console.log('No selection rect provided, skipping screenshot');
+    return null;
+  }
+  
+  try {
+    console.log('Attempting to capture screenshot for tab:', tabId);
+    console.log('Selection rect:', selectionRect);
+    console.log('Viewport dimensions:', selectionRect.viewport_width, 'x', selectionRect.viewport_height);
+    
+    // Capture visible tab as PNG
+    // Note: This requires <all_urls> host permission or activeTab permission
+    // captureVisibleTab captures the full visible viewport of the active tab
+    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+    
+    if (!dataUrl) {
+      console.error('captureVisibleTab returned empty result');
+      return null;
+    }
+    
+    // Decode to get image dimensions for verification
+    try {
+      const base64Data = dataUrl.split(',')[1];
+      const imgBytes = atob(base64Data);
+      // PNG header is 8 bytes, then IHDR chunk with width/height (4 bytes each, big-endian)
+      // For quick check, we can decode a small portion
+      console.log('Screenshot captured successfully, data URL length:', dataUrl.length);
+      console.log('Base64 data length:', base64Data.length);
+    } catch (e) {
+      console.log('Could not decode screenshot dimensions (non-critical):', e);
+    }
+    
+    // Extract base64 from data URL
+    const base64Data = dataUrl.split(',')[1];
+    
+    if (!base64Data) {
+      console.error('Failed to extract base64 data from screenshot');
+      return null;
+    }
+    
+    // Return both the screenshot and selection info for backend cropping
+    // The backend will verify dimensions match viewport
+    return {
+      screenshot: base64Data,
+      selection_rect: selectionRect
+    };
+  } catch (error) {
+    console.error('Failed to capture screenshot:', error.message || error);
+    // Common errors:
+    // - "Cannot access contents of url" - missing host permission
+    // - "No active tab" - tab focus issue
+    // - "Cannot capture a protected page" - chrome:// pages
+    return null;
+  }
+}
+
 // Handle save highlight request
-async function handleSaveHighlight(highlightData) {
+async function handleSaveHighlight(highlightData, senderTabId) {
   const config = await getConfig();
   
   // Check if configured
@@ -217,8 +279,25 @@ async function handleSaveHighlight(highlightData) {
     };
   }
   
+  // Capture screenshot preview
+  let previewData = null;
+  if (highlightData.selection_rect) {
+    try {
+      previewData = await captureHighlightPreview(senderTabId, highlightData.selection_rect);
+    } catch (error) {
+      console.error('Failed to capture preview:', error);
+      // Continue without preview - it's optional
+    }
+  }
+  
+  // Add preview data to highlight data
+  const dataWithPreview = {
+    ...highlightData,
+    preview_data: previewData
+  };
+  
   try {
-    const response = await saveHighlightToAPI(highlightData, config);
+    const response = await saveHighlightToAPI(dataWithPreview, config);
     return {
       success: true,
       highlight_id: response.highlight_id,
@@ -229,7 +308,7 @@ async function handleSaveHighlight(highlightData) {
     
     // Queue for later if network error
     if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-      await queueHighlight(highlightData);
+      await queueHighlight(dataWithPreview);
       return {
         success: false,
         queued: true,

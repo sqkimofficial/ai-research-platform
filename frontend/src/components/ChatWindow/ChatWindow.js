@@ -433,12 +433,13 @@ const ChatWindow = ({
     const fetchPreview = async () => {
       if (!showMentionDropdown) {
         setPreviewImage(null);
+        setPreviewLoading(false);
         return;
       }
       
       const selectedItem = mentionItems[mentionSelectedIndex];
       
-      // Only fetch preview for PDF highlights (they have preview images)
+      // Fetch preview for PDF highlights (PDFs always have previews)
       if (selectedItem?.type === 'highlight' && selectedItem?.sourceType === 'pdf' && selectedItem?.pdfId) {
         setPreviewLoading(true);
         try {
@@ -452,17 +453,33 @@ const ChatWindow = ({
             setPreviewImage(null);
           }
         } catch (error) {
-          console.error('Failed to fetch highlight preview:', error);
+          console.error('Failed to fetch PDF highlight preview:', error);
           setPreviewImage(null);
         }
         setPreviewLoading(false);
+      } 
+      // Fetch preview for web highlights (only if preview_image exists in data)
+      else if (selectedItem?.type === 'highlight' && selectedItem?.sourceType === 'web' && selectedItem?.sourceUrl && selectedProjectId) {
+        // Check if this highlight has a preview_image field (new highlights will have it)
+        // If not, don't show loading state - just skip preview
+        if (selectedItem.data?.preview_image) {
+          // Preview is already in the data, use it directly
+          setPreviewImage(selectedItem.data.preview_image);
+          setPreviewLoading(false);
+        } else {
+          // No preview available for this web highlight (old highlight)
+          // Don't show loading, don't try to fetch
+          setPreviewImage(null);
+          setPreviewLoading(false);
+        }
       } else {
         setPreviewImage(null);
+        setPreviewLoading(false);
       }
     };
     
     fetchPreview();
-  }, [mentionSelectedIndex, mentionItems, showMentionDropdown]);
+  }, [mentionSelectedIndex, mentionItems, showMentionDropdown, selectedProjectId]);
 
   // Close mention dropdown when clicking outside
   useEffect(() => {
@@ -1170,7 +1187,7 @@ const ChatWindow = ({
                           </div>
                         ) : (
                           <img 
-                            src={`data:image/png;base64,${previewImage}`} 
+                            src={`data:image/jpeg;base64,${previewImage}`} 
                             alt="Highlight context preview" 
                           />
                         )}

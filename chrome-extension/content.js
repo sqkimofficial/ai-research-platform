@@ -190,25 +190,55 @@ async function handleSaveHighlight(e) {
   e.preventDefault();
   e.stopPropagation();
   
+  console.log('Save button clicked');
+  
+  // FIRST: Capture selection rect BEFORE anything else (clicking might clear selection)
+  const selection = window.getSelection();
+  let selectionRect = null;
+  
+  if (selection.rangeCount > 0) {
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    
+    selectionRect = {
+      x: rect.left + window.scrollX,
+      y: rect.top + window.scrollY,
+      width: rect.width,
+      height: rect.height,
+      viewport_width: window.innerWidth,
+      viewport_height: window.innerHeight,
+      scroll_x: window.scrollX,
+      scroll_y: window.scrollY
+    };
+    console.log('Captured selection rect:', selectionRect);
+  } else {
+    console.log('No selection range available');
+  }
+  
+  // Store references before hiding
+  const noteTextarea = highlightPopup ? highlightPopup.querySelector('#highlight-note') : null;
+  const note = noteTextarea ? noteTextarea.value.trim() : '';
+  
+  // Validate text
   if (!selectedText) {
     showNotification('No text selected', 'error');
     return;
   }
   
-  // Get the note
-  const noteTextarea = highlightPopup.querySelector('#highlight-note');
-  const note = noteTextarea.value.trim();
+  // NOW hide popup (after capturing selection rect)
+  if (highlightPopup) {
+    console.log('Hiding popup now');
+    highlightPopup.style.display = 'none';
+    highlightPopup.classList.remove('visible');
+  }
   
-  // Show loading state
-  const saveBtn = highlightPopup.querySelector('.btn-save');
-  const originalBtnContent = saveBtn.innerHTML;
-  saveBtn.disabled = true;
-  saveBtn.innerHTML = `
-    <svg class="spinner" width="14" height="14" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="30 70"/>
-    </svg>
-    Saving...
-  `;
+  // Force browser to repaint by waiting for next animation frame
+  // This ensures the popup removal is rendered before screenshot
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  
+  // Additional small delay to ensure screenshot captures clean page
+  await new Promise(resolve => setTimeout(resolve, 100));
   
   // Get page info
   const highlightData = {
@@ -216,10 +246,11 @@ async function handleSaveHighlight(e) {
     source_url: window.location.href,
     page_title: document.title,
     note: note || null,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    selection_rect: selectionRect
   };
   
-  // Send to background script
+  // Send to background script (which will capture screenshot - popup is now fully gone)
   try {
     const response = await chrome.runtime.sendMessage({
       action: 'saveHighlight',
@@ -227,21 +258,46 @@ async function handleSaveHighlight(e) {
     });
     
     if (response.success) {
+      // Success - popup stays hidden
       showNotification('Highlight saved!', 'success');
       // Visual feedback - briefly highlight the selected text
       highlightSelectedText();
-      hidePopup();
+      selectedText = ''; // Clear selected text
     } else {
+      // Error - show popup again with error message
       showNotification(response.error || 'Failed to save highlight', 'error');
+      // Restore popup
+      if (highlightPopup && noteTextarea) {
+        highlightPopup.style.display = 'block';
+        setTimeout(() => highlightPopup.classList.add('visible'), 10);
+        // Restore note value
+        noteTextarea.value = note;
+        // Focus textarea
+        setTimeout(() => noteTextarea.focus(), 100);
+      }
     }
   } catch (error) {
     console.error('Error saving highlight:', error);
-    showNotification('Failed to save highlight', 'error');
+    
+    // Error - show popup again
+    if (highlightPopup && noteTextarea) {
+      highlightPopup.style.display = 'block';
+      setTimeout(() => highlightPopup.classList.add('visible'), 10);
+      // Restore note value
+      noteTextarea.value = note;
+      // Focus textarea
+      setTimeout(() => noteTextarea.focus(), 100);
+    }
+    
+    // Check for extension context invalidated error
+    if (error.message && error.message.includes('Extension context invalidated')) {
+      showNotification('Extension was updated. Please refresh this page.', 'error');
+    } else if (error.message && error.message.includes('Receiving end does not exist')) {
+      showNotification('Extension not ready. Please refresh this page.', 'error');
+    } else {
+      showNotification('Failed to save highlight. Try refreshing the page.', 'error');
+    }
   }
-  
-  // Reset button
-  saveBtn.disabled = false;
-  saveBtn.innerHTML = originalBtnContent;
 }
 
 // Show notification toast

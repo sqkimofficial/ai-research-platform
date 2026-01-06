@@ -1,8 +1,133 @@
 from flask import Blueprint, request, jsonify
 from models.database import HighlightModel, ProjectModel
 from utils.auth import get_user_id_from_token, log_auth_info
+import base64
+import io
+
+# Try to import PIL for image processing
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    print("Warning: Pillow not installed. Web highlight previews will not be generated.")
 
 highlight_bp = Blueprint('highlight', __name__)
+
+
+def generate_cropped_preview(preview_data, scale_factor=0.3):
+    """
+    Generate a cropped preview image with 1:2 aspect ratio (height:width), centered on selection.
+    
+    Process:
+    1. Scale down screenshot by fixed factor (default 0.2 = 20% of original size)
+    2. Crop with 1:2 aspect ratio (height:width): full width, height = width/2, centered on selection
+    3. No horizontal cropping - preserves full viewport width
+    
+    Args:
+        preview_data: dict with 'screenshot' (base64) and 'selection_rect'
+        scale_factor: Scaling factor (default 0.2 = 20% of original size)
+    
+    Returns:
+        Base64 encoded JPEG string, or None if processing fails
+    """
+    if not PIL_AVAILABLE:
+        return None
+    
+    if not preview_data or not preview_data.get('screenshot'):
+        return None
+    
+    try:
+        # Decode the screenshot
+        screenshot_base64 = preview_data['screenshot']
+        img_bytes = base64.b64decode(screenshot_base64)
+        img = Image.open(io.BytesIO(img_bytes))
+        original_width, original_height = img.size
+        
+        selection_rect = preview_data.get('selection_rect', {})
+        viewport_width = selection_rect.get('viewport_width', original_width)
+        viewport_height = selection_rect.get('viewport_height', original_height)
+        
+        print(f"Original screenshot: {original_width}x{original_height}")
+        print(f"Viewport: {viewport_width}x{viewport_height}")
+        
+        # Calculate device pixel ratio
+        device_pixel_ratio = original_width / viewport_width if viewport_width > 0 else 1
+        print(f"Device pixel ratio: {device_pixel_ratio}")
+        
+        # STEP 1: Scale down by fixed factor (0.2 = 20% of original size)
+        scaled_width = int(original_width * scale_factor)
+        scaled_height = int(original_height * scale_factor)
+        img = img.resize((scaled_width, scaled_height), Image.LANCZOS)
+        print(f"Scaled screenshot to: {scaled_width}x{scaled_height} (scale_factor: {scale_factor:.3f}, {scale_factor*100:.1f}% of original)")
+        
+        # STEP 2: Calculate crop with 1:2 aspect ratio (height:width)
+        # Get selection position in viewport coordinates
+        sel_x = selection_rect.get('x', 0)
+        sel_y = selection_rect.get('y', 0)
+        sel_width = selection_rect.get('width', 100)
+        sel_height = selection_rect.get('height', 20)
+        scroll_x = selection_rect.get('scroll_x', 0)
+        scroll_y = selection_rect.get('scroll_y', 0)
+        
+        # Selection center relative to viewport (viewport coordinates)
+        sel_viewport_x = sel_x - scroll_x
+        sel_viewport_y = sel_y - scroll_y
+        center_y_viewport = sel_viewport_y + sel_height / 2
+        
+        # Convert viewport coordinates to scaled screenshot coordinates
+        # First convert viewport coords to original screenshot coords, then apply scale
+        center_y_original = center_y_viewport * device_pixel_ratio
+        center_y_scaled = center_y_original * scale_factor
+        
+        # Crop dimensions: 1:2 aspect ratio (height:width)
+        # Height = width / 2
+        crop_width = scaled_width  # Full width
+        crop_height = int(scaled_width / 2)  # Height is half of width (1:2 ratio)
+        
+        # Safety check: if scaled height is less than crop height, use scaled height
+        if crop_height > scaled_height:
+            crop_height = scaled_height
+            print(f"WARNING: Crop height {crop_height} exceeds scaled height {scaled_height}, using scaled height")
+        
+        # Crop area: full width, height = width/2, centered vertically on selection
+        left = 0
+        top = max(0, min(scaled_height - crop_height, center_y_scaled - crop_height // 2))
+        right = scaled_width  # Full width
+        bottom = min(scaled_height, top + crop_height)
+        
+        print(f"Crop: left={left}, top={top}, right={right}, bottom={bottom} (width={right-left}, height={bottom-top}, aspect_ratio={((right-left)/(bottom-top)):.2f}:1)")
+        
+        # STEP 3: Crop the image (1:2 aspect ratio)
+        cropped = img.crop((int(left), int(top), int(right), int(bottom)))
+        final_width, final_height = cropped.size
+        
+        print(f"Final cropped image: {final_width}x{final_height}")
+        
+        # Convert to JPEG and base64 (JPEG is much smaller than PNG for screenshots)
+        buffer = io.BytesIO()
+        # Convert RGBA to RGB if needed (JPEG doesn't support transparency)
+        if cropped.mode in ('RGBA', 'LA', 'P'):
+            # Create a white background for transparency
+            rgb_img = Image.new('RGB', cropped.size, (255, 255, 255))
+            if cropped.mode == 'P':
+                cropped = cropped.convert('RGBA')
+            rgb_img.paste(cropped, mask=cropped.split()[-1] if cropped.mode in ('RGBA', 'LA') else None)
+            cropped = rgb_img
+        
+        # Save as JPEG with quality 85 (good balance between quality and file size)
+        cropped.save(buffer, format='JPEG', quality=85, optimize=True)
+        result_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        
+        print(f"Final preview size: {len(result_base64)} bytes (base64, JPEG format)")
+        
+        return result_base64
+        
+    except Exception as e:
+        print(f"Error generating cropped preview: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 @highlight_bp.route('', methods=['POST'])
@@ -16,7 +141,8 @@ def save_highlight():
         page_title: string (required),
         text: string (required),
         note: string (optional),
-        tags: [string] (optional)
+        tags: [string] (optional),
+        preview_data: { screenshot: base64, selection_rect: {...} } (optional)
     }
     
     Returns: { success: true, highlight_id: string, message: string }
@@ -41,6 +167,7 @@ def save_highlight():
     text = data['text']
     note = data.get('note')
     tags = data.get('tags', [])
+    preview_data = data.get('preview_data')
     
     # Log auth info for Chrome extension
     log_auth_info(project_id)
@@ -50,6 +177,19 @@ def save_highlight():
     if not project or project.get('user_id') != user_id:
         return jsonify({'error': 'Project not found or access denied'}), 404
     
+    # Process preview data to generate cropped preview image
+    preview_image = None
+    if preview_data:
+        print(f"[HIGHLIGHT] Received preview_data with keys: {preview_data.keys() if isinstance(preview_data, dict) else 'not a dict'}")
+        if isinstance(preview_data, dict):
+            screenshot_len = len(preview_data.get('screenshot', '')) if preview_data.get('screenshot') else 0
+            print(f"[HIGHLIGHT] Screenshot base64 length: {screenshot_len}")
+            print(f"[HIGHLIGHT] Selection rect: {preview_data.get('selection_rect')}")
+        preview_image = generate_cropped_preview(preview_data)
+        print(f"[HIGHLIGHT] Generated preview_image: {'Yes, length=' + str(len(preview_image)) if preview_image else 'None'}")
+    else:
+        print("[HIGHLIGHT] No preview_data received")
+    
     # Save highlight
     highlight_id = HighlightModel.save_highlight(
         user_id=user_id,
@@ -58,10 +198,12 @@ def save_highlight():
         page_title=page_title,
         highlight_text=text,
         note=note,
-        tags=tags
+        tags=tags,
+        preview_image=preview_image
     )
     
-    print(f"Highlight saved: {highlight_id} for project {project_id}")
+    print(f"Highlight saved: {highlight_id} for project {project_id}" + 
+          (f" (with preview)" if preview_image else " (no preview)"))
     
     return jsonify({
         'success': True,
@@ -283,3 +425,45 @@ def unarchive_highlight():
         }), 200
     else:
         return jsonify({'error': 'Highlight not found'}), 404
+
+
+@highlight_bp.route('/preview/<highlight_id>', methods=['GET'])
+def get_highlight_preview(highlight_id):
+    """
+    Return preview image for a specific web highlight.
+    
+    Query params:
+        project_id: string (required)
+        source_url: string (required)
+    
+    Returns: { preview_image: base64_string }
+    """
+    user_id = get_user_id_from_token()
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    project_id = request.args.get('project_id')
+    source_url = request.args.get('source_url')
+    
+    if not project_id or not source_url:
+        return jsonify({'error': 'project_id and source_url required'}), 400
+    
+    # Validate project belongs to user
+    project = ProjectModel.get_project(project_id)
+    if not project or project.get('user_id') != user_id:
+        return jsonify({'error': 'Project not found or access denied'}), 404
+    
+    # Get highlights for this URL
+    highlight_doc = HighlightModel.get_highlights_by_url(user_id, project_id, source_url)
+    if not highlight_doc:
+        return jsonify({'error': 'Not found'}), 404
+    
+    # Find the specific highlight
+    for h in highlight_doc.get('highlights', []):
+        if h.get('highlight_id') == highlight_id:
+            preview = h.get('preview_image')
+            if preview:
+                return jsonify({'preview_image': preview})
+            return jsonify({'error': 'No preview available'}), 404
+    
+    return jsonify({'error': 'Highlight not found'}), 404
