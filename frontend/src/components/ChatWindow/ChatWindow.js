@@ -450,41 +450,58 @@ const ChatWindow = ({
       }
       
       const selectedItem = mentionItems[mentionSelectedIndex];
+      console.log('[PREVIEW] Selected item:', selectedItem?.type, selectedItem?.sourceType, selectedItem?.data?.highlight_id);
       
       // Fetch preview for PDF highlights (PDFs always have previews)
       if (selectedItem?.type === 'highlight' && selectedItem?.sourceType === 'pdf' && selectedItem?.pdfId) {
+        console.log('[PREVIEW] Fetching PDF preview for:', selectedItem.pdfId, selectedItem.data.highlight_id);
         setPreviewLoading(true);
         try {
           const response = await pdfAPI.getHighlightPreview(
             selectedItem.pdfId, 
             selectedItem.data.highlight_id
           );
+          console.log('[PREVIEW] PDF preview response:', response.data);
           if (response.data?.preview_image) {
             setPreviewImage(response.data.preview_image);
           } else {
-            setPreviewImage(null);
+            console.log('[PREVIEW] PDF preview: No preview_image in response');
+            setPreviewImage('placeholder');
           }
         } catch (error) {
-          console.error('Failed to fetch PDF highlight preview:', error);
-          setPreviewImage(null);
+          console.error('[PREVIEW] Failed to fetch PDF highlight preview:', error);
+          setPreviewImage('placeholder');
         }
         setPreviewLoading(false);
       } 
-      // Fetch preview for web highlights (only if preview_image exists in data)
+      // Fetch preview for web highlights - only use preview_image_url (S3)
       else if (selectedItem?.type === 'highlight' && selectedItem?.sourceType === 'web' && selectedItem?.sourceUrl && selectedProjectId) {
-        // Check if this highlight has a preview_image field (new highlights will have it)
-        // If not, don't show loading state - just skip preview
-        if (selectedItem.data?.preview_image) {
-          // Preview is already in the data, use it directly
-          setPreviewImage(selectedItem.data.preview_image);
+        console.log('[PREVIEW] Web highlight - checking for preview_image_url');
+        console.log('[PREVIEW] Highlight data keys:', selectedItem.data ? Object.keys(selectedItem.data) : 'no data');
+        console.log('[PREVIEW] preview_image_url value:', selectedItem.data?.preview_image_url);
+        
+        // Check if this highlight has a preview_image_url field (S3 URL)
+        if (selectedItem.data?.preview_image_url) {
+          // Preview URL is already in the data, use it directly
+          console.log('[PREVIEW] Found preview_image_url:', selectedItem.data.preview_image_url);
+          setPreviewImage(selectedItem.data.preview_image_url);
           setPreviewLoading(false);
         } else {
-          // No preview available for this web highlight (old highlight)
-          // Don't show loading, don't try to fetch
-          setPreviewImage(null);
+          // No preview available for this web highlight - show placeholder
+          console.log('[PREVIEW] No preview_image_url found - showing placeholder');
+          setPreviewImage('placeholder');
           setPreviewLoading(false);
         }
+      } else if (selectedItem?.type === 'highlight') {
+        console.log('[PREVIEW] Highlight but missing required data:', {
+          sourceType: selectedItem?.sourceType,
+          sourceUrl: selectedItem?.sourceUrl,
+          selectedProjectId
+        });
+        setPreviewImage('placeholder');
+        setPreviewLoading(false);
       } else {
+        console.log('[PREVIEW] Not a highlight item, no preview needed');
         setPreviewImage(null);
         setPreviewLoading(false);
       }
@@ -1330,9 +1347,14 @@ const ChatWindow = ({
                             <div className="preview-loading-spinner"></div>
                             <span>Loading preview...</span>
                           </div>
+                        ) : previewImage === 'placeholder' ? (
+                          <div className="preview-placeholder">
+                            <div className="preview-placeholder-icon">🖼️</div>
+                            <span>No preview available</span>
+                          </div>
                         ) : (
                           <img 
-                            src={`data:image/jpeg;base64,${previewImage}`} 
+                            src={previewImage.startsWith('http') ? previewImage : `data:image/jpeg;base64,${previewImage}`} 
                             alt="Highlight context preview" 
                           />
                         )}

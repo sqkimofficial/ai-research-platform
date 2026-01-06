@@ -2362,7 +2362,7 @@
   border-radius: 20px;
   padding: 8px;
   box-shadow: 4px 4px 8px rgba(0, 0, 0, 0.08);
-  overflow: hidden;
+  overflow: visible;
   z-index: 1001;
   display: flex;
   align-items: flex-start;
@@ -2405,6 +2405,26 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Preview placeholder when no image available */
+.preview-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  font-family: 'DM Sans', sans-serif;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 8px;
+}
+
+.preview-placeholder-icon {
+  font-size: 32px;
+  opacity: 0.6;
 }
 
 /* Responsive: hide preview on small screens */

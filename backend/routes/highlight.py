@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from models.database import HighlightModel, ProjectModel
 from utils.auth import get_user_id_from_token, log_auth_info
+from services.s3_service import S3Service
 import base64
 import io
 
@@ -20,16 +21,16 @@ def generate_cropped_preview(preview_data, scale_factor=0.3):
     Generate a cropped preview image with 1:2 aspect ratio (height:width), centered on selection.
     
     Process:
-    1. Scale down screenshot by fixed factor (default 0.2 = 20% of original size)
+    1. Scale down screenshot by fixed factor (default 0.3 = 30% of original size)
     2. Crop with 1:2 aspect ratio (height:width): full width, height = width/2, centered on selection
     3. No horizontal cropping - preserves full viewport width
     
     Args:
         preview_data: dict with 'screenshot' (base64) and 'selection_rect'
-        scale_factor: Scaling factor (default 0.2 = 20% of original size)
+        scale_factor: Scaling factor (default 0.3 = 30% of original size)
     
     Returns:
-        Base64 encoded JPEG string, or None if processing fails
+        bytes: JPEG image bytes, or None if processing fails
     """
     if not PIL_AVAILABLE:
         return None
@@ -55,7 +56,7 @@ def generate_cropped_preview(preview_data, scale_factor=0.3):
         device_pixel_ratio = original_width / viewport_width if viewport_width > 0 else 1
         print(f"Device pixel ratio: {device_pixel_ratio}")
         
-        # STEP 1: Scale down by fixed factor (0.2 = 20% of original size)
+        # STEP 1: Scale down by fixed factor (0.3 = 30% of original size)
         scaled_width = int(original_width * scale_factor)
         scaled_height = int(original_height * scale_factor)
         img = img.resize((scaled_width, scaled_height), Image.LANCZOS)
@@ -104,7 +105,7 @@ def generate_cropped_preview(preview_data, scale_factor=0.3):
         
         print(f"Final cropped image: {final_width}x{final_height}")
         
-        # Convert to JPEG and base64 (JPEG is much smaller than PNG for screenshots)
+        # Convert to JPEG bytes (JPEG is much smaller than PNG for screenshots)
         buffer = io.BytesIO()
         # Convert RGBA to RGB if needed (JPEG doesn't support transparency)
         if cropped.mode in ('RGBA', 'LA', 'P'):
@@ -117,11 +118,11 @@ def generate_cropped_preview(preview_data, scale_factor=0.3):
         
         # Save as JPEG with quality 85 (good balance between quality and file size)
         cropped.save(buffer, format='JPEG', quality=85, optimize=True)
-        result_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        image_bytes = buffer.getvalue()
         
-        print(f"Final preview size: {len(result_base64)} bytes (base64, JPEG format)")
+        print(f"Final preview size: {len(image_bytes)} bytes (JPEG format)")
         
-        return result_base64
+        return image_bytes
         
     except Exception as e:
         print(f"Error generating cropped preview: {e}")
@@ -177,21 +178,45 @@ def save_highlight():
     if not project or project.get('user_id') != user_id:
         return jsonify({'error': 'Project not found or access denied'}), 404
     
+    # Generate a highlight_id upfront (needed for S3 key)
+    import uuid
+    highlight_id = str(uuid.uuid4())
+    
     # Process preview data to generate cropped preview image
-    preview_image = None
+    preview_image_url = None
     if preview_data:
         print(f"[HIGHLIGHT] Received preview_data with keys: {preview_data.keys() if isinstance(preview_data, dict) else 'not a dict'}")
         if isinstance(preview_data, dict):
             screenshot_len = len(preview_data.get('screenshot', '')) if preview_data.get('screenshot') else 0
             print(f"[HIGHLIGHT] Screenshot base64 length: {screenshot_len}")
             print(f"[HIGHLIGHT] Selection rect: {preview_data.get('selection_rect')}")
-        preview_image = generate_cropped_preview(preview_data)
-        print(f"[HIGHLIGHT] Generated preview_image: {'Yes, length=' + str(len(preview_image)) if preview_image else 'None'}")
+        
+        # Generate cropped preview image (returns bytes)
+        image_bytes = generate_cropped_preview(preview_data)
+        
+        if image_bytes:
+            print(f"[HIGHLIGHT] Generated preview image: {len(image_bytes)} bytes")
+            
+            # Upload to S3 if available
+            if S3Service.is_available():
+                preview_image_url = S3Service.upload_highlight_image(
+                    image_bytes=image_bytes,
+                    user_id=user_id,
+                    highlight_id=highlight_id
+                )
+                if preview_image_url:
+                    print(f"[HIGHLIGHT] Uploaded to S3: {preview_image_url}")
+                else:
+                    print("[HIGHLIGHT] S3 upload failed, preview will not be saved")
+            else:
+                print("[HIGHLIGHT] S3 not configured, preview will not be saved")
+        else:
+            print("[HIGHLIGHT] Failed to generate preview image")
     else:
         print("[HIGHLIGHT] No preview_data received")
     
-    # Save highlight
-    highlight_id = HighlightModel.save_highlight(
+    # Save highlight with S3 URL
+    saved_highlight_id = HighlightModel.save_highlight(
         user_id=user_id,
         project_id=project_id,
         source_url=source_url,
@@ -199,15 +224,16 @@ def save_highlight():
         highlight_text=text,
         note=note,
         tags=tags,
-        preview_image=preview_image
+        preview_image_url=preview_image_url,
+        highlight_id=highlight_id  # Pass the pre-generated ID
     )
     
-    print(f"Highlight saved: {highlight_id} for project {project_id}" + 
-          (f" (with preview)" if preview_image else " (no preview)"))
+    print(f"Highlight saved: {saved_highlight_id} for project {project_id}" + 
+          (f" (with S3 preview: {preview_image_url})" if preview_image_url else " (no preview)"))
     
     return jsonify({
         'success': True,
-        'highlight_id': highlight_id,
+        'highlight_id': saved_highlight_id,
         'message': 'Highlight saved successfully'
     }), 201
 
@@ -430,40 +456,58 @@ def unarchive_highlight():
 @highlight_bp.route('/preview/<highlight_id>', methods=['GET'])
 def get_highlight_preview(highlight_id):
     """
-    Return preview image for a specific web highlight.
+    Return preview image URL for a specific web highlight.
     
     Query params:
         project_id: string (required)
         source_url: string (required)
     
-    Returns: { preview_image: base64_string }
+    Returns: { preview_image_url: string } or { error: 'No preview available' }
     """
+    print(f"[PREVIEW] Fetching preview for highlight_id: {highlight_id}")
+    
     user_id = get_user_id_from_token()
     if not user_id:
+        print(f"[PREVIEW] ERROR: Unauthorized - no user_id from token")
         return jsonify({'error': 'Unauthorized'}), 401
+    
+    print(f"[PREVIEW] User ID: {user_id}")
     
     project_id = request.args.get('project_id')
     source_url = request.args.get('source_url')
     
+    print(f"[PREVIEW] Project ID: {project_id}, Source URL: {source_url}")
+    
     if not project_id or not source_url:
+        print(f"[PREVIEW] ERROR: Missing required params - project_id: {project_id}, source_url: {source_url}")
         return jsonify({'error': 'project_id and source_url required'}), 400
     
     # Validate project belongs to user
     project = ProjectModel.get_project(project_id)
     if not project or project.get('user_id') != user_id:
+        print(f"[PREVIEW] ERROR: Project not found or access denied - project exists: {project is not None}")
         return jsonify({'error': 'Project not found or access denied'}), 404
     
     # Get highlights for this URL
     highlight_doc = HighlightModel.get_highlights_by_url(user_id, project_id, source_url)
     if not highlight_doc:
+        print(f"[PREVIEW] ERROR: No highlight document found for URL: {source_url}")
         return jsonify({'error': 'Not found'}), 404
+    
+    print(f"[PREVIEW] Found highlight doc with {len(highlight_doc.get('highlights', []))} highlights")
     
     # Find the specific highlight
     for h in highlight_doc.get('highlights', []):
+        print(f"[PREVIEW] Checking highlight: {h.get('highlight_id')} - has preview_image_url: {h.get('preview_image_url') is not None}")
         if h.get('highlight_id') == highlight_id:
-            preview = h.get('preview_image')
-            if preview:
-                return jsonify({'preview_image': preview})
-            return jsonify({'error': 'No preview available'}), 404
+            # Only return S3 URL - no fallback to base64
+            preview_url = h.get('preview_image_url')
+            if preview_url:
+                print(f"[PREVIEW] SUCCESS: Found preview URL: {preview_url}")
+                return jsonify({'preview_image_url': preview_url})
+            
+            print(f"[PREVIEW] ERROR: Highlight found but no preview_image_url field. Keys in highlight: {list(h.keys())}")
+            return jsonify({'error': 'No preview available', 'reason': 'preview_image_url field is missing or empty'}), 404
     
+    print(f"[PREVIEW] ERROR: Highlight ID {highlight_id} not found in document")
     return jsonify({'error': 'Highlight not found'}), 404

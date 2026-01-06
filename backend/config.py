@@ -1,7 +1,24 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env from the backend directory (where this file is located)
+backend_dir = Path(__file__).parent
+env_path = backend_dir / '.env'
+
+# Try backend/.env first, then project root .env
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"[CONFIG] Loaded .env from: {env_path}")
+else:
+    # Try project root
+    root_env = backend_dir.parent / '.env'
+    if root_env.exists():
+        load_dotenv(root_env)
+        print(f"[CONFIG] Loaded .env from: {root_env}")
+    else:
+        load_dotenv()  # Default behavior
+        print(f"[CONFIG] Using default .env loading (cwd)")
 
 class Config:
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -16,6 +33,21 @@ class Config:
     AUTH0_API_AUDIENCE = os.getenv('AUTH0_API_AUDIENCE', 'https://api.stitch.app')
     AUTH0_ALGORITHMS = ['RS256']
     AUTH0_ISSUER = f'https://{AUTH0_DOMAIN}/'
+    
+    # AWS S3 Configuration for highlight preview images
+    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+    AWS_S3_BUCKET_NAME = os.getenv('AWS_S3_BUCKET_NAME')
+    AWS_S3_REGION = os.getenv('AWS_S3_REGION', 'us-east-1')
+    
+    @staticmethod
+    def is_s3_configured():
+        """Check if AWS S3 is properly configured"""
+        return all([
+            Config.AWS_ACCESS_KEY_ID,
+            Config.AWS_SECRET_ACCESS_KEY,
+            Config.AWS_S3_BUCKET_NAME
+        ])
     
     # Validate required environment variables
     @staticmethod

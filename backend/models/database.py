@@ -657,7 +657,7 @@ class HighlightModel:
     """Model for managing web highlights from Chrome extension"""
     
     @staticmethod
-    def save_highlight(user_id, project_id, source_url, page_title, highlight_text, note=None, tags=None, preview_image=None):
+    def save_highlight(user_id, project_id, source_url, page_title, highlight_text, note=None, tags=None, preview_image_url=None, highlight_id=None):
         """
         Save a highlight. If document for this URL already exists, append to highlights array.
         Otherwise create new document.
@@ -670,12 +670,16 @@ class HighlightModel:
             highlight_text: The highlighted text
             note: Optional note
             tags: Optional list of tags
-            preview_image: Optional base64 encoded JPEG preview (1:2 aspect ratio, typically 1200x600)
+            preview_image_url: Optional S3 URL for the preview image (new highlights use this)
+            highlight_id: Optional pre-generated highlight ID (used when uploading to S3 first)
         
         Returns: highlight_id
         """
         db = Database.get_db()
-        highlight_id = str(uuid.uuid4())
+        
+        # Use provided highlight_id or generate a new one
+        if not highlight_id:
+            highlight_id = str(uuid.uuid4())
         
         highlight_obj = {
             'highlight_id': highlight_id,
@@ -683,7 +687,7 @@ class HighlightModel:
             'timestamp': datetime.utcnow(),
             'note': note,
             'tags': tags or [],
-            'preview_image': preview_image  # Base64 encoded JPEG (1:2 aspect ratio, typically 1200x600)
+            'preview_image_url': preview_image_url  # S3 URL for the preview image
         }
         
         # Check if document exists for this user+project+url combination
