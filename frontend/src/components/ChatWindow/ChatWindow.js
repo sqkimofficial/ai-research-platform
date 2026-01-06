@@ -119,6 +119,12 @@ const ChatWindow = ({
   const [previewImage, setPreviewImage] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   
+  // File attachment state
+  const [pendingFiles, setPendingFiles] = useState([]); // Array of File objects
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const chatFileInputRef = useRef(null);
+  
   const modeMenuRef = useRef(null);
   const commandsMenuRef = useRef(null);
   const sortMenuRef = useRef(null);
@@ -661,6 +667,69 @@ const ChatWindow = ({
     return false;
   }, [showMentionDropdown, mentionItems, mentionSelectedIndex, handleMentionSelect]);
 
+  // File attachment handlers
+  const addValidFiles = useCallback((files) => {
+    const validFiles = files.filter(file => {
+      const ext = file.name.toLowerCase();
+      return ext.endsWith('.pdf') || ext.endsWith('.jpg') || 
+             ext.endsWith('.jpeg') || ext.endsWith('.png');
+    });
+    if (validFiles.length > 0) {
+      setPendingFiles(prev => [...prev, ...validFiles]);
+    }
+  }, []);
+
+  const handleFileSelect = useCallback((e) => {
+    const files = Array.from(e.target.files || []);
+    addValidFiles(files);
+    e.target.value = ''; // Reset input for re-selection
+  }, [addValidFiles]);
+
+  const removePendingFile = useCallback((index) => {
+    setPendingFiles(prev => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // Drag and drop handlers
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only set to false if leaving the container entirely
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setIsDraggingOver(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+    
+    const files = Array.from(e.dataTransfer.files || []);
+    addValidFiles(files);
+  }, [addValidFiles]);
+
+  // Helper to truncate file names
+  const truncateFileName = useCallback((fileName, maxLength = 20) => {
+    if (!fileName) return 'Untitled';
+    if (fileName.length <= maxLength) return fileName;
+    const ext = fileName.lastIndexOf('.');
+    if (ext > 0) {
+      const name = fileName.substring(0, ext);
+      const extension = fileName.substring(ext);
+      const availableLength = maxLength - extension.length - 3; // 3 for "..."
+      if (availableLength > 0) {
+        return name.substring(0, availableLength) + '...' + extension;
+      }
+    }
+    return fileName.substring(0, maxLength - 3) + '...';
+  }, []);
+
   const initializeSession = async () => {
     // If it's a new chat, don't create session yet - wait for first message
     if (isNewChat) {
@@ -775,9 +844,32 @@ const ChatWindow = ({
   const sendMessageToSession = async (targetSessionId, userMessage) => {
     const attachedSectionsToSend = currentAttachedSections;
     const attachedHighlightsToSend = currentAttachedHighlights;
+    const filesToUpload = [...pendingFiles];
+    
+    // Upload any pending files first
+    if (filesToUpload.length > 0 && selectedProjectId) {
+      setUploadingFiles(true);
+      setPendingFiles([]); // Clear immediately for UX
+      try {
+        for (const file of filesToUpload) {
+          await pdfAPI.uploadPDF(selectedProjectId, file);
+        }
+      } catch (err) {
+        console.error('Failed to upload files:', err);
+        // Show error but continue with message
+      } finally {
+        setUploadingFiles(false);
+      }
+    }
     
     // Prepare message content with attached sections and highlights
     let messageContent = userMessage;
+    
+    // Add file info to message context
+    if (filesToUpload.length > 0) {
+      const filesInfo = filesToUpload.map(f => f.name).join(', ');
+      messageContent = `[New sources uploaded: ${filesInfo}]\n\n${messageContent}`;
+    }
     
     // Add attached sections
     if (attachedSectionsToSend.length > 0) {
@@ -1038,7 +1130,32 @@ const ChatWindow = ({
   // Chat input component (reusable)
   const chatInputArea = (
     <div className="chat-input-area">
-        <div className="chat-input-container">
+        <div 
+          className={`chat-input-container ${isDraggingOver ? 'drag-over' : ''}`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {/* Hidden file input */}
+          <input
+            type="file"
+            ref={chatFileInputRef}
+            onChange={handleFileSelect}
+            accept=".pdf,.jpg,.jpeg,.png"
+            multiple
+            style={{ display: 'none' }}
+          />
+          
+          {/* Drag overlay - shown when dragging files over */}
+          {isDraggingOver && (
+            <div className="chat-drag-overlay">
+              <div className="chat-drag-overlay-content">
+                <AttachIcon className="chat-drag-overlay-icon" />
+                <span>Drop PDF or image to attach</span>
+              </div>
+            </div>
+          )}
+          
           {/* Top Section: Document Selector and Bookmark */}
           <div className="chat-input-top-section">
             <div className="document-selector-wrapper" ref={documentDropdownRef}>
@@ -1079,8 +1196,10 @@ const ChatWindow = ({
             <button
               type="button"
               className="attach-button"
-              aria-label="Attach"
-              title="Attach"
+              onClick={() => chatFileInputRef.current?.click()}
+              disabled={uploadingFiles}
+              aria-label="Attach file"
+              title="Attach PDF or image"
             >
               <AttachIcon className="attach-button-icon" />
             </button>
@@ -1088,8 +1207,28 @@ const ChatWindow = ({
 
           {/* Middle Section: Input Area */}
           <div className="chat-input-middle-section">
-          {(currentAttachedSections.length > 0 || currentAttachedHighlights.length > 0) && (
+          {(currentAttachedSections.length > 0 || currentAttachedHighlights.length > 0 || pendingFiles.length > 0) && (
             <div className="attached-items-container">
+              {/* Pending file attachments */}
+              {pendingFiles.length > 0 && (
+                <div className="attached-files-indicator">
+                  {pendingFiles.map((file, idx) => (
+                    <div key={idx} className="attached-file-chip">
+                      {file.name.toLowerCase().endsWith('.pdf') ? 
+                        <PdfIcon className="file-type-icon" /> : 
+                        <img src={highlightsImageIcon} alt="Image" className="file-type-icon" />}
+                      <span className="file-name">{truncateFileName(file.name)}</span>
+                      <button 
+                        className="remove-file-button"
+                        onClick={() => removePendingFile(idx)}
+                        title="Remove file"
+                      >
+                        <DeleteIcon />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               {currentAttachedSections.length > 0 && (
                 <div className="attached-sections-indicator">
                   <span className="attached-icon">📄</span>

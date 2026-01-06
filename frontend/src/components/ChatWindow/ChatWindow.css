@@ -957,6 +957,7 @@
 }
 
 .chat-input-container {
+  position: relative;
   background: var(--color-background-secondary);
   border: 1px solid var(--color-border);
   border-radius: 16px;
@@ -965,6 +966,7 @@
   flex-direction: column;
   gap: 12px;
   overflow: visible; /* Allow dropdown/preview to extend outside */
+  transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
 /* Top Section: Document Selector and Bookmark */
@@ -2299,4 +2301,113 @@
   left: auto;
   z-index: 1000;
   overflow: visible; /* Allow preview to extend outside */
+}
+
+/* ==================== File Attachment Styles ==================== */
+
+/* Drag over state for input container */
+.chat-input-container.drag-over {
+  border-color: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* Drag overlay */
+.chat-drag-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.05);
+  border: 2px dashed rgba(0, 0, 0, 0.3);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.chat-drag-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.chat-drag-overlay-icon {
+  width: 32px;
+  height: 32px;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+/* File attachment chips */
+.attached-files-indicator {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 0 8px 0;
+}
+
+.attached-file-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 6px;
+  background: var(--color-selected, #f5f5f5);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.1));
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.attached-file-chip .file-type-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.attached-file-chip .file-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text, #323232);
+}
+
+.attached-file-chip .remove-file-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+  color: var(--color-icon, rgba(0, 0, 0, 0.5));
+}
+
+.attached-file-chip .remove-file-button:hover {
+  opacity: 1;
+}
+
+.attached-file-chip .remove-file-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Attach button disabled state */
+.chat-input-container .attach-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-input-container .attach-button:disabled:hover {
+  background: transparent;
+}
+
+.chat-input-container .attach-button:disabled .attach-button-icon {
+  color: rgba(0, 0, 0, 0.3);
 }
