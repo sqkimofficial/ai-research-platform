@@ -69,6 +69,7 @@ def save_document():
         patches = data.get('patches', '')  # Patch text from diff-match-patch
         version = data.get('version', 0)  # Expected version for optimistic locking
         title = data.get('title')
+        should_generate_snapshot = data.get('should_generate_snapshot', True)  # Phase 3: Default to True for backward compatibility
         
         if not document_id:
             return jsonify({'error': 'document_id is required'}), 400
@@ -107,15 +108,19 @@ def save_document():
         updated_doc = ResearchDocumentModel.get_document(document_id)
         new_content = updated_doc.get('content', '')
         
-        # Generate snapshot from HTML content (don't fail save if this fails)
-        try:
-            from services.snapshot_service import get_snapshot_service
-            snapshot_service = get_snapshot_service()
-            snapshot = snapshot_service.generate_snapshot(new_content)
-            if snapshot:
-                ResearchDocumentModel.update_document(document_id, snapshot=snapshot)
-        except Exception as snapshot_error:
-            print(f"Warning: Failed to generate snapshot: {snapshot_error}")
+        # Phase 3: Generate snapshot only if should_generate_snapshot is True
+        if should_generate_snapshot:
+            # Generate snapshot from HTML content (don't fail save if this fails)
+            try:
+                from services.snapshot_service import get_snapshot_service
+                snapshot_service = get_snapshot_service()
+                snapshot = snapshot_service.generate_snapshot(new_content)
+                if snapshot:
+                    ResearchDocumentModel.update_document(document_id, snapshot=snapshot)
+            except Exception as snapshot_error:
+                print(f"Warning: Failed to generate snapshot: {snapshot_error}")
+        else:
+            print(f"[DELTA SAVE] Snapshot generation skipped (edit not on first page)")
         
         # Index document for semantic search (don't fail save if this fails)
         try:
@@ -130,7 +135,7 @@ def save_document():
         }), 200
     
     except Exception as e:
-        print(f"[DELTA SAVE] Error: {e}")
+        print(f"Error saving document: {e}")
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document/pdf', methods=['GET'])

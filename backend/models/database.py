@@ -482,7 +482,6 @@ class ResearchDocumentModel:
         
         # Version check (optimistic locking)
         if current_version != expected_version:
-            print(f"[DELTA SAVE] Version mismatch: expected {expected_version}, got {current_version}")
             return {
                 'success': False, 
                 'error': 'Version mismatch',
@@ -495,18 +494,11 @@ class ResearchDocumentModel:
             patches = dmp.patch_fromText(patches_text)
             new_content, results = dmp.patch_apply(patches, current_content)
             
-            print(f"[DELTA SAVE] Document: {document_id}")
-            print(f"[DELTA SAVE] Received patch: {len(patches_text)} bytes")
-            print(f"[DELTA SAVE] Current content: {len(current_content)} bytes")
-            print(f"[DELTA SAVE] New content: {len(new_content)} bytes")
-            print(f"[DELTA SAVE] All patches applied successfully: {results}")
-            
             # Check if all patches applied successfully
             if not all(results):
-                print(f"[DELTA SAVE] Warning: Some patches failed to apply: {results}")
+                print(f"Warning: Some patches failed to apply: {results}")
             
             new_version = current_version + 1
-            print(f"[DELTA SAVE] Version: {current_version} -> {new_version}")
             
             # Update document with new content and incremented version
             db.research_documents.update_one(
@@ -528,7 +520,7 @@ class ResearchDocumentModel:
             }
             
         except Exception as e:
-            print(f"[DELTA SAVE] Error applying patches: {e}")
+            print(f"Error applying patches: {e}")
             return {'success': False, 'error': str(e)}
     
     @staticmethod

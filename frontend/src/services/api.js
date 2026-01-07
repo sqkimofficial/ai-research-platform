@@ -212,13 +212,15 @@ export const documentAPI = {
    * @param {string} patches - Patch text from diff-match-patch
    * @param {number} version - Current version for optimistic locking
    * @param {string} title - Optional title update
+   * @param {boolean} shouldGenerateSnapshot - Whether to generate snapshot (Phase 3)
    */
-  saveDocument: (documentId, patches, version, title = null) => {
+  saveDocument: (documentId, patches, version, title = null, shouldGenerateSnapshot = true) => {
     return api.post('/api/document', { 
       document_id: documentId, 
       patches, 
       version,
-      title 
+      title,
+      should_generate_snapshot: shouldGenerateSnapshot
     });
   },
   downloadPDF: (sessionId) => {

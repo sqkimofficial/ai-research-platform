@@ -278,9 +278,40 @@ Optimize the delta save implementation to reduce unnecessary operations, prevent
 
 ### To-dos
 
-- [ ] Phase 1: Skip saves for tiny patches (<10 bytes or >80% of content size)
-- [ ] Phase 2: Reduce version conflicts with save queue and 3s debounce
+- [x] Phase 1: Skip saves for tiny patches (<200 bytes or >80% of content size) - **COMPLETED**
+- [x] Phase 2: Reduce version conflicts with save queue and 3s debounce - **COMPLETED**
 - [ ] Phase 3: Implement first-page snapshot detection using cursor position (Method A)
 - [ ] Phase 4: Throttle snapshot generation with debounce and significant-change detection
 - [ ] Phase 5: Move snapshot/indexing to background tasks, non-blocking saves
 - [ ] Phase 6: Optimize CORS with preflight caching
+
+---
+
+## Phase 1 & 2 Implementation Notes
+
+### Additional Changes Made (Not in Original Plan)
+
+**Phase 1 Enhancements:**
+1. **Skip threshold changed**: From 10 bytes to 200 bytes (original plan had 10 bytes, but diff-match-patch patches have overhead, so 200 bytes is more practical)
+2. **10-second force-save timer**: Added automatic timer that fires after 10 seconds if a save was skipped, ensuring small changes eventually get saved even if user stops typing
+3. **Timer persistence**: Timer continues running and updates with latest skipped content, so the most recent skipped change is saved after 10 seconds
+4. **Force save parameter**: Added `forceSave` parameter to `performSave()` to bypass skip checks when timer fires
+5. **MAX_SAVE_INTERVAL integration**: Disabled MAX_SAVE_INTERVAL when skip timer is active to prevent conflicts
+
+**Phase 2 Enhancements:**
+1. **Save queuing**: Implemented `saveInProgressRef` and `pendingSaveQueueRef` to queue saves during active saves, preventing 409 conflicts
+2. **Queue processing**: Queued saves are processed after successful saves, retries, and even after errors
+3. **Skip timer cleanup**: Skip timer is properly cleared on successful saves and retries
+4. **Content tracking**: Added `skippedContentRef` to track content that was skipped, separate from `pendingContentRef`
+
+**Bug Fixes:**
+1. Fixed issue where skip timer wouldn't fire automatically (was checking `pendingContentRef` which was null)
+2. Fixed MAX_SAVE_INTERVAL triggering immediately after skips by updating `lastSaveTimeRef` when skipping
+3. Fixed skip timer re-skipping saves by adding `forceSave` parameter
+4. Fixed debounce not working properly by ensuring MAX_SAVE_INTERVAL doesn't interfere with skip timer
+
+**Key Implementation Details:**
+- Skip threshold: 200 bytes (not 10 bytes as originally planned)
+- Debounce delay: 3 seconds (increased from 2 seconds)
+- Skip force timer: 10 seconds
+- MAX_SAVE_INTERVAL: 30 seconds (disabled when skip timer active)

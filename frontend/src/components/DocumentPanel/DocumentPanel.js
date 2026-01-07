@@ -1277,7 +1277,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       lastSavedContentRef.current = htmlContent;
       documentVersionRef.current = version;
       
-      console.log(`[DELTA] Document loaded: ${documentId}, version: ${version}, content length: ${htmlContent.length}`);
     } catch (err) {
       const errorMessage = err.response?.data?.error || err.message || 'Failed to load document';
       setError(errorMessage);
@@ -1401,6 +1400,81 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     }
   };
 
+  // Phase 3: Check if edit is on first page
+  const isEditOnFirstPage = useCallback(() => {
+    try {
+      // Get TipTap editor instance
+      if (!editorRef.current) {
+        return true; // Default to true if editor not available
+      }
+      
+      const editor = editorRef.current.getEditor();
+      if (!editor) {
+        return true; // Default to true if editor not available
+      }
+
+      // Get editor DOM element
+      const editorDOM = editor.view.dom;
+      if (!editorDOM) {
+        return true; // Default to true if DOM not available
+      }
+
+      // Calculate scrollHeight of editor container
+      const scrollHeight = editorDOM.scrollHeight;
+      
+      // Define page height: 1056px (11" at 96 DPI)
+      const PAGE_HEIGHT = 1056;
+      
+      // Calculate total pages
+      const totalPages = Math.ceil(scrollHeight / PAGE_HEIGHT);
+      
+      // If document is single page or less, always generate snapshot
+      if (totalPages <= 1) {
+        return true;
+      }
+
+      // Get cursor position
+      const selection = editor.state.selection;
+      if (!selection || !selection.$anchor) {
+        return true; // Default to true if no selection
+      }
+
+      const cursorPos = selection.$anchor.pos;
+      
+      // Get coordinates of cursor position
+      const coords = editor.view.coordsAtPos(cursorPos);
+      if (!coords) {
+        return true; // Default to true if coords not available
+      }
+
+      // Get editor container's bounding rect
+      const editorRect = editorDOM.getBoundingClientRect();
+      if (!editorRect) {
+        return true; // Default to true if rect not available
+      }
+
+      // Calculate cursor Y relative to editor container
+      const cursorY = coords.top - editorRect.top + editorDOM.scrollTop;
+      
+      // Determine which page the cursor is on (1-indexed)
+      const currentPage = Math.floor(cursorY / PAGE_HEIGHT) + 1;
+      
+      // Return true if page === 1
+      const isFirstPage = currentPage === 1;
+      
+      if (isFirstPage) {
+        console.log(`[DELTA] Edit on page 1, snapshot will be generated`);
+      } else {
+        console.log(`[DELTA] Edit on page ${currentPage}, skipping snapshot`);
+      }
+      
+      return isFirstPage;
+    } catch (error) {
+      console.error('[DELTA] Error checking edit page:', error);
+      return true; // Default to true on error to be safe
+    }
+  }, []);
+
   // Perform the actual save operation using delta patches
   const performSave = useCallback(async (htmlContentToSave, forceSave = false) => {
     if (!activeDocumentId || htmlContentToSave === undefined || htmlContentToSave === null) {
@@ -1413,7 +1487,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     
     // If no changes, skip save (unless forced)
     if (patches.length === 0 && !forceSave) {
-      console.log('[DELTA] No changes detected, skipping save');
       pendingContentRef.current = null;
       return;
     }
@@ -1421,12 +1494,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     const patchText = dmp.patch_toText(patches);
     const fullContentLength = htmlContentToSave.length;
     const patchLength = patchText.length;
-    const savings = fullContentLength > 0 ? ((1 - patchLength / fullContentLength) * 100).toFixed(1) : 0;
-    
-    console.log('[DELTA] Computing delta...');
-    console.log(`[DELTA] Patch size: ${patchLength} bytes`);
-    console.log(`[DELTA] Full content would be: ${fullContentLength} bytes`);
-    console.log(`[DELTA] Savings: ${savings}%`);
 
     // Check if enough time has passed since last skip to force save
     // Only apply this timer if we previously skipped a save
@@ -1435,12 +1502,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     const timeSinceLastSkip = wasTimerRunning ? (Date.now() - lastSkipTimeRef.current) : null;
     const shouldForceSave = forceSave || (wasTimerRunning && timeSinceLastSkip >= MIN_SAVE_INTERVAL);
 
-    // Debug logging
-    console.log(`[DELTA] Skip check: patchLength=${patchLength}, wasTimerRunning=${wasTimerRunning}, timeSinceLastSkip=${timeSinceLastSkip}, shouldForceSave=${shouldForceSave}, forceSave=${forceSave}`);
-
     // Phase 2: Skip if content hasn't changed (unless forced)
     if (htmlContentToSave === lastSavedContentRef.current && !forceSave) {
-      console.log('[DELTA] Skipping save: no changes');
       lastSaveTimeRef.current = Date.now(); // Update to prevent MAX_SAVE_INTERVAL from triggering
       pendingContentRef.current = null;
       return;
@@ -1448,7 +1511,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
     // Phase 2: Queue save if another save is in progress
     if (saveInProgressRef.current) {
-      console.log('[DELTA] Save queued: save already in progress');
       pendingSaveQueueRef.current = htmlContentToSave;
       return;
     }
@@ -1458,9 +1520,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       const timerJustStarted = lastSkipTimeRef.current === null;
       lastSkipTimeRef.current = Date.now(); // Track when we skipped
       lastSaveTimeRef.current = Date.now(); // Update last save time to prevent MAX_SAVE_INTERVAL from triggering
-      console.log('[DELTA] Skipping save: patch too small (<200 bytes)');
       if (timerJustStarted) {
-        console.log(`[DELTA] Timer started: will force save after ${MIN_SAVE_INTERVAL}ms if no successful save`);
         // Store the content to save when timer fires
         skippedContentRef.current = htmlContentToSave;
         // Set actual timer to fire after 10 seconds
@@ -1469,7 +1529,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
         }
         skipTimerRef.current = setTimeout(() => {
           if (skippedContentRef.current) {
-            console.log(`[DELTA] Skip timer fired after ${MIN_SAVE_INTERVAL}ms, forcing save`);
             const contentToSave = skippedContentRef.current;
             skippedContentRef.current = null; // Clear it before saving
             performSave(contentToSave, true); // Force save when timer fires
@@ -1489,9 +1548,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       const timerJustStarted = lastSkipTimeRef.current === null;
       lastSkipTimeRef.current = Date.now(); // Track when we skipped
       lastSaveTimeRef.current = Date.now(); // Update last save time to prevent MAX_SAVE_INTERVAL from triggering
-      console.log('[DELTA] Skipping save: patch too large (>80% of content size)');
       if (timerJustStarted) {
-        console.log(`[DELTA] Timer started: will force save after ${MIN_SAVE_INTERVAL}ms if no successful save`);
         // Store the content to save when timer fires
         skippedContentRef.current = htmlContentToSave;
         // Set actual timer to fire after 10 seconds
@@ -1500,7 +1557,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
         }
         skipTimerRef.current = setTimeout(() => {
           if (skippedContentRef.current) {
-            console.log(`[DELTA] Skip timer fired after ${MIN_SAVE_INTERVAL}ms, forcing save`);
             const contentToSave = skippedContentRef.current;
             skippedContentRef.current = null; // Clear it before saving
             performSave(contentToSave, true); // Force save when timer fires
@@ -1514,19 +1570,14 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       return;
     }
 
-    // Log if forcing save due to time since last skip (timer ended)
-    if (shouldForceSave) {
-      const timeSinceSkip = Date.now() - lastSkipTimeRef.current;
-      console.log(`[DELTA] Timer ended: ${timeSinceSkip}ms elapsed, forcing save (patch: ${patchLength} bytes)`);
-      // Clear the skip timer since we're forcing the save
-      if (skipTimerRef.current) {
-        clearTimeout(skipTimerRef.current);
-        skipTimerRef.current = null;
-      }
-    } else {
-      // Normal save (not forced by timer)
-      console.log('[DELTA] Saving document...');
+    // Clear the skip timer since we're forcing the save
+    if (shouldForceSave && skipTimerRef.current) {
+      clearTimeout(skipTimerRef.current);
+      skipTimerRef.current = null;
     }
+
+    // Phase 3: Check if edit is on first page
+    const shouldGenerateSnapshot = isEditOnFirstPage();
 
     // Phase 2: Mark save as in progress
     saveInProgressRef.current = true;
@@ -1535,7 +1586,9 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       const response = await documentAPI.saveDocument(
         activeDocumentId, 
         patchText, 
-        documentVersionRef.current
+        documentVersionRef.current,
+        null, // title
+        shouldGenerateSnapshot
       );
       
       // Update tracking refs with successful save
@@ -1550,10 +1603,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
         skipTimerRef.current = null;
       }
       
-      console.log(`[DELTA] Save successful, new version: ${newVersion}`);
-      if (hadTimer) {
-        console.log('[DELTA] Timer cleared: successful save completed');
-      }
+      console.log('Save successful');
       
       setContent(htmlContentToSave);
       setSaveStatus('saved');
@@ -1565,7 +1615,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       if (pendingSaveQueueRef.current) {
         const queuedContent = pendingSaveQueueRef.current;
         pendingSaveQueueRef.current = null;
-        console.log('[DELTA] Processing queued save');
         performSave(queuedContent);
       }
       
@@ -1580,7 +1629,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     } catch (err) {
       // Handle version conflict - refetch and retry
       if (err.response?.status === 409) {
-        console.log('[DELTA] Version conflict detected, refetching document...');
         try {
           const freshDoc = await documentAPI.getDocument(activeDocumentId);
           lastSavedContentRef.current = freshDoc.data.content || '';
@@ -1590,10 +1638,14 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
           const newPatches = dmp.patch_make(lastSavedContentRef.current, htmlContentToSave);
           if (newPatches.length > 0) {
             const newPatchText = dmp.patch_toText(newPatches);
+            // Phase 3: Check if edit is on first page for retry
+            const shouldGenerateSnapshotRetry = isEditOnFirstPage();
             const retryResponse = await documentAPI.saveDocument(
               activeDocumentId,
               newPatchText,
-              documentVersionRef.current
+              documentVersionRef.current,
+              null, // title
+              shouldGenerateSnapshotRetry
             );
             lastSavedContentRef.current = htmlContentToSave;
             documentVersionRef.current = retryResponse.data.version;
@@ -1604,10 +1656,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
               clearTimeout(skipTimerRef.current);
               skipTimerRef.current = null;
             }
-            console.log(`[DELTA] Retry successful, new version: ${retryResponse.data.version}`);
-            if (hadTimer) {
-              console.log('[DELTA] Timer cleared: successful retry save completed');
-            }
+            console.log('Save successful');
             setSaveStatus('saved');
             lastSaveTimeRef.current = Date.now();
             pendingContentRef.current = null;
@@ -1617,30 +1666,41 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
             if (pendingSaveQueueRef.current) {
               const queuedContent = pendingSaveQueueRef.current;
               pendingSaveQueueRef.current = null;
-              console.log('[DELTA] Processing queued save');
               performSave(queuedContent);
             }
             return;
           }
         } catch (retryErr) {
-          console.error('[DELTA] Retry failed:', retryErr);
+          // Retry failed, log the retry error
+          const retryErrorMessage = retryErr.response?.data?.error || retryErr.message || 'Retry failed';
+          console.error(`Save not successful: Retry failed - ${retryErrorMessage}`);
+          setSaveStatus('error');
+          saveInProgressRef.current = false;
+          
+          // Process queued save if there is one
+          if (pendingSaveQueueRef.current) {
+            const queuedContent = pendingSaveQueueRef.current;
+            pendingSaveQueueRef.current = null;
+            performSave(queuedContent);
+          }
+          return;
         }
       }
       
       // Phase 2: Clear save in progress flag on error
       saveInProgressRef.current = false;
       setSaveStatus('error');
-      console.error('[DELTA] Failed to save document:', err);
+      const errorMessage = err.response?.data?.error || err.message || 'Unknown error';
+      console.error(`Save not successful: ${errorMessage}`);
       
       // Phase 2: Process queued save if there is one (even after error)
       if (pendingSaveQueueRef.current) {
         const queuedContent = pendingSaveQueueRef.current;
         pendingSaveQueueRef.current = null;
-        console.log('[DELTA] Processing queued save after error');
         performSave(queuedContent);
       }
     }
-  }, [activeDocumentId]);
+  }, [activeDocumentId, isEditOnFirstPage]);
 
   // Schedule auto-save with debounce
   const scheduleAutoSave = useCallback((newHtmlContent) => {
@@ -1655,11 +1715,9 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     // Set new debounce timer (save after 3s of inactivity - Phase 2)
     debounceTimerRef.current = setTimeout(() => {
       if (pendingContentRef.current) {
-        console.log('[DELTA] Debounce timer fired, calling performSave');
         performSave(pendingContentRef.current);
       }
     }, DEBOUNCE_DELAY);
-    console.log(`[DELTA] Debounce timer set for ${DEBOUNCE_DELAY}ms`);
 
     // Phase 2: Check MAX_SAVE_INTERVAL only if no save is in progress
     // Don't trigger if skip timer is running (let skip timer handle it)
@@ -1668,7 +1726,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       const timeSinceLastSave = Date.now() - lastSaveTimeRef.current;
       if (timeSinceLastSave >= MAX_SAVE_INTERVAL) {
         // Clear debounce and save immediately (but only if not in progress and not skipping)
-        console.log(`[DELTA] MAX_SAVE_INTERVAL exceeded (${timeSinceLastSave}ms), saving immediately`);
         if (debounceTimerRef.current) {
           clearTimeout(debounceTimerRef.current);
         }
@@ -1682,7 +1739,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
             if (debounceTimerRef.current) {
               clearTimeout(debounceTimerRef.current);
             }
-            console.log('[DELTA] MAX_SAVE_INTERVAL timer fired');
             performSave(pendingContentRef.current);
           }
           maxIntervalTimerRef.current = null;
@@ -1764,7 +1820,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
               version: documentVersionRef.current
             })
           );
-          console.log('[DELTA] Sent beacon with patches on unload');
         }
       }
     };
