@@ -312,24 +312,32 @@ def get_session():
         # Optionally filter by project_id
         project_id_filter = request.args.get('project_id')
         
-        # Generate cache key for session list
-        if project_id_filter:
-            cache_key = f"cache:sessions:{user_id}:{project_id_filter}"
-        else:
-            cache_key = f"cache:sessions:{user_id}:all"
+        # Pagination parameters
+        limit = request.args.get('limit', type=int)
+        skip = request.args.get('skip', type=int, default=0)
         
-        # Check Redis cache first
-        redis_service = get_redis_service()
-        cached_data = redis_service.get(cache_key)
+        # Only cache first page (skip=0, limit=5) to avoid cache complexity with pagination
+        use_cache = (skip == 0 and limit == 5)
         
-        if cached_data is not None:
-            print(f"[REDIS] get_session: Cache hit for session list (project: {project_id_filter or 'all'})")
-            return jsonify(cached_data), 200
+        if use_cache:
+            # Generate cache key for session list (only for first page)
+            if project_id_filter:
+                cache_key = f"cache:sessions:{user_id}:{project_id_filter}"
+            else:
+                cache_key = f"cache:sessions:{user_id}:all"
+            
+            # Check Redis cache first
+            redis_service = get_redis_service()
+            cached_data = redis_service.get(cache_key)
+            
+            if cached_data is not None:
+                print(f"[REDIS] get_session: Cache hit for session list (project: {project_id_filter or 'all'})")
+                return jsonify(cached_data), 200
         
-        # Cache miss - fetch from MongoDB
-        print(f"[REDIS] get_session: Cache miss for session list, fetching from MongoDB")
+        # Cache miss or paginated request - fetch from MongoDB
+        print(f"[REDIS] get_session: Fetching sessions (project: {project_id_filter or 'all'}, limit: {limit}, skip: {skip})")
         
-        sessions = ChatSessionModel.get_all_sessions(user_id, project_id_filter)
+        sessions = ChatSessionModel.get_all_sessions(user_id, project_id_filter, limit=limit, skip=skip)
         sessions_list = []
         for session in sessions:
             # Get first user message for title
@@ -361,11 +369,30 @@ def get_session():
                 'message_count': len(messages)
             })
         
-        response_data = {'sessions': sessions_list}
+        # Get total count for pagination (only if limit is specified)
+        total_count = None
+        has_more = False
+        if limit is not None:
+            # Count total sessions matching the query using MongoDB count_documents (more efficient)
+            from models.database import Database
+            db = Database.get_db()
+            query = {'user_id': user_id}
+            if project_id_filter:
+                query['project_id'] = project_id_filter
+            total_count = db.chat_sessions.count_documents(query)
+            has_more = (skip + limit) < total_count
         
-        # Cache the result
-        redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)  # 5 minutes TTL
-        print(f"[REDIS] get_session: Cached {len(sessions_list)} sessions")
+        response_data = {
+            'sessions': sessions_list,
+            'has_more': has_more,
+            'total_count': total_count
+        }
+        
+        # Cache only the first page
+        if use_cache:
+            redis_service = get_redis_service()
+            redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)  # 5 minutes TTL
+            print(f"[REDIS] get_session: Cached {len(sessions_list)} sessions")
         
         return jsonify(response_data), 200
     

@@ -3,6 +3,7 @@ from models.database import HighlightModel, ProjectModel
 from utils.auth import get_user_id_from_token, log_auth_info
 from services.s3_service import S3Service
 from services.redis_service import get_redis_service
+from services.sse_service import SSEService
 from config import Config
 import base64
 import io
@@ -236,6 +237,21 @@ def save_highlight():
     redis_service.delete(f"cache:highlights:{user_id}:{project_id}:{source_url}")
     print(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
     print(f"[REDIS] Cache invalidated successfully")
+    
+    # Send SSE event to notify frontend that highlight was saved
+    try:
+        SSEService.broadcast_to_user(
+            user_id=user_id,
+            event_type='highlight_saved',
+            data={
+                'project_id': project_id,
+                'highlight_id': saved_highlight_id,
+                'source_url': source_url
+            }
+        )
+        print(f"[SSE] Sent highlight_saved event for highlight {saved_highlight_id} in project {project_id}")
+    except Exception as sse_error:
+        print(f"[SSE] Failed to send highlight_saved event: {sse_error}")
     
     print(f"Highlight saved: {saved_highlight_id} for project {project_id}" + 
           (f" (with S3 preview: {preview_image_url})" if preview_image_url else " (no preview)"))

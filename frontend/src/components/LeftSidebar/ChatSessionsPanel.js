@@ -12,11 +12,12 @@ const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId,
   const [shouldRender, setShouldRender] = useState(isOpen);
   const [isClosing, setIsClosing] = useState(false);
 
-  useEffect(() => {
-    if (isOpen && selectedProjectId) {
-      loadSessions();
-    }
-  }, [isOpen, selectedProjectId]);
+  // Session fetching removed - now handled in ChatWindow when expanded
+  // useEffect(() => {
+  //   if (isOpen && selectedProjectId) {
+  //     loadSessions();
+  //   }
+  // }, [isOpen, selectedProjectId]);
 
   useEffect(() => {
     let timeoutId;
@@ -35,20 +36,21 @@ const ChatSessionsPanel = ({ isOpen, onClose, onSelectSession, currentSessionId,
     };
   }, [isOpen, shouldRender]);
 
-  const loadSessions = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      // Filter sessions by selected project
-      const response = await chatAPI.getAllSessions(selectedProjectId);
-      setSessions(response.data.sessions || []);
-    } catch (err) {
-      console.error('Failed to load sessions:', err);
-      setError('Failed to load chat sessions.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Session loading removed - now handled in ChatWindow when expanded
+  // const loadSessions = async () => {
+  //   try {
+  //     setLoading(true);
+  //     setError('');
+  //     // Filter sessions by selected project
+  //     const response = await chatAPI.getAllSessions(selectedProjectId);
+  //     setSessions(response.data.sessions || []);
+  //   } catch (err) {
+  //     console.error('Failed to load sessions:', err);
+  //     setError('Failed to load chat sessions.');
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);

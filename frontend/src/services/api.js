@@ -159,10 +159,20 @@ export const chatAPI = {
   getSession: (sessionId) => {
     return api.get(`/api/chat/session?session_id=${sessionId}`);
   },
-  getAllSessions: (projectId = null) => {
+  getAllSessions: (projectId = null, limit = null, skip = 0) => {
     let url = '/api/chat/session';
+    const params = [];
     if (projectId) {
-      url += `?project_id=${projectId}`;
+      params.push(`project_id=${projectId}`);
+    }
+    if (limit !== null) {
+      params.push(`limit=${limit}`);
+    }
+    if (skip > 0) {
+      params.push(`skip=${skip}`);
+    }
+    if (params.length > 0) {
+      url += `?${params.join('&')}`;
     }
     return api.get(url);
   },

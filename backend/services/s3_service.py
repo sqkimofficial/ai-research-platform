@@ -103,7 +103,7 @@ class S3Service:
             
             # us-east-1 returns None, so handle that case
             if region is None or region == '':
-                region = 'us-east-1'
+                region = 'us-east-2'
             
             cls._bucket_region = region
             print(f"[S3] Detected bucket region for {target_bucket}: {region}")

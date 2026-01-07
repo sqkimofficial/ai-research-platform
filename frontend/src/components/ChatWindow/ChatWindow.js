@@ -112,6 +112,10 @@ const ChatWindow = ({
   const [chatSessions, setChatSessions] = useState([]);
   const [currentChatTitle, setCurrentChatTitle] = useState('Untitled');
   const [isChatDropdownOpen, setIsChatDropdownOpen] = useState(false);
+  const [sessionsHasMore, setSessionsHasMore] = useState(false);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsLoadingMore, setSessionsLoadingMore] = useState(false);
+  const [sessionsCacheKey, setSessionsCacheKey] = useState(null);
   
   // @ mention state
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
@@ -195,10 +199,19 @@ const ChatWindow = ({
     fetchDocumentName();
   }, [activeDocumentId, documentNameRefreshTrigger]);
 
-  // Fetch available documents for dropdown
+  // Fetch available documents for dropdown - only when dropdown is opened (lazy loading)
+  // Removed automatic fetch on mount/project change - DocumentPanel already handles this
+  useEffect(() => {
+    // Clear documents when project changes
+    if (selectedProjectId) {
+      setAvailableDocuments([]);
+    }
+  }, [selectedProjectId]);
+
   useEffect(() => {
     const fetchAvailableDocuments = async () => {
-      if (selectedProjectId) {
+      // Only fetch when dropdown is opened and we don't have documents yet
+      if (isDocumentDropdownOpen && availableDocuments.length === 0 && selectedProjectId) {
         try {
           const response = await documentAPI.getAllResearchDocuments(selectedProjectId);
           setAvailableDocuments(response.data.documents || []);
@@ -209,23 +222,136 @@ const ChatWindow = ({
       }
     };
     fetchAvailableDocuments();
-  }, [selectedProjectId, documentNameRefreshTrigger]);
+  }, [isDocumentDropdownOpen, selectedProjectId, availableDocuments.length]); // Only fetch when dropdown opens
 
-  // Fetch chat sessions for dropdown
+  // Fetch chat sessions for dropdown - only when chat is expanded
   useEffect(() => {
     const fetchChatSessions = async () => {
-      if (selectedProjectId) {
+      // Only fetch when chat is expanded (not collapsed) and project is selected
+      if (!isCollapsed && selectedProjectId) {
+        const cacheKey = `chat-sessions-${selectedProjectId}`;
+        
+        // Check cache first
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          try {
+            const cachedData = JSON.parse(cached);
+            const now = Date.now();
+            // Cache valid for 5 minutes
+            if (now - cachedData.timestamp < 300000) {
+              setChatSessions(cachedData.sessions || []);
+              setSessionsHasMore(cachedData.hasMore || false);
+              setSessionsCacheKey(cacheKey);
+              return;
+            }
+          } catch (e) {
+            console.warn('Failed to parse cached sessions:', e);
+          }
+        }
+        
+        // Fetch first page (5 sessions)
+        setSessionsLoading(true);
         try {
-          const response = await chatAPI.getAllSessions(selectedProjectId);
-          setChatSessions(response.data.sessions || []);
+          const response = await chatAPI.getAllSessions(selectedProjectId, 5, 0);
+          const sessions = response.data.sessions || [];
+          setChatSessions(sessions);
+          setSessionsHasMore(response.data.has_more || false);
+          setSessionsCacheKey(cacheKey);
+          
+          // Cache the result
+          localStorage.setItem(cacheKey, JSON.stringify({
+            sessions,
+            hasMore: response.data.has_more || false,
+            timestamp: Date.now()
+          }));
         } catch (error) {
           console.error('Failed to fetch chat sessions:', error);
           setChatSessions([]);
+          setSessionsHasMore(false);
+        } finally {
+          setSessionsLoading(false);
         }
+      } else if (isCollapsed) {
+        // Clear sessions when collapsed to free memory
+        setChatSessions([]);
+        setSessionsHasMore(false);
+        setSessionsCacheKey(null);
       }
     };
     fetchChatSessions();
-  }, [selectedProjectId, sessionId]); // Reload when session changes to refresh list
+  }, [selectedProjectId, isCollapsed]); // Only depend on project and collapsed state
+
+  // Load more sessions (pagination)
+  const loadMoreSessions = async () => {
+    if (!selectedProjectId || sessionsLoadingMore || !sessionsHasMore) return;
+    
+    setSessionsLoadingMore(true);
+    try {
+      const skip = chatSessions.length;
+      const response = await chatAPI.getAllSessions(selectedProjectId, 5, skip);
+      const newSessions = response.data.sessions || [];
+      setChatSessions(prev => [...prev, ...newSessions]);
+      setSessionsHasMore(response.data.has_more || false);
+      
+      // Update cache with new sessions
+      if (sessionsCacheKey) {
+        const cached = localStorage.getItem(sessionsCacheKey);
+        if (cached) {
+          try {
+            const cachedData = JSON.parse(cached);
+            const updatedSessions = [...cachedData.sessions, ...newSessions];
+            localStorage.setItem(sessionsCacheKey, JSON.stringify({
+              sessions: updatedSessions,
+              hasMore: response.data.has_more || false,
+              timestamp: cachedData.timestamp // Keep original timestamp
+            }));
+          } catch (e) {
+            console.warn('Failed to update cached sessions:', e);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load more chat sessions:', error);
+    } finally {
+      setSessionsLoadingMore(false);
+    }
+  };
+
+  // Invalidate sessions cache (called when new session is created)
+  const invalidateSessionsCache = () => {
+    if (selectedProjectId) {
+      const cacheKey = `chat-sessions-${selectedProjectId}`;
+      localStorage.removeItem(cacheKey);
+      // Refetch sessions if chat is expanded
+      if (!isCollapsed) {
+        setChatSessions([]);
+        setSessionsHasMore(false);
+        // Trigger refetch by updating a dependency
+        const fetchSessions = async () => {
+          setSessionsLoading(true);
+          try {
+            const response = await chatAPI.getAllSessions(selectedProjectId, 5, 0);
+            const sessions = response.data.sessions || [];
+            setChatSessions(sessions);
+            setSessionsHasMore(response.data.has_more || false);
+            setSessionsCacheKey(cacheKey);
+            localStorage.setItem(cacheKey, JSON.stringify({
+              sessions,
+              hasMore: response.data.has_more || false,
+              timestamp: Date.now()
+            }));
+          } catch (error) {
+            console.error('Failed to fetch chat sessions:', error);
+            setChatSessions([]);
+            setSessionsHasMore(false);
+          } finally {
+            setSessionsLoading(false);
+          }
+        };
+        fetchSessions();
+      }
+    }
+  };
 
   // Update chat title based on messages or session
   useEffect(() => {
@@ -254,8 +380,14 @@ const ChatWindow = ({
     const refreshSessions = async () => {
       if (selectedProjectId && sessionId && messages.length > 0) {
         try {
-          const response = await chatAPI.getAllSessions(selectedProjectId);
-          setChatSessions(response.data.sessions || []);
+          // Use pagination - only fetch first 5 sessions to update titles
+          const response = await chatAPI.getAllSessions(selectedProjectId, 5, 0);
+          const sessions = response.data.sessions || [];
+          // Only update if we have sessions, preserve existing sessions if refresh fails
+          if (sessions.length > 0) {
+            setChatSessions(sessions);
+            setSessionsHasMore(response.data.has_more || false);
+          }
         } catch (error) {
           console.error('Failed to refresh chat sessions:', error);
         }
@@ -861,6 +993,9 @@ const ChatWindow = ({
       if (onSessionCreated) {
         onSessionCreated(newSessionId);
       }
+      
+      // Invalidate sessions cache so new session appears in dropdown
+      invalidateSessionsCache();
       
       // Now send the message
       await sendMessageToSession(newSessionId, userMessage);
@@ -1558,22 +1693,38 @@ const ChatWindow = ({
                   <PlusIcon className="chat-session-new-icon" />
                   <span>New Chat</span>
                 </button>
-                {chatSessions.length > 0 && (
-                  <div className="chat-session-list">
-                    {chatSessions.map((session) => (
+                {sessionsLoading && chatSessions.length === 0 ? (
+                  <div className="chat-session-loading">Loading sessions...</div>
+                ) : (
+                  <>
+                    {chatSessions.length > 0 && (
+                      <div className="chat-session-list">
+                        {chatSessions.map((session) => (
+                          <button
+                            key={session.session_id}
+                            type="button"
+                            className={`chat-session-item ${sessionId === session.session_id && !isNewChat ? 'active' : ''}`}
+                            onClick={() => handleSessionSelect(session.session_id)}
+                          >
+                            <span>{session.title || 'Untitled Chat'}</span>
+                            {sessionId === session.session_id && !isNewChat && (
+                              <CheckIcon className="chat-session-check-icon" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {sessionsHasMore && (
                       <button
-                        key={session.session_id}
                         type="button"
-                        className={`chat-session-item ${sessionId === session.session_id && !isNewChat ? 'active' : ''}`}
-                        onClick={() => handleSessionSelect(session.session_id)}
+                        className="chat-session-load-more"
+                        onClick={loadMoreSessions}
+                        disabled={sessionsLoadingMore}
                       >
-                        <span>{session.title || 'Untitled Chat'}</span>
-                        {sessionId === session.session_id && !isNewChat && (
-                          <CheckIcon className="chat-session-check-icon" />
-                        )}
+                        {sessionsLoadingMore ? 'Loading...' : 'Load More'}
                       </button>
-                    ))}
-                  </div>
+                    )}
+                  </>
                 )}
               </div>
             )}

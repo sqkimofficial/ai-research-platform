@@ -368,6 +368,24 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
               ? { ...pdf, extraction_status: 'processing' }
               : pdf
           ));
+        } else if (data.type === 'highlight_saved') {
+          // Highlight saved - refresh highlights list immediately
+          console.log('[SSE] Highlight saved for project:', data.data.project_id);
+          if (selectedProjectId && selectedProjectId === data.data.project_id) {
+            // Invalidate localStorage cache to ensure fresh data
+            const cacheKey = getCacheKey('highlights', selectedProjectId);
+            try {
+              localStorage.removeItem(cacheKey);
+              console.log('[SSE] Invalidated localStorage cache for highlights');
+            } catch (e) {
+              console.warn('[SSE] Failed to invalidate cache:', e);
+            }
+            // Force refresh - add small delay to ensure backend cache invalidation has propagated
+            console.log('[SSE] Forcing highlights list refresh after highlight save');
+            setTimeout(() => {
+              loadHighlightsForProject(selectedProjectId);
+            }, 500);
+          }
         } else if (data.type === 'connected') {
           console.log('[SSE] Server confirmed connection:', data.message);
         }
@@ -706,7 +724,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       
       if (selectedProjectId) {
         loadPdfsForProject(selectedProjectId);
-        loadHighlightsForProject(selectedProjectId); // Also load web highlights
       }
     }
   }, [pdfTabTrigger]);
@@ -915,11 +932,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
         setPdfTabs(prev => prev.map(tab => 
           tab.id === activeTabId ? { ...tab, selectedPdfData: selectedData } : tab
         ));
-        
-        // Also refresh the PDFs list to update extraction status in the table
-        if (selectedProjectId) {
-          loadPdfsForProject(selectedProjectId, true);
-        }
       } catch (err) {
         console.error('Failed to load PDF highlights:', err);
         // Update with error state but keep PDF loaded

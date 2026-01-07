@@ -323,13 +323,16 @@ class ChatSessionModel:
         return []
     
     @staticmethod
-    def get_all_sessions(user_id, project_id=None):
+    def get_all_sessions(user_id, project_id=None, limit=None, skip=0):
         """Get all sessions for a user, optionally filtered by project_id, sorted by updated_at descending"""
         db = Database.get_db()
         query = {'user_id': user_id}
         if project_id:
             query['project_id'] = project_id
-        sessions = list(db.chat_sessions.find(query).sort('updated_at', -1))
+        cursor = db.chat_sessions.find(query).sort('updated_at', -1).skip(skip)
+        if limit:
+            cursor = cursor.limit(limit)
+        sessions = list(cursor)
         return sessions
     
     @staticmethod
