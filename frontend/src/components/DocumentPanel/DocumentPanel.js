@@ -1402,7 +1402,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   };
 
   // Perform the actual save operation using delta patches
-  const performSave = useCallback(async (htmlContentToSave) => {
+  const performSave = useCallback(async (htmlContentToSave, forceSave = false) => {
     if (!activeDocumentId || htmlContentToSave === undefined || htmlContentToSave === null) {
       return;
     }
@@ -1411,8 +1411,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     const dmp = dmpRef.current;
     const patches = dmp.patch_make(lastSavedContentRef.current, htmlContentToSave);
     
-    // If no changes, skip save
-    if (patches.length === 0) {
+    // If no changes, skip save (unless forced)
+    if (patches.length === 0 && !forceSave) {
       console.log('[DELTA] No changes detected, skipping save');
       pendingContentRef.current = null;
       return;
@@ -1430,15 +1430,16 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
     // Check if enough time has passed since last skip to force save
     // Only apply this timer if we previously skipped a save
+    // If forceSave is true (from skip timer), always force the save
     const wasTimerRunning = lastSkipTimeRef.current !== null;
     const timeSinceLastSkip = wasTimerRunning ? (Date.now() - lastSkipTimeRef.current) : null;
-    const shouldForceSave = wasTimerRunning && timeSinceLastSkip >= MIN_SAVE_INTERVAL;
+    const shouldForceSave = forceSave || (wasTimerRunning && timeSinceLastSkip >= MIN_SAVE_INTERVAL);
 
     // Debug logging
-    console.log(`[DELTA] Skip check: patchLength=${patchLength}, wasTimerRunning=${wasTimerRunning}, timeSinceLastSkip=${timeSinceLastSkip}, shouldForceSave=${shouldForceSave}`);
+    console.log(`[DELTA] Skip check: patchLength=${patchLength}, wasTimerRunning=${wasTimerRunning}, timeSinceLastSkip=${timeSinceLastSkip}, shouldForceSave=${shouldForceSave}, forceSave=${forceSave}`);
 
-    // Phase 2: Skip if content hasn't changed
-    if (htmlContentToSave === lastSavedContentRef.current) {
+    // Phase 2: Skip if content hasn't changed (unless forced)
+    if (htmlContentToSave === lastSavedContentRef.current && !forceSave) {
       console.log('[DELTA] Skipping save: no changes');
       lastSaveTimeRef.current = Date.now(); // Update to prevent MAX_SAVE_INTERVAL from triggering
       pendingContentRef.current = null;
@@ -1471,7 +1472,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
             console.log(`[DELTA] Skip timer fired after ${MIN_SAVE_INTERVAL}ms, forcing save`);
             const contentToSave = skippedContentRef.current;
             skippedContentRef.current = null; // Clear it before saving
-            performSave(contentToSave);
+            performSave(contentToSave, true); // Force save when timer fires
           }
         }, MIN_SAVE_INTERVAL);
       } else {
@@ -1502,7 +1503,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
             console.log(`[DELTA] Skip timer fired after ${MIN_SAVE_INTERVAL}ms, forcing save`);
             const contentToSave = skippedContentRef.current;
             skippedContentRef.current = null; // Clear it before saving
-            performSave(contentToSave);
+            performSave(contentToSave, true); // Force save when timer fires
           }
         }, MIN_SAVE_INTERVAL);
       } else {
