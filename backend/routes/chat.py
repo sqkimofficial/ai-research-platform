@@ -912,13 +912,24 @@ def clear_pending_content_route():
         # Verify pending content exists
         pending_data = ChatSessionModel.get_pending_content(session_id)
         if not pending_data or pending_data['pending_content_id'] != pending_content_id:
-            return jsonify({'error': 'Pending content not found or already processed'}), 404
+            # Pending content already cleared or doesn't exist - this is fine (idempotent operation)
+            # The desired end state (no pending content) is already achieved, so return success
+            return jsonify({
+                'success': True,
+                'message': 'Pending content already cleared or not found'
+            }), 200
         
         # Update the message status to 'approved' in the database
         updated = ChatSessionModel.update_message_status(session_id, pending_content_id, 'approved')
         
         if not updated:
-            return jsonify({'error': 'Message not found'}), 404
+            # Message not found, but that's okay - might have been already processed
+            # Still clear pending content if it exists (idempotent operation)
+            ChatSessionModel.clear_pending_content(session_id)
+            return jsonify({
+                'success': True,
+                'message': 'Message not found (may have been already processed)'
+            }), 200
         
         # Clear pending content
         ChatSessionModel.clear_pending_content(session_id)

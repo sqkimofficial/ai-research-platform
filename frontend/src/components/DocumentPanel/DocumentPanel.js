@@ -558,7 +558,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     for (const doc of docs) {
       if (wordCounts[doc.document_id] === undefined) {
         try {
-          const response = await documentAPI.getDocument(null, doc.document_id);
+          const response = await documentAPI.getDocument(doc.document_id);
           const content = response.data.content || '';
           // getWordCount now handles HTML properly, so we can pass it directly
           wordCounts[doc.document_id] = getWordCount(content);

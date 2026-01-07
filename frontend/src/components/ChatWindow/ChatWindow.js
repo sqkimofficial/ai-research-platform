@@ -181,7 +181,7 @@ const ChatWindow = ({
     const fetchDocumentName = async () => {
       if (activeDocumentId) {
         try {
-          const response = await documentAPI.getDocument(null, activeDocumentId);
+          const response = await documentAPI.getDocument(activeDocumentId);
           const title = response.data.title || 'Untitled Document';
           setCurrentDocumentName(title);
         } catch (error) {
