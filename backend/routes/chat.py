@@ -2,10 +2,12 @@ from flask import Blueprint, request, jsonify
 from models.database import ChatSessionModel, Database, ProjectModel, ResearchDocumentModel
 from services.perplexity_service import PerplexityService
 from services.vector_service import VectorService
+from services.redis_service import get_redis_service
 from utils.auth import get_user_id_from_token, log_auth_info
 from utils.file_helpers import get_session_dir
 from utils.html_helpers import strip_html_tags
 from utils.markdown_converter import markdown_to_html
+from config import Config
 from datetime import datetime
 import os
 import json
@@ -202,6 +204,14 @@ def create_session():
             return jsonify({'error': 'Unauthorized - project does not belong to user'}), 403
         
         session_id = ChatSessionModel.create_session(user_id, project_id)
+        
+        # Invalidate cache
+        redis_service = get_redis_service()
+        redis_service.delete(f"cache:sessions:{user_id}:{project_id}")
+        redis_service.delete(f"cache:sessions:{user_id}:all")
+        print(f"[REDIS] Invalidating cache: cache:sessions:{user_id}:{project_id or 'all'}")
+        print(f"[REDIS] Cache invalidated successfully")
+        
         return jsonify({
             'session_id': session_id,
             'message': 'Session created successfully'
@@ -222,6 +232,24 @@ def get_session():
         
         # If session_id is provided, get specific session
         if session_id:
+            # Generate cache key for individual session
+            cache_key = f"cache:session:{session_id}"
+            
+            # Check Redis cache first
+            redis_service = get_redis_service()
+            cached_data = redis_service.get(cache_key)
+            
+            if cached_data is not None:
+                # Verify user still owns this session (security check)
+                if cached_data.get('user_id') == user_id:
+                    print(f"[REDIS] get_session: Cache hit for session {session_id}")
+                    # Remove user_id from response (it's only for verification)
+                    response_data = {k: v for k, v in cached_data.items() if k != 'user_id'}
+                    return jsonify(response_data), 200
+            
+            # Cache miss - fetch from MongoDB
+            print(f"[REDIS] get_session: Cache miss for session {session_id}, fetching from MongoDB")
+            
             session = ChatSessionModel.get_session(session_id)
             if not session:
                 return jsonify({'error': 'Session not found'}), 404
@@ -262,18 +290,45 @@ def get_session():
                 if project:
                     project_name = project.get('project_name')
             
-            return jsonify({
+            response_data = {
                 'session_id': session['session_id'],
                 'project_id': project_id,
                 'project_name': project_name,
                 'messages': serialized_messages,
                 'created_at': session['created_at'].isoformat(),
-                'updated_at': session['updated_at'].isoformat()
-            }), 200
+                'updated_at': session['updated_at'].isoformat(),
+                'user_id': user_id  # Store for cache verification
+            }
+            
+            # Cache the result (shorter TTL for individual sessions since they change more frequently)
+            redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_VERSION)  # 1 minute TTL
+            print(f"[REDIS] get_session: Cached session {session_id}")
+            
+            # Remove user_id from response
+            response_data = {k: v for k, v in response_data.items() if k != 'user_id'}
+            return jsonify(response_data), 200
         
         # If no session_id, return all sessions for the user
         # Optionally filter by project_id
         project_id_filter = request.args.get('project_id')
+        
+        # Generate cache key for session list
+        if project_id_filter:
+            cache_key = f"cache:sessions:{user_id}:{project_id_filter}"
+        else:
+            cache_key = f"cache:sessions:{user_id}:all"
+        
+        # Check Redis cache first
+        redis_service = get_redis_service()
+        cached_data = redis_service.get(cache_key)
+        
+        if cached_data is not None:
+            print(f"[REDIS] get_session: Cache hit for session list (project: {project_id_filter or 'all'})")
+            return jsonify(cached_data), 200
+        
+        # Cache miss - fetch from MongoDB
+        print(f"[REDIS] get_session: Cache miss for session list, fetching from MongoDB")
+        
         sessions = ChatSessionModel.get_all_sessions(user_id, project_id_filter)
         sessions_list = []
         for session in sessions:
@@ -306,7 +361,13 @@ def get_session():
                 'message_count': len(messages)
             })
         
-        return jsonify({'sessions': sessions_list}), 200
+        response_data = {'sessions': sessions_list}
+        
+        # Cache the result
+        redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)  # 5 minutes TTL
+        print(f"[REDIS] get_session: Cached {len(sessions_list)} sessions")
+        
+        return jsonify(response_data), 200
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -366,6 +427,19 @@ def send_message():
             return jsonify({'error': 'Unauthorized'}), 403
         
         ChatSessionModel.add_message(session_id, 'user', message_with_highlights)
+        
+        # Invalidate cache for this session (message was added)
+        redis_service = get_redis_service()
+        redis_service.delete(f"cache:session:{session_id}")
+        # Also invalidate session list cache for the project
+        session_data = ChatSessionModel.get_session(session_id)
+        if session_data:
+            project_id = session_data.get('project_id')
+            if project_id:
+                redis_service.delete(f"cache:sessions:{user_id}:{project_id}")
+            redis_service.delete(f"cache:sessions:{user_id}:all")
+            print(f"[REDIS] Invalidating cache: cache:session:{session_id}")
+            print(f"[REDIS] Cache invalidated successfully")
         
         # Get document content for context
         session_dir = get_session_dir(session_id)
@@ -705,6 +779,19 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 status=status,
                 pending_content_id=pending_content_id
             )
+            
+            # Invalidate cache for this session (message was added)
+            redis_service = get_redis_service()
+            redis_service.delete(f"cache:session:{session_id}")
+            # Also invalidate session list cache for the project
+            session_data = ChatSessionModel.get_session(session_id)
+            if session_data:
+                project_id = session_data.get('project_id')
+                if project_id:
+                    redis_service.delete(f"cache:sessions:{user_id}:{project_id}")
+                redis_service.delete(f"cache:sessions:{user_id}:all")
+                print(f"[REDIS] Invalidating cache: cache:session:{session_id}")
+                print(f"[REDIS] Cache invalidated successfully")
         else:
             # No content - regular chat message
             ChatSessionModel.add_message(
@@ -716,6 +803,19 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 placement=None,
                 status=None
             )
+            
+            # Invalidate cache for this session (message was added)
+            redis_service = get_redis_service()
+            redis_service.delete(f"cache:session:{session_id}")
+            # Also invalidate session list cache for the project
+            session_data = ChatSessionModel.get_session(session_id)
+            if session_data:
+                project_id = session_data.get('project_id')
+                if project_id:
+                    redis_service.delete(f"cache:sessions:{user_id}:{project_id}")
+                redis_service.delete(f"cache:sessions:{user_id}:all")
+                print(f"[REDIS] Invalidating cache: cache:session:{session_id}")
+                print(f"[REDIS] Cache invalidated successfully")
         
         # DO NOT auto-insert content - it's now pending approval
         # Content will be inserted when user approves via /chat/approve endpoint

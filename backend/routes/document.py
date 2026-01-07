@@ -2,7 +2,9 @@ from flask import Blueprint, request, jsonify, send_file
 from utils.file_helpers import get_session_dir
 from models.database import ChatSessionModel, ResearchDocumentModel, ProjectModel
 from services.vector_service import VectorService
+from services.redis_service import get_redis_service
 from utils.auth import get_user_id_from_token, log_auth_info
+from config import Config
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -127,6 +129,16 @@ def save_document():
             vector_service.index_document(document_id, new_content)
         except Exception as index_error:
             print(f"Warning: Failed to index document: {index_error}")
+        
+        # Invalidate cache (document list cache, not content cache - that's handled by version)
+        redis_service = get_redis_service()
+        if project_id:
+            cache_key = f"cache:documents:{user_id}:{project_id}"
+            redis_service.delete(cache_key)
+        redis_service.delete(f"cache:documents:{user_id}:all")
+        redis_service.delete_pattern(f"cache:doc:{document_id}:*")
+        print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
+        print(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({
             'status': 'ok',
@@ -364,6 +376,22 @@ def get_all_research_documents():
             return jsonify({'error': 'Unauthorized'}), 401
         
         project_id = request.args.get('project_id')
+        
+        # Generate cache key
+        cache_key = f"cache:documents:{user_id}:{project_id or 'all'}"
+        
+        # Check Redis cache first
+        redis_service = get_redis_service()
+        cached_data = redis_service.get(cache_key)
+        
+        if cached_data is not None:
+            print(f"[REDIS] get_all_research_documents: Cache hit")
+            return jsonify(cached_data), 200
+        
+        # Cache miss - fetch from MongoDB
+        print(f"[REDIS] get_all_research_documents: Checking cache for user {user_id}, project {project_id}")
+        print(f"[REDIS] get_all_research_documents: Cache miss, fetching from MongoDB")
+        
         documents = ResearchDocumentModel.get_all_documents(user_id, project_id)
         
         # Serialize documents
@@ -379,7 +407,13 @@ def get_all_research_documents():
                 'updated_at': doc.get('updated_at').isoformat() if doc.get('updated_at') else None
             })
         
-        return jsonify({'documents': serialized_docs}), 200
+        response_data = {'documents': serialized_docs}
+        
+        # Cache the result
+        redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)
+        print(f"[REDIS] get_all_research_documents: Cached {len(serialized_docs)} documents")
+        
+        return jsonify(response_data), 200
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -409,6 +443,15 @@ def create_research_document():
         
         document_id = ResearchDocumentModel.create_document(user_id, project_id, title)
         
+        # Invalidate cache
+        redis_service = get_redis_service()
+        cache_key = f"cache:documents:{user_id}:{project_id}"
+        redis_service.delete(cache_key)
+        # Also invalidate "all" cache
+        redis_service.delete(f"cache:documents:{user_id}:all")
+        print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id}")
+        print(f"[REDIS] Cache invalidated successfully")
+        
         return jsonify({
             'document_id': document_id,
             'status': 'created'
@@ -432,9 +475,22 @@ def delete_research_document(document_id):
         if document['user_id'] != user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         
+        project_id = document.get('project_id')
+        
         success = ResearchDocumentModel.delete_document(document_id)
         
         if success:
+            # Invalidate cache
+            redis_service = get_redis_service()
+            if project_id:
+                cache_key = f"cache:documents:{user_id}:{project_id}"
+                redis_service.delete(cache_key)
+            # Also invalidate "all" cache and document-specific caches
+            redis_service.delete(f"cache:documents:{user_id}:all")
+            redis_service.delete_pattern(f"cache:doc:{document_id}:*")
+            print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
+            print(f"[REDIS] Cache invalidated successfully")
+            
             return jsonify({'status': 'deleted'}), 200
         else:
             return jsonify({'error': 'Failed to delete document'}), 500
@@ -457,10 +513,21 @@ def archive_document(document_id):
         if document['user_id'] != user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         
+        project_id = document.get('project_id')
+        
         success = ResearchDocumentModel.archive_document(document_id)
         
         if not success:
             return jsonify({'error': 'Failed to archive document'}), 500
+        
+        # Invalidate cache
+        redis_service = get_redis_service()
+        if project_id:
+            cache_key = f"cache:documents:{user_id}:{project_id}"
+            redis_service.delete(cache_key)
+        redis_service.delete(f"cache:documents:{user_id}:all")
+        print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
+        print(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({'status': 'ok'}), 200
     
@@ -482,10 +549,21 @@ def unarchive_document(document_id):
         if document['user_id'] != user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         
+        project_id = document.get('project_id')
+        
         success = ResearchDocumentModel.unarchive_document(document_id)
         
         if not success:
             return jsonify({'error': 'Failed to unarchive document'}), 500
+        
+        # Invalidate cache
+        redis_service = get_redis_service()
+        if project_id:
+            cache_key = f"cache:documents:{user_id}:{project_id}"
+            redis_service.delete(cache_key)
+        redis_service.delete(f"cache:documents:{user_id}:all")
+        print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
+        print(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({'status': 'ok'}), 200
     
@@ -513,10 +591,22 @@ def rename_document(document_id):
         if document['user_id'] != user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         
+        project_id = document.get('project_id')
+        
         success = ResearchDocumentModel.rename_document(document_id, new_title.strip())
         
         if not success:
             return jsonify({'error': 'Failed to rename document'}), 500
+        
+        # Invalidate cache
+        redis_service = get_redis_service()
+        if project_id:
+            cache_key = f"cache:documents:{user_id}:{project_id}"
+            redis_service.delete(cache_key)
+        redis_service.delete(f"cache:documents:{user_id}:all")
+        redis_service.delete_pattern(f"cache:doc:{document_id}:*")
+        print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
+        print(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({'status': 'ok', 'title': new_title.strip()}), 200
     

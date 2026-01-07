@@ -2,6 +2,8 @@ from flask import Blueprint, request, jsonify
 from models.database import HighlightModel, ProjectModel
 from utils.auth import get_user_id_from_token, log_auth_info
 from services.s3_service import S3Service
+from services.redis_service import get_redis_service
+from config import Config
 import base64
 import io
 
@@ -228,6 +230,13 @@ def save_highlight():
         highlight_id=highlight_id  # Pass the pre-generated ID
     )
     
+    # Invalidate cache
+    redis_service = get_redis_service()
+    redis_service.delete(f"cache:highlights:{user_id}:{project_id}")
+    redis_service.delete(f"cache:highlights:{user_id}:{project_id}:{source_url}")
+    print(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
+    print(f"[REDIS] Cache invalidated successfully")
+    
     print(f"Highlight saved: {saved_highlight_id} for project {project_id}" + 
           (f" (with S3 preview: {preview_image_url})" if preview_image_url else " (no preview)"))
     
@@ -267,6 +276,24 @@ def get_highlights():
     if not project or project.get('user_id') != user_id:
         return jsonify({'error': 'Project not found or access denied'}), 404
     
+    # Generate cache key
+    if source_url:
+        cache_key = f"cache:highlights:{user_id}:{project_id}:{source_url}"
+    else:
+        cache_key = f"cache:highlights:{user_id}:{project_id}"
+    
+    # Check Redis cache first
+    redis_service = get_redis_service()
+    cached_data = redis_service.get(cache_key)
+    
+    if cached_data is not None:
+        print(f"[REDIS] get_highlights: Cache hit")
+        return jsonify(cached_data), 200
+    
+    # Cache miss - fetch from MongoDB
+    print(f"[REDIS] get_highlights: Cache key: {cache_key}")
+    print(f"[REDIS] get_highlights: Cache miss, fetching from MongoDB")
+    
     # Get highlights based on filters
     if source_url:
         # Get highlights for specific URL
@@ -288,7 +315,13 @@ def get_highlights():
         if '_id' in h:
             h['_id'] = str(h['_id'])
     
-    return jsonify({'highlights': highlights}), 200
+    response_data = {'highlights': highlights}
+    
+    # Cache the result
+    redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)
+    print(f"[REDIS] get_highlights: Cached {len(highlights)} highlights")
+    
+    return jsonify(response_data), 200
 
 
 @highlight_bp.route('', methods=['DELETE'])
@@ -339,6 +372,13 @@ def delete_highlight():
     )
     
     if success:
+        # Invalidate cache
+        redis_service = get_redis_service()
+        redis_service.delete(f"cache:highlights:{user_id}:{project_id}")
+        redis_service.delete(f"cache:highlights:{user_id}:{project_id}:{source_url}")
+        print(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
+        print(f"[REDIS] Cache invalidated successfully")
+        
         return jsonify({
             'success': True,
             'message': 'Highlight deleted successfully'
@@ -392,6 +432,13 @@ def archive_highlight():
     )
     
     if success:
+        # Invalidate cache
+        redis_service = get_redis_service()
+        redis_service.delete(f"cache:highlights:{user_id}:{project_id}")
+        redis_service.delete(f"cache:highlights:{user_id}:{project_id}:{source_url}")
+        print(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
+        print(f"[REDIS] Cache invalidated successfully")
+        
         return jsonify({
             'success': True,
             'message': 'Highlight archived successfully'
@@ -445,6 +492,13 @@ def unarchive_highlight():
     )
     
     if success:
+        # Invalidate cache
+        redis_service = get_redis_service()
+        redis_service.delete(f"cache:highlights:{user_id}:{project_id}")
+        redis_service.delete(f"cache:highlights:{user_id}:{project_id}:{source_url}")
+        print(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
+        print(f"[REDIS] Cache invalidated successfully")
+        
         return jsonify({
             'success': True,
             'message': 'Highlight unarchived successfully'

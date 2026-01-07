@@ -20,3 +20,4 @@ html2image>=2.0.0
 pytesseract>=0.3.10
 boto3>=1.34.0
 diff-match-patch>=20230430
+redis>=5.0.0

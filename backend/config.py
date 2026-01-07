@@ -40,6 +40,15 @@ class Config:
     AWS_S3_BUCKET_NAME = os.getenv('AWS_S3_BUCKET_NAME')
     AWS_S3_REGION = os.getenv('AWS_S3_REGION', 'us-east-1')
     
+    # Redis Configuration for server-side caching
+    REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+    REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
+    REDIS_PASSWORD = os.getenv('REDIS_PASSWORD', None)
+    REDIS_DB = int(os.getenv('REDIS_DB', 0))
+    REDIS_TTL_DOCUMENTS = int(os.getenv('REDIS_TTL_DOCUMENTS', 300))  # 5 min
+    REDIS_TTL_METADATA = int(os.getenv('REDIS_TTL_METADATA', 600))  # 10 min
+    REDIS_TTL_VERSION = int(os.getenv('REDIS_TTL_VERSION', 60))  # 1 min
+    
     @staticmethod
     def is_s3_configured():
         """Check if AWS S3 is properly configured"""

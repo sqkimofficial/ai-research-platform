@@ -6,6 +6,8 @@ from flask import Blueprint, request, jsonify, send_file
 from models.database import PDFDocumentModel, ProjectModel
 from utils.auth import get_user_id_from_token
 from services.pdf_extraction_service import get_highlight_extraction_service
+from services.redis_service import get_redis_service
+from config import Config
 import base64
 import io
 import threading
@@ -124,6 +126,14 @@ def upload_document():
         content_type=content_type
     )
     
+    # Invalidate cache
+    redis_service = get_redis_service()
+    if project_id:
+        redis_service.delete(f"cache:pdfs:{user_id}:{project_id}")
+    redis_service.delete(f"cache:pdfs:{user_id}:all")
+    print(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
+    print(f"[REDIS] Cache invalidated successfully")
+    
     # Start background thread to extract highlights
     thread = threading.Thread(
         target=extract_highlights_async,
@@ -158,7 +168,7 @@ def get_pdfs():
     project_id = request.args.get('project_id')
     
     if pdf_id:
-        # Get specific PDF
+        # Get specific PDF (don't cache individual PDFs due to size)
         pdf = PDFDocumentModel.get_pdf_document(pdf_id)
         if not pdf or pdf.get('user_id') != user_id:
             return jsonify({'error': 'PDF not found or access denied'}), 404
@@ -178,7 +188,25 @@ def get_pdfs():
         
         return jsonify({'pdf': pdf}), 200
     
-    elif project_id:
+    # Generate cache key for list endpoints
+    if project_id:
+        cache_key = f"cache:pdfs:{user_id}:{project_id}"
+    else:
+        cache_key = f"cache:pdfs:{user_id}:all"
+    
+    # Check Redis cache first
+    redis_service = get_redis_service()
+    cached_data = redis_service.get(cache_key)
+    
+    if cached_data is not None:
+        print(f"[REDIS] get_pdfs: Cache hit")
+        return jsonify(cached_data), 200
+    
+    # Cache miss - fetch from MongoDB
+    print(f"[REDIS] get_pdfs: Cache key: {cache_key}")
+    print(f"[REDIS] get_pdfs: Cache miss, fetching from MongoDB")
+    
+    if project_id:
         # Validate project belongs to user
         project = ProjectModel.get_project(project_id)
         if not project or project.get('user_id') != user_id:
@@ -201,7 +229,13 @@ def get_pdfs():
             if 'timestamp' in h:
                 h['timestamp'] = h['timestamp'].isoformat()
     
-    return jsonify({'pdfs': pdfs}), 200
+    response_data = {'pdfs': pdfs}
+    
+    # Cache the result
+    redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)
+    print(f"[REDIS] get_pdfs: Cached {len(pdfs)} PDFs")
+    
+    return jsonify(response_data), 200
 
 
 @pdf_bp.route('/file/<pdf_id>', methods=['GET'])
@@ -399,9 +433,21 @@ def delete_pdf(pdf_id):
     if not user_id:
         return jsonify({'error': 'Unauthorized'}), 401
     
+    # Get PDF to find project_id before deletion
+    pdf = PDFDocumentModel.get_pdf_document(pdf_id)
+    project_id = pdf.get('project_id') if pdf else None
+    
     success = PDFDocumentModel.delete_pdf_document(pdf_id, user_id)
     
     if success:
+        # Invalidate cache
+        redis_service = get_redis_service()
+        if project_id:
+            redis_service.delete(f"cache:pdfs:{user_id}:{project_id}")
+        redis_service.delete(f"cache:pdfs:{user_id}:all")
+        print(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
+        print(f"[REDIS] Cache invalidated successfully")
+        
         return jsonify({
             'success': True,
             'message': 'PDF deleted successfully'
@@ -474,10 +520,21 @@ def archive_pdf():
     if not pdf or pdf.get('user_id') != user_id:
         return jsonify({'error': 'PDF not found or access denied'}), 404
     
+    # Get project_id before archiving
+    project_id = pdf.get('project_id')
+    
     # Archive PDF
     success = PDFDocumentModel.archive_pdf_document(pdf_id)
     
     if success:
+        # Invalidate cache
+        redis_service = get_redis_service()
+        if project_id:
+            redis_service.delete(f"cache:pdfs:{user_id}:{project_id}")
+        redis_service.delete(f"cache:pdfs:{user_id}:all")
+        print(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
+        print(f"[REDIS] Cache invalidated successfully")
+        
         return jsonify({
             'success': True,
             'message': 'PDF archived successfully'
@@ -515,10 +572,21 @@ def unarchive_pdf():
     if not pdf or pdf.get('user_id') != user_id:
         return jsonify({'error': 'PDF not found or access denied'}), 404
     
+    # Get project_id before unarchiving
+    project_id = pdf.get('project_id')
+    
     # Unarchive PDF
     success = PDFDocumentModel.unarchive_pdf_document(pdf_id)
     
     if success:
+        # Invalidate cache
+        redis_service = get_redis_service()
+        if project_id:
+            redis_service.delete(f"cache:pdfs:{user_id}:{project_id}")
+        redis_service.delete(f"cache:pdfs:{user_id}:all")
+        print(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
+        print(f"[REDIS] Cache invalidated successfully")
+        
         return jsonify({
             'success': True,
             'message': 'PDF unarchived successfully'
