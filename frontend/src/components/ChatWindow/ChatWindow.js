@@ -452,27 +452,39 @@ const ChatWindow = ({
       const selectedItem = mentionItems[mentionSelectedIndex];
       console.log('[PREVIEW] Selected item:', selectedItem?.type, selectedItem?.sourceType, selectedItem?.data?.highlight_id);
       
-      // Fetch preview for PDF highlights (PDFs always have previews)
+      // Fetch preview for PDF highlights - use preview_image_url (S3)
       if (selectedItem?.type === 'highlight' && selectedItem?.sourceType === 'pdf' && selectedItem?.pdfId) {
-        console.log('[PREVIEW] Fetching PDF preview for:', selectedItem.pdfId, selectedItem.data.highlight_id);
-        setPreviewLoading(true);
-        try {
-          const response = await pdfAPI.getHighlightPreview(
-            selectedItem.pdfId, 
-            selectedItem.data.highlight_id
-          );
-          console.log('[PREVIEW] PDF preview response:', response.data);
-          if (response.data?.preview_image) {
-            setPreviewImage(response.data.preview_image);
-          } else {
-            console.log('[PREVIEW] PDF preview: No preview_image in response');
+        console.log('[PREVIEW] PDF highlight - checking for preview_image_url');
+        console.log('[PREVIEW] PDF highlight data keys:', selectedItem.data ? Object.keys(selectedItem.data) : 'no data');
+        console.log('[PREVIEW] preview_image_url value:', selectedItem.data?.preview_image_url);
+        
+        // Check if preview_image_url is already in the data
+        if (selectedItem.data?.preview_image_url) {
+          console.log('[PREVIEW] Found preview_image_url in data:', selectedItem.data.preview_image_url);
+          setPreviewImage(selectedItem.data.preview_image_url);
+          setPreviewLoading(false);
+        } else {
+          // Try to fetch from API (for old highlights that might not have URL in data)
+          console.log('[PREVIEW] No preview_image_url in data, fetching from API');
+          setPreviewLoading(true);
+          try {
+            const response = await pdfAPI.getHighlightPreview(
+              selectedItem.pdfId, 
+              selectedItem.data.highlight_id
+            );
+            console.log('[PREVIEW] PDF preview API response:', response.data);
+            if (response.data?.preview_image_url) {
+              setPreviewImage(response.data.preview_image_url);
+            } else {
+              console.log('[PREVIEW] PDF preview: No preview_image_url in API response');
+              setPreviewImage('placeholder');
+            }
+          } catch (error) {
+            console.error('[PREVIEW] Failed to fetch PDF highlight preview:', error);
             setPreviewImage('placeholder');
           }
-        } catch (error) {
-          console.error('[PREVIEW] Failed to fetch PDF highlight preview:', error);
-          setPreviewImage('placeholder');
+          setPreviewLoading(false);
         }
-        setPreviewLoading(false);
       } 
       // Fetch preview for web highlights - only use preview_image_url (S3)
       else if (selectedItem?.type === 'highlight' && selectedItem?.sourceType === 'web' && selectedItem?.sourceUrl && selectedProjectId) {

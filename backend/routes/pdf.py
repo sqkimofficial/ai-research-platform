@@ -2,15 +2,19 @@
 Highlight Document Routes for handling PDF/Image uploads, viewing, and highlight extraction.
 Supports PDF, JPG, and PNG files.
 """
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, Response, stream_with_context
 from models.database import PDFDocumentModel, ProjectModel
 from utils.auth import get_user_id_from_token
 from services.pdf_extraction_service import get_highlight_extraction_service
 from services.redis_service import get_redis_service
+from services.s3_service import S3Service
+from services.sse_service import SSEService
 from config import Config
 import base64
 import io
 import threading
+import queue
+import json
 
 pdf_bp = Blueprint('pdf', __name__)
 
@@ -23,28 +27,171 @@ SUPPORTED_EXTENSIONS = {
 }
 
 
-def extract_highlights_async(doc_id, file_base64_data, content_type='application/pdf'):
+def extract_highlights_async(doc_id, file_base64_data=None, content_type='application/pdf', file_url=None):
     """
     Extract highlights from document in background thread using OpenAI GPT-4o mini.
     Updates the document with extracted highlights.
+    
+    Args:
+        doc_id: PDF document ID
+        file_base64_data: Base64 encoded file data (legacy - for old documents)
+        content_type: MIME type
+        file_url: S3 URL of the file (preferred for new uploads)
     """
     try:
+        # Get PDF document to retrieve user_id
+        pdf_doc = PDFDocumentModel.get_pdf_document(doc_id)
+        if not pdf_doc:
+            print(f"Error: PDF document {doc_id} not found")
+            PDFDocumentModel.update_extraction_status(doc_id, 'failed', 'Document not found')
+            return
+        
+        user_id = pdf_doc.get('user_id')
+        if not user_id:
+            print(f"Error: No user_id found for PDF document {doc_id}")
+            PDFDocumentModel.update_extraction_status(doc_id, 'failed', 'User ID not found')
+            return
+        
         # Update status to processing
         PDFDocumentModel.update_extraction_status(doc_id, 'processing')
         
+        # Send SSE event to notify frontend that extraction started
+        try:
+            SSEService.broadcast_to_user(
+                user_id=user_id,
+                event_type='extraction_started',
+                data={
+                    'pdf_id': doc_id,
+                    'status': 'processing'
+                }
+            )
+            print(f"[SSE] Sent extraction_started event for PDF {doc_id}")
+        except Exception as sse_error:
+            print(f"[SSE] Failed to send extraction_started event: {sse_error}")
+        
+        # Get file data - prefer S3 URL, fallback to legacy file_data
+        if file_url:
+            # Fetch from S3
+            print(f"[EXTRACTION] Fetching file from S3: {file_url}")
+            file_bytes = S3Service.get_file_from_s3(file_url)
+            if file_bytes:
+                # Convert to base64 for extraction service (it expects base64)
+                file_base64_data = base64.b64encode(file_bytes).decode('utf-8')
+                print(f"[EXTRACTION] Successfully fetched file from S3 ({len(file_bytes)} bytes)")
+            else:
+                print(f"[EXTRACTION] Failed to fetch file from S3")
+                PDFDocumentModel.update_extraction_status(doc_id, 'failed', 'Failed to fetch file from S3')
+                return
+        elif not file_base64_data:
+            # Try to get from legacy file_data
+            file_doc = PDFDocumentModel.get_pdf_file_data(doc_id)
+            if file_doc and file_doc.get('file_data'):
+                file_base64_data = file_doc['file_data']
+                print(f"[EXTRACTION] Using legacy file_data from MongoDB")
+            else:
+                print(f"[EXTRACTION] No file data available")
+                PDFDocumentModel.update_extraction_status(doc_id, 'failed', 'No file data available')
+                return
+        
         # Get highlight extraction service (uses OpenAI GPT-4o mini) and extract highlights
         extraction_service = get_highlight_extraction_service()
-        highlights = extraction_service.extract_highlights(file_base64_data, content_type)
+        highlights = extraction_service.extract_highlights(file_base64_data, content_type, user_id=user_id, pdf_id=doc_id)
         
         # Update the document with highlights
-        PDFDocumentModel.update_highlights(doc_id, highlights)
+        update_success = PDFDocumentModel.update_highlights(doc_id, highlights)
+        
+        if not update_success:
+            print(f"[ERROR] Failed to update highlights in database for PDF {doc_id}")
+            PDFDocumentModel.update_extraction_status(doc_id, 'failed', 'Failed to save highlights to database')
+            raise Exception("Failed to update highlights in database")
         
         print(f"Extracted {len(highlights)} highlights from document {doc_id}")
+        print(f"[EXTRACTION] Continuing to verification and cache invalidation for PDF {doc_id}, user_id: {user_id}")
+        
+        # Verify the update was successful by reading back from DB
+        try:
+            updated_doc = PDFDocumentModel.get_pdf_document(doc_id)
+            if updated_doc:
+                actual_status = updated_doc.get('extraction_status')
+                actual_highlight_count = len(updated_doc.get('highlights', []))
+                print(f"[VERIFY] PDF {doc_id} status in DB: {actual_status}, highlights: {actual_highlight_count}")
+                if actual_status != 'completed':
+                    print(f"[ERROR] Extraction status is {actual_status}, expected 'completed'")
+            else:
+                print(f"[ERROR] Could not verify update - PDF {doc_id} not found in database")
+        except Exception as verify_error:
+            print(f"[ERROR] Exception during verification: {verify_error}")
+            import traceback
+            traceback.print_exc()
+        
+        # Invalidate cache AFTER confirming DB update succeeded
+        try:
+            project_id = pdf_doc.get('project_id')
+            redis_service = get_redis_service()
+            if project_id:
+                redis_service.delete(f"cache:pdfs:{user_id}:{project_id}")
+            redis_service.delete(f"cache:pdfs:{user_id}:all")
+            print(f"[REDIS] Cache invalidated after extraction completion for PDF {doc_id}")
+        except Exception as cache_error:
+            print(f"[ERROR] Exception during cache invalidation: {cache_error}")
+            import traceback
+            traceback.print_exc()
+        
+        # Small delay to ensure DB write is fully committed and any in-flight reads complete
+        import time
+        time.sleep(0.5)
+        
+        # Send SSE event to notify frontend that extraction completed
+        # Wait additional time before notifying (as requested - total 2.5 seconds)
+        time.sleep(2)
+        try:
+            SSEService.broadcast_to_user(
+                user_id=user_id,
+                event_type='extraction_complete',
+                data={
+                    'pdf_id': doc_id,
+                    'highlight_count': len(highlights),
+                    'status': 'completed'
+                }
+            )
+            print(f"[SSE] Sent extraction_complete event for PDF {doc_id}")
+        except Exception as sse_error:
+            print(f"[ERROR] Exception during SSE broadcast: {sse_error}")
+            import traceback
+            traceback.print_exc()
         
     except Exception as e:
         error_msg = str(e)
-        print(f"Error extracting highlights from document {doc_id}: {error_msg}")
+        import traceback
+        print(f"[ERROR] Error extracting highlights from document {doc_id}: {error_msg}")
+        traceback.print_exc()
         PDFDocumentModel.update_extraction_status(doc_id, 'failed', error_msg)
+        
+        # Send SSE event for failed extraction (only if user_id is available)
+        try:
+            # Try to get user_id if not already set
+            if 'user_id' not in locals() or not user_id:
+                pdf_doc = PDFDocumentModel.get_pdf_document(doc_id)
+                if pdf_doc:
+                    user_id = pdf_doc.get('user_id')
+            
+            if user_id:
+                SSEService.broadcast_to_user(
+                    user_id=user_id,
+                    event_type='extraction_failed',
+                    data={
+                        'pdf_id': doc_id,
+                        'error': error_msg,
+                        'status': 'failed'
+                    }
+                )
+                print(f"[SSE] Sent extraction_failed event for PDF {doc_id}")
+            else:
+                print(f"[SSE] Cannot send extraction_failed event - user_id not available")
+        except Exception as sse_error:
+            print(f"[SSE] Failed to send extraction_failed event: {sse_error}")
+            import traceback
+            traceback.print_exc()
 
 
 @pdf_bp.route('', methods=['POST'])
@@ -93,8 +240,8 @@ def upload_document():
         if not file_ext:
             return jsonify({'error': 'Only PDF, JPG, and PNG files are allowed'}), 400
         
-        # Read file and encode to base64
-        file_data = base64.b64encode(file.read()).decode('utf-8')
+        # Read file bytes
+        file_bytes = file.read()
         filename = file.filename
         content_type = file.content_type or SUPPORTED_EXTENSIONS[file_ext]
     
@@ -104,26 +251,56 @@ def upload_document():
         if not data:
             return jsonify({'error': 'No data provided'}), 400
         
-        file_data = data.get('file_data')
+        file_data_base64 = data.get('file_data')
         filename = data.get('filename')
         project_id = data.get('project_id')
         content_type = data.get('content_type', 'application/pdf')
         
-        if not file_data or not filename or not project_id:
+        if not file_data_base64 or not filename or not project_id:
             return jsonify({'error': 'file_data, filename, and project_id are required'}), 400
+        
+        # Decode base64 to bytes
+        file_bytes = base64.b64decode(file_data_base64)
     
     # Validate project belongs to user
     project = ProjectModel.get_project(project_id)
     if not project or project.get('user_id') != user_id:
         return jsonify({'error': 'Project not found or access denied'}), 404
     
+    # Generate PDF ID upfront (needed for S3 key)
+    import uuid
+    doc_id = str(uuid.uuid4())
+    
+    # Upload file to S3
+    file_url = None
+    if S3Service.is_available():
+        file_url = S3Service.upload_document_file(
+            file_bytes=file_bytes,
+            user_id=user_id,
+            pdf_id=doc_id,
+            filename=filename,
+            content_type=content_type
+        )
+        if file_url:
+            print(f"[PDF UPLOAD] Successfully uploaded to S3: {file_url}")
+        else:
+            print(f"[PDF UPLOAD] S3 upload failed, will store in MongoDB (legacy mode)")
+            # Fallback to base64 for legacy support
+            file_data = base64.b64encode(file_bytes).decode('utf-8')
+    else:
+        print(f"[PDF UPLOAD] S3 not configured, storing in MongoDB (legacy mode)")
+        # Fallback to base64 for legacy support
+        file_data = base64.b64encode(file_bytes).decode('utf-8')
+    
     # Create document entry
-    doc_id = PDFDocumentModel.create_pdf_document(
+    PDFDocumentModel.create_pdf_document(
         user_id=user_id,
         project_id=project_id,
         filename=filename,
-        file_data=file_data,
-        content_type=content_type
+        file_url=file_url,
+        file_data=file_data if not file_url else None,  # Only store base64 if S3 upload failed
+        content_type=content_type,
+        pdf_id=doc_id  # Use the pre-generated ID
     )
     
     # Invalidate cache
@@ -134,10 +311,13 @@ def upload_document():
     print(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
     print(f"[REDIS] Cache invalidated successfully")
     
+    # Prepare file data for extraction (needed for extraction service)
+    file_base64_for_extraction = base64.b64encode(file_bytes).decode('utf-8')
+    
     # Start background thread to extract highlights
     thread = threading.Thread(
         target=extract_highlights_async,
-        args=(doc_id, file_data, content_type)
+        args=(doc_id, file_base64_for_extraction, content_type, file_url)
     )
     thread.daemon = True
     thread.start()
@@ -182,6 +362,9 @@ def get_pdfs():
         for h in pdf.get('highlights', []):
             if 'timestamp' in h:
                 h['timestamp'] = h['timestamp'].isoformat()
+            # Fix preview_image_url region if present
+            if 'preview_image_url' in h and h['preview_image_url']:
+                h['preview_image_url'] = S3Service.fix_s3_url_region(h['preview_image_url'], is_pdf_highlight=True)
         
         # Don't include file_data in response (too large)
         pdf.pop('file_data', None)
@@ -199,8 +382,32 @@ def get_pdfs():
     cached_data = redis_service.get(cache_key)
     
     if cached_data is not None:
-        print(f"[REDIS] get_pdfs: Cache hit")
-        return jsonify(cached_data), 200
+        # Verify cached data - check if any PDFs have stale 'processing' status
+        pdfs = cached_data.get('pdfs', [])
+        needs_refresh = False
+        for pdf in pdfs:
+            if pdf.get('extraction_status') == 'processing':
+                # Verify this PDF's actual status in DB
+                pdf_id = pdf.get('pdf_id')
+                if pdf_id:
+                    actual_doc = PDFDocumentModel.get_pdf_document(pdf_id)
+                    if actual_doc:
+                        actual_status = actual_doc.get('extraction_status')
+                        if actual_status != 'processing':
+                            print(f"[CACHE VERIFY] PDF {pdf_id} in cache has status=processing, but DB has status={actual_status}. Invalidating cache.")
+                            needs_refresh = True
+                            break
+        
+        if not needs_refresh:
+            print(f"[REDIS] get_pdfs: Cache hit (verified)")
+            return jsonify(cached_data), 200
+        else:
+            # Invalidate cache and fetch fresh data
+            print(f"[REDIS] get_pdfs: Cache hit but stale, invalidating and fetching fresh")
+            redis_service.delete(cache_key)
+            if project_id:
+                redis_service.delete(f"cache:pdfs:{user_id}:all")
+            # Fall through to fetch from MongoDB
     
     # Cache miss - fetch from MongoDB
     print(f"[REDIS] get_pdfs: Cache key: {cache_key}")
@@ -225,9 +432,18 @@ def get_pdfs():
             pdf['created_at'] = pdf['created_at'].isoformat()
         if 'updated_at' in pdf:
             pdf['updated_at'] = pdf['updated_at'].isoformat()
+        
+        # Ensure extraction_status is included and log it for debugging
+        extraction_status = pdf.get('extraction_status', 'unknown')
+        highlight_count = len(pdf.get('highlights', []))
+        print(f"[GET_PDFS] PDF {pdf.get('pdf_id', 'unknown')}: status={extraction_status}, highlights={highlight_count}")
+        
         for h in pdf.get('highlights', []):
             if 'timestamp' in h:
                 h['timestamp'] = h['timestamp'].isoformat()
+            # Fix preview_image_url region if present
+            if 'preview_image_url' in h and h['preview_image_url']:
+                h['preview_image_url'] = S3Service.fix_s3_url_region(h['preview_image_url'], is_pdf_highlight=True)
     
     response_data = {'pdfs': pdfs}
     
@@ -278,20 +494,31 @@ def get_pdf_file(pdf_id):
     if not pdf or pdf.get('user_id') != user_id:
         return jsonify({'error': 'PDF not found or access denied'}), 404
     
-    # Get file data
+    # Get file data/URL
     file_doc = PDFDocumentModel.get_pdf_file_data(pdf_id)
-    if not file_doc or not file_doc.get('file_data'):
-        return jsonify({'error': 'PDF file data not found'}), 404
+    if not file_doc:
+        return jsonify({'error': 'PDF file not found'}), 404
     
-    # Decode base64 and return as file
-    pdf_bytes = base64.b64decode(file_doc['file_data'])
+    # Check for S3 URL first (new uploads)
+    file_url = file_doc.get('file_url')
+    if file_url:
+        # Fix URL region if needed before redirecting
+        file_url = S3Service.fix_s3_url_region(file_url, is_pdf_highlight=True)
+        # Redirect to S3 URL - browser will fetch directly from S3
+        from flask import redirect
+        return redirect(file_url, code=302)
     
-    return send_file(
-        io.BytesIO(pdf_bytes),
-        mimetype=file_doc.get('content_type', 'application/pdf'),
-        as_attachment=False,
-        download_name=file_doc.get('filename', 'document.pdf')
-    )
+    # Fallback to legacy file_data (base64)
+    if file_doc.get('file_data'):
+        pdf_bytes = base64.b64decode(file_doc['file_data'])
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype=file_doc.get('content_type', 'application/pdf'),
+            as_attachment=False,
+            download_name=file_doc.get('filename', 'document.pdf')
+        )
+    
+    return jsonify({'error': 'PDF file data not found'}), 404
 
 
 @pdf_bp.route('/highlights/<pdf_id>', methods=['GET'])
@@ -313,6 +540,9 @@ def get_pdf_highlights(pdf_id):
     for h in highlights:
         if 'timestamp' in h:
             h['timestamp'] = h['timestamp'].isoformat()
+        # Fix preview_image_url region if present
+        if 'preview_image_url' in h and h['preview_image_url']:
+            h['preview_image_url'] = S3Service.fix_s3_url_region(h['preview_image_url'])
     
     return jsonify({
         'highlights': highlights,
@@ -433,9 +663,19 @@ def delete_pdf(pdf_id):
     if not user_id:
         return jsonify({'error': 'Unauthorized'}), 401
     
-    # Get PDF to find project_id before deletion
+    # Get PDF to find project_id and file_url before deletion
     pdf = PDFDocumentModel.get_pdf_document(pdf_id)
-    project_id = pdf.get('project_id') if pdf else None
+    if not pdf or pdf.get('user_id') != user_id:
+        return jsonify({'error': 'PDF not found or access denied'}), 404
+    
+    project_id = pdf.get('project_id')
+    file_url = pdf.get('file_url')
+    filename = pdf.get('filename', 'document.pdf')
+    
+    # Delete file from S3 if it exists
+    if file_url:
+        S3Service.delete_document_file_by_url(file_url)
+        print(f"[PDF DELETE] Deleted file from S3: {file_url}")
     
     success = PDFDocumentModel.delete_pdf_document(pdf_id, user_id)
     
@@ -453,7 +693,7 @@ def delete_pdf(pdf_id):
             'message': 'PDF deleted successfully'
         }), 200
     else:
-        return jsonify({'error': 'PDF not found or access denied'}), 404
+        return jsonify({'error': 'PDF deletion failed'}), 500
 
 
 @pdf_bp.route('/reextract/<pdf_id>', methods=['POST'])
@@ -474,13 +714,20 @@ def reextract_highlights(pdf_id):
     
     # Get file data
     file_doc = PDFDocumentModel.get_pdf_file_data(pdf_id)
-    if not file_doc or not file_doc.get('file_data'):
+    if not file_doc:
+        return jsonify({'error': 'PDF file not found'}), 404
+    
+    # Get file data - prefer S3 URL, fallback to legacy file_data
+    file_url = file_doc.get('file_url')
+    file_data = file_doc.get('file_data')
+    
+    if not file_url and not file_data:
         return jsonify({'error': 'PDF file data not found'}), 404
     
     # Start background thread to re-extract highlights
     thread = threading.Thread(
         target=extract_highlights_async,
-        args=(pdf_id, file_doc['file_data'])
+        args=(pdf_id, file_data, file_doc.get('content_type', 'application/pdf'), file_url)
     )
     thread.daemon = True
     thread.start()
@@ -595,14 +842,93 @@ def unarchive_pdf():
         return jsonify({'error': 'Failed to unarchive PDF'}), 500
 
 
+@pdf_bp.route('/events', methods=['GET'])
+def sse_events():
+    """
+    Server-Sent Events endpoint for real-time extraction status updates.
+    
+    Clients subscribe to this endpoint to receive notifications when PDF extraction completes.
+    
+    Query params:
+        token: string (optional) - Auth token if not in Authorization header
+    
+    Returns: SSE stream with extraction events
+    """
+    user_id = get_user_id_from_token()
+    if not user_id:
+        print("[SSE] Unauthorized - no user_id from token")
+        return Response(
+            'data: {"type":"error","message":"Unauthorized"}\n\n',
+            mimetype='text/event-stream',
+            status=401
+        )
+    
+    print(f"[SSE] New connection request from user {user_id}")
+    
+    # Create a queue for this connection
+    event_queue = queue.Queue()
+    
+    # Add connection to SSE service
+    SSEService.add_connection(user_id, event_queue)
+    print(f"[SSE] Connection added for user {user_id}, total connections: {SSEService.get_connection_count(user_id)}")
+    
+    def event_stream():
+        """Generator function that yields SSE events."""
+        try:
+            # Send initial connection message
+            yield f"data: {json.dumps({'type': 'connected', 'message': 'SSE connection established'})}\n\n"
+            print(f"[SSE] Sent connection confirmation to user {user_id}")
+            
+            while True:
+                try:
+                    # Wait for event with timeout to allow connection health checks
+                    event = event_queue.get(timeout=30)
+                    
+                    # Format as SSE
+                    event_json = json.dumps(event)
+                    yield f"data: {event_json}\n\n"
+                    print(f"[SSE] Sent event to user {user_id}: {event.get('type', 'unknown')}")
+                    
+                except queue.Empty:
+                    # Send keepalive ping
+                    yield f": keepalive\n\n"
+                except Exception as e:
+                    print(f"[SSE] Error in event stream for user {user_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    break
+        except GeneratorExit:
+            print(f"[SSE] Client disconnected (GeneratorExit) for user {user_id}")
+        except Exception as e:
+            print(f"[SSE] Unexpected error in event stream for user {user_id}: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # Remove connection when client disconnects
+            SSEService.remove_connection(user_id, event_queue)
+            print(f"[SSE] Connection closed for user {user_id}")
+    
+    return Response(
+        stream_with_context(event_stream()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',  # Disable buffering in nginx
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',  # Allow CORS for SSE
+            'Access-Control-Allow-Credentials': 'true'
+        }
+    )
+
+
 @pdf_bp.route('/highlight-preview/<pdf_id>/<highlight_id>', methods=['GET'])
 def get_highlight_preview(pdf_id, highlight_id):
     """
-    Get preview image for a specific highlight.
+    Get preview image URL for a specific highlight.
     
-    Returns the base64 encoded preview image centered on the highlight text.
+    Returns the S3 URL for the preview image centered on the highlight text.
     
-    Returns: { preview_image: string (base64 PNG) }
+    Returns: { preview_image_url: string } or { error: 'No preview available' }
     """
     user_id = get_user_id_from_token()
     if not user_id:
@@ -616,10 +942,12 @@ def get_highlight_preview(pdf_id, highlight_id):
     # Find the specific highlight
     for highlight in pdf.get('highlights', []):
         if highlight.get('highlight_id') == highlight_id:
-            preview = highlight.get('preview_image')
-            if preview:
-                return jsonify({'preview_image': preview}), 200
-            return jsonify({'error': 'No preview available for this highlight'}), 404
+            preview_url = highlight.get('preview_image_url')
+            if preview_url:
+                # Fix URL region if needed
+                preview_url = S3Service.fix_s3_url_region(preview_url, is_pdf_highlight=True)
+                return jsonify({'preview_image_url': preview_url}), 200
+            return jsonify({'error': 'No preview available for this highlight', 'reason': 'preview_image_url field is missing or empty'}), 404
     
     return jsonify({'error': 'Highlight not found'}), 404
 

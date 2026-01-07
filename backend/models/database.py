@@ -821,7 +821,7 @@ class PDFDocumentModel:
         return 'yellow'
     
     @staticmethod
-    def create_pdf_document(user_id, project_id, filename, file_data, content_type='application/pdf'):
+    def create_pdf_document(user_id, project_id, filename, file_url=None, file_data=None, content_type='application/pdf', pdf_id=None):
         """
         Create a new PDF document entry.
         
@@ -829,21 +829,25 @@ class PDFDocumentModel:
             user_id: User ID
             project_id: Project ID
             filename: Original filename
-            file_data: Binary PDF data (base64 encoded string)
+            file_url: S3 URL for the file (preferred for new uploads)
+            file_data: Binary PDF data (base64 encoded string) - legacy support only
             content_type: MIME type
+            pdf_id: Optional pre-generated PDF ID (used when uploading to S3 first)
         
         Returns:
             pdf_document_id
         """
         db = Database.get_db()
-        pdf_id = str(uuid.uuid4())
+        if not pdf_id:
+            pdf_id = str(uuid.uuid4())
         
         pdf_doc = {
             'pdf_id': pdf_id,
             'user_id': user_id,
             'project_id': project_id,
             'filename': filename,
-            'file_data': file_data,  # Base64 encoded PDF data
+            'file_url': file_url,  # S3 URL for the file (new uploads)
+            'file_data': file_data,  # Base64 encoded PDF data (legacy - only for backward compatibility)
             'content_type': content_type,
             'highlights': [],  # Will be populated by AI extraction
             'extraction_status': 'pending',  # pending, processing, completed, failed
@@ -889,11 +893,11 @@ class PDFDocumentModel:
     
     @staticmethod
     def get_pdf_file_data(pdf_id):
-        """Get just the file data for a PDF document"""
+        """Get file data/URL for a PDF document"""
         db = Database.get_db()
         doc = db.pdf_documents.find_one(
             {'pdf_id': pdf_id},
-            {'file_data': 1, 'content_type': 1, 'filename': 1}
+            {'file_url': 1, 'file_data': 1, 'content_type': 1, 'filename': 1}
         )
         return doc
     
@@ -910,8 +914,12 @@ class PDFDocumentModel:
         for h in highlights:
             normalized_h = h.copy()
             normalized_h['color_tag'] = PDFDocumentModel.normalize_color(h.get('color', h.get('color_tag', 'yellow')))
-            normalized_h['highlight_id'] = str(uuid.uuid4())
-            normalized_h['timestamp'] = datetime.utcnow()
+            # Preserve highlight_id if it exists (from extraction service), otherwise generate new one
+            if 'highlight_id' not in normalized_h:
+                normalized_h['highlight_id'] = str(uuid.uuid4())
+            # Preserve timestamp if it exists, otherwise set new one
+            if 'timestamp' not in normalized_h:
+                normalized_h['timestamp'] = datetime.utcnow()
             normalized_highlights.append(normalized_h)
         
         result = db.pdf_documents.update_one(
@@ -924,6 +932,19 @@ class PDFDocumentModel:
                 }
             }
         )
+        
+        # Log the update result for debugging
+        if result.modified_count > 0:
+            print(f"[DB] Successfully updated PDF {pdf_id} with {len(normalized_highlights)} highlights, status: completed")
+        else:
+            print(f"[DB] WARNING: Update operation returned modified_count={result.modified_count} for PDF {pdf_id}")
+            # Check if document exists
+            doc = db.pdf_documents.find_one({'pdf_id': pdf_id})
+            if not doc:
+                print(f"[DB] ERROR: PDF {pdf_id} does not exist in database")
+            else:
+                print(f"[DB] PDF {pdf_id} exists but was not modified (maybe no changes?)")
+        
         return result.modified_count > 0
     
     @staticmethod

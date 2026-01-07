@@ -9,6 +9,7 @@ import json
 import base64
 import io
 import re
+import uuid
 
 # Add parent directory to path for imports
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -42,6 +43,14 @@ except ImportError:
     OCR_SERVICE_AVAILABLE = False
     print("Warning: OCR position service not available.")
 
+# Try to import S3 service
+try:
+    from services.s3_service import S3Service
+    S3_SERVICE_AVAILABLE = True
+except ImportError:
+    S3_SERVICE_AVAILABLE = False
+    print("Warning: S3 service not available.")
+
 
 class HighlightExtractionService:
     """Service for extracting highlights from PDFs and images using OpenAI GPT-4o mini."""
@@ -58,25 +67,27 @@ class HighlightExtractionService:
         self.client = OpenAI(api_key=Config.OPENAI_API_KEY)
         self.model = "gpt-4o-mini"
     
-    def extract_highlights(self, file_base64_data, content_type='application/pdf'):
+    def extract_highlights(self, file_base64_data, content_type='application/pdf', user_id=None, pdf_id=None):
         """
         Extract highlighted text from a document (PDF or image) using OpenAI's vision capabilities.
         
         Args:
             file_base64_data: Base64 encoded file data
             content_type: MIME type of the file (application/pdf, image/jpeg, image/png)
+            user_id: User ID for S3 uploads (optional)
+            pdf_id: PDF document ID for S3 uploads (optional)
         
         Returns:
-            List of highlights with text and color information
+            List of highlights with text and color information (preview_image_url instead of preview_image)
         """
         file_type = self.SUPPORTED_TYPES.get(content_type, 'pdf')
         
         if file_type == 'pdf':
-            return self._extract_from_pdf(file_base64_data)
+            return self._extract_from_pdf(file_base64_data, user_id, pdf_id)
         else:
-            return self._extract_from_image(file_base64_data, content_type)
+            return self._extract_from_image(file_base64_data, content_type, user_id, pdf_id)
     
-    def _extract_from_pdf(self, pdf_base64_data):
+    def _extract_from_pdf(self, pdf_base64_data, user_id=None, pdf_id=None):
         """Extract highlights from a PDF file."""
         if not PYMUPDF_AVAILABLE:
             raise ValueError("PyMuPDF is required for PDF processing. Install with: pip install pymupdf")
@@ -105,22 +116,30 @@ class HighlightExtractionService:
                 
                 # Add position and preview for each highlight
                 for idx, highlight in enumerate(page_highlights, 1):
+                    # Generate highlight_id if not present
+                    if 'highlight_id' not in highlight:
+                        highlight['highlight_id'] = str(uuid.uuid4())
+                    highlight_id = highlight['highlight_id']
                     bbox = self._find_highlight_position(doc, highlight['text'], page_num)
                     if bbox:
                         highlight['bounding_box'] = bbox
-                        preview_image = self._generate_preview_image(doc, page_num, bbox)
-                        highlight['preview_image'] = preview_image
-                        if preview_image:
-                            preview_size_kb = len(base64.b64decode(preview_image)) / 1024
-                            print(f"  Highlight {idx}: Position found, preview size: {preview_size_kb:.1f} KB")
+                        preview_image_bytes = self._generate_preview_image_bytes(doc, page_num, bbox)
+                        preview_image_url = self._upload_preview_to_s3(preview_image_bytes, user_id, highlight_id)
+                        if preview_image_url:
+                            highlight['preview_image_url'] = preview_image_url
+                            print(f"  Highlight {idx}: Position found, preview uploaded to S3: {preview_image_url}")
+                        else:
+                            print(f"  Highlight {idx}: Position found, but S3 upload failed")
                     else:
                         # Fallback: use page center if text not found
                         # This is normal - GPT-4o extracts from images, but text search may fail due to formatting differences
-                        preview_image = self._generate_page_preview(doc, page_num)
-                        highlight['preview_image'] = preview_image
-                        if preview_image:
-                            preview_size_kb = len(base64.b64decode(preview_image)) / 1024
-                            print(f"  Highlight {idx}: Text position not found (using centered preview), preview size: {preview_size_kb:.1f} KB")
+                        preview_image_bytes = self._generate_page_preview_bytes(doc, page_num)
+                        preview_image_url = self._upload_preview_to_s3(preview_image_bytes, user_id, highlight_id)
+                        if preview_image_url:
+                            highlight['preview_image_url'] = preview_image_url
+                            print(f"  Highlight {idx}: Text position not found (using centered preview), uploaded to S3: {preview_image_url}")
+                        else:
+                            print(f"  Highlight {idx}: Text position not found, S3 upload failed")
                 
                 all_highlights.extend(page_highlights)
             
@@ -131,7 +150,7 @@ class HighlightExtractionService:
             print(f"Error extracting highlights from PDF: {e}")
             raise
     
-    def _extract_from_image(self, image_base64_data, content_type):
+    def _extract_from_image(self, image_base64_data, content_type, user_id=None, pdf_id=None):
         """Extract highlights from an image file (JPG/PNG)."""
         try:
             # For images, we process directly - no conversion needed
@@ -152,6 +171,10 @@ class HighlightExtractionService:
             
             # Generate preview images for each highlight
             for idx, highlight in enumerate(highlights, 1):
+                # Generate highlight_id if not present
+                if 'highlight_id' not in highlight:
+                    highlight['highlight_id'] = str(uuid.uuid4())
+                highlight_id = highlight['highlight_id']
                 bbox = None
                 
                 # Try to find the highlight text position using OCR
@@ -164,11 +187,14 @@ class HighlightExtractionService:
                         print(f"  Highlight {idx}: Text position not found via OCR (using centered preview)")
                 
                 # Generate preview image (centered on bbox if found, otherwise centered on image)
-                highlight['preview_image'] = self._generate_image_preview(image_base64_data, bbox=bbox)
+                preview_image_bytes = self._generate_image_preview_bytes(image_base64_data, bbox=bbox)
+                preview_image_url = self._upload_preview_to_s3(preview_image_bytes, user_id, highlight_id)
                 
-                if highlight['preview_image']:
-                    preview_size_kb = len(base64.b64decode(highlight['preview_image'])) / 1024
-                    print(f"  Highlight {idx}: Preview generated, size: {preview_size_kb:.1f} KB")
+                if preview_image_url:
+                    highlight['preview_image_url'] = preview_image_url
+                    print(f"  Highlight {idx}: Preview uploaded to S3: {preview_image_url}")
+                else:
+                    print(f"  Highlight {idx}: Preview generated but S3 upload failed")
             
             return highlights
             
@@ -427,6 +453,92 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             print(f"Error finding highlight position: {e}")
             return None
     
+    def _upload_preview_to_s3(self, image_bytes, user_id, highlight_id):
+        """
+        Upload preview image bytes to S3.
+        
+        Args:
+            image_bytes: Image bytes (PNG or JPEG)
+            user_id: User ID
+            highlight_id: Highlight ID
+        
+        Returns:
+            S3 URL string or None if upload fails
+        """
+        if not S3_SERVICE_AVAILABLE or not image_bytes:
+            return None
+        
+        if not user_id or not highlight_id:
+            print(f"[PDF EXTRACTION] Cannot upload to S3: user_id={user_id}, highlight_id={highlight_id}")
+            return None
+        
+        if S3Service.is_available():
+            url = S3Service.upload_highlight_image(image_bytes, user_id, highlight_id)
+            return url
+        else:
+            print("[PDF EXTRACTION] S3 not configured, skipping upload")
+            return None
+    
+    def _generate_preview_image_bytes(self, doc, page_number, bbox, width=600, height=320):
+        """
+        Generate a cropped preview image centered on the highlight (returns bytes).
+        Includes context above and below the highlight.
+        
+        Args:
+            doc: PyMuPDF document object
+            page_number: 1-indexed page number
+            bbox: Normalized bounding box dict with x0, y0, x1, y1
+            width: Target width in pixels
+            height: Target height in pixels
+        
+        Returns:
+            PNG image bytes or None
+        """
+        if not PYMUPDF_AVAILABLE or not PIL_AVAILABLE:
+            return None
+        
+        try:
+            page = doc[page_number - 1]
+            page_rect = page.rect
+            
+            # Calculate the center of the highlight
+            highlight_center_y = (bbox['y0'] + bbox['y1']) / 2 * page_rect.height
+            
+            # Determine crop region with context
+            # Calculate how much page height we need for the aspect ratio
+            aspect_ratio = width / height
+            crop_width = page_rect.width
+            crop_height = crop_width / aspect_ratio
+            
+            # Center the crop on the highlight
+            crop_top = max(0, highlight_center_y - crop_height / 2)
+            crop_bottom = crop_top + crop_height
+            
+            # Adjust if we go beyond page bounds
+            if crop_bottom > page_rect.height:
+                crop_bottom = page_rect.height
+                crop_top = max(0, crop_bottom - crop_height)
+            
+            # Render at higher DPI for quality
+            clip = fitz.Rect(0, crop_top, page_rect.width, crop_bottom)
+            mat = fitz.Matrix(2, 2)  # 2x scale for better quality
+            pix = page.get_pixmap(matrix=mat, clip=clip)
+            
+            # Convert to PIL Image and resize
+            img_bytes = pix.tobytes("png")
+            img = Image.open(io.BytesIO(img_bytes))
+            img = img.resize((width, height), Image.LANCZOS)
+            
+            # Save as optimized PNG
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG', optimize=True)
+            
+            return buffer.getvalue()
+            
+        except Exception as e:
+            print(f"Error generating preview image: {e}")
+            return None
+    
     def _generate_preview_image(self, doc, page_number, bbox, width=600, height=320):
         """
         Generate a cropped preview image centered on the highlight.
@@ -440,7 +552,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             height: Target height in pixels
         
         Returns:
-            Base64 encoded PNG string
+            Base64 encoded PNG string (DEPRECATED - use _generate_preview_image_bytes)
         """
         if not PYMUPDF_AVAILABLE or not PIL_AVAILABLE:
             return None
@@ -485,6 +597,55 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             
         except Exception as e:
             print(f"Error generating preview image: {e}")
+            return None
+    
+    def _generate_page_preview_bytes(self, doc, page_number, width=600, height=320):
+        """
+        Generate a centered preview of the page (fallback when text position not found) - returns bytes.
+        
+        Args:
+            doc: PyMuPDF document object
+            page_number: 1-indexed page number
+            width: Target width in pixels
+            height: Target height in pixels
+        
+        Returns:
+            PNG image bytes or None
+        """
+        if not PYMUPDF_AVAILABLE or not PIL_AVAILABLE:
+            return None
+        
+        try:
+            page = doc[page_number - 1]
+            page_rect = page.rect
+            
+            # Calculate center crop
+            aspect_ratio = width / height
+            crop_width = page_rect.width
+            crop_height = crop_width / aspect_ratio
+            
+            # Center on page
+            crop_top = max(0, (page_rect.height - crop_height) / 2)
+            crop_bottom = min(page_rect.height, crop_top + crop_height)
+            
+            # Render at higher DPI
+            clip = fitz.Rect(0, crop_top, page_rect.width, crop_bottom)
+            mat = fitz.Matrix(2, 2)
+            pix = page.get_pixmap(matrix=mat, clip=clip)
+            
+            # Convert to PIL Image and resize
+            img_bytes = pix.tobytes("png")
+            img = Image.open(io.BytesIO(img_bytes))
+            img = img.resize((width, height), Image.LANCZOS)
+            
+            # Save as optimized PNG
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG', optimize=True)
+            
+            return buffer.getvalue()
+            
+        except Exception as e:
+            print(f"Error generating page preview: {e}")
             return None
     
     def _generate_page_preview(self, doc, page_number, width=600, height=320):
@@ -536,6 +697,67 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             print(f"Error generating page preview: {e}")
             return None
     
+    def _generate_image_preview_bytes(self, image_base64, bbox=None, width=600, height=320):
+        """
+        Generate a cropped preview from an image (for standalone images, not PDFs) - returns bytes.
+        
+        Args:
+            image_base64: Base64 encoded image
+            bbox: Optional normalized bounding box dict with x0, y0, x1, y1
+            width: Target width in pixels
+            height: Target height in pixels
+        
+        Returns:
+            PNG image bytes or None
+        """
+        if not PIL_AVAILABLE:
+            return None
+        
+        try:
+            img_bytes = base64.b64decode(image_base64)
+            img = Image.open(io.BytesIO(img_bytes))
+            img_width, img_height = img.size
+            
+            # Calculate crop area
+            aspect_ratio = width / height
+            
+            if bbox:
+                # Center on the highlight bounding box
+                center_x = (bbox['x0'] + bbox['x1']) / 2 * img_width
+                center_y = (bbox['y0'] + bbox['y1']) / 2 * img_height
+            else:
+                # Center on image
+                center_x = img_width / 2
+                center_y = img_height / 2
+            
+            # Calculate crop dimensions
+            crop_width = min(img_width, img_width * 0.8)  # Max 80% of image width
+            crop_height = crop_width / aspect_ratio
+            
+            if crop_height > img_height:
+                crop_height = img_height
+                crop_width = crop_height * aspect_ratio
+            
+            # Calculate crop bounds centered on target point
+            left = max(0, min(img_width - crop_width, center_x - crop_width / 2))
+            top = max(0, min(img_height - crop_height, center_y - crop_height / 2))
+            right = left + crop_width
+            bottom = top + crop_height
+            
+            # Crop and resize
+            cropped = img.crop((left, top, right, bottom))
+            cropped = cropped.resize((width, height), Image.LANCZOS)
+            
+            # Save as optimized PNG
+            buffer = io.BytesIO()
+            cropped.save(buffer, format='PNG', optimize=True)
+            
+            return buffer.getvalue()
+            
+        except Exception as e:
+            print(f"Error generating image preview: {e}")
+            return None
+    
     def _generate_image_preview(self, image_base64, bbox=None, width=600, height=320):
         """
         Generate a cropped preview from an image (for standalone images, not PDFs).
@@ -547,7 +769,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             height: Target height in pixels
         
         Returns:
-            Base64 encoded PNG string
+            Base64 encoded PNG string (DEPRECATED - use _generate_image_preview_bytes)
         """
         if not PIL_AVAILABLE:
             return None

@@ -344,6 +344,11 @@ export const pdfAPI = {
   reextractHighlights: (pdfId) => {
     return api.post(`/api/pdfs/reextract/${pdfId}`);
   },
+  // Get SSE event source URL for real-time extraction updates
+  getSSEEventSourceUrl: () => {
+    const token = getToken();
+    return `${API_BASE_URL}/api/pdfs/events?token=${token}`;
+  },
 };
 
 export default api;

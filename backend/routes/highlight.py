@@ -288,6 +288,13 @@ def get_highlights():
     
     if cached_data is not None:
         print(f"[REDIS] get_highlights: Cache hit")
+        # Fix URLs in cached data before returning
+        if 'highlights' in cached_data:
+            for h_doc in cached_data['highlights']:
+                if 'highlights' in h_doc:
+                    for h in h_doc['highlights']:
+                        if 'preview_image_url' in h and h['preview_image_url']:
+                            h['preview_image_url'] = S3Service.fix_s3_url_region(h['preview_image_url'])
         return jsonify(cached_data), 200
     
     # Cache miss - fetch from MongoDB
@@ -310,10 +317,15 @@ def get_highlights():
             project_id=project_id
         )
     
-    # Convert ObjectId to string for JSON serialization
-    for h in highlights:
-        if '_id' in h:
-            h['_id'] = str(h['_id'])
+    # Convert ObjectId to string for JSON serialization and fix URLs
+    for h_doc in highlights:
+        if '_id' in h_doc:
+            h_doc['_id'] = str(h_doc['_id'])
+        # Fix preview_image_url in nested highlights array
+        if 'highlights' in h_doc:
+            for h in h_doc['highlights']:
+                if 'preview_image_url' in h and h['preview_image_url']:
+                    h['preview_image_url'] = S3Service.fix_s3_url_region(h['preview_image_url'])
     
     response_data = {'highlights': highlights}
     
@@ -557,6 +569,8 @@ def get_highlight_preview(highlight_id):
             # Only return S3 URL - no fallback to base64
             preview_url = h.get('preview_image_url')
             if preview_url:
+                # Fix URL region if needed
+                preview_url = S3Service.fix_s3_url_region(preview_url)
                 print(f"[PREVIEW] SUCCESS: Found preview URL: {preview_url}")
                 return jsonify({'preview_image_url': preview_url})
             

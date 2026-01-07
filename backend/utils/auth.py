@@ -20,22 +20,29 @@ from models.database import UserModel
 
 def get_token_from_header():
     """
-    Extract the token from the Authorization header.
+    Extract the token from the Authorization header or query parameter.
+    
+    For SSE (EventSource), tokens must be passed as query parameter since
+    EventSource doesn't support custom headers.
     
     Returns:
         str: The token string, or None if not present
     """
+    # First try Authorization header (standard for API calls)
     auth_header = request.headers.get('Authorization')
-    if not auth_header:
-        return None
+    if auth_header:
+        try:
+            # Expected format: "Bearer <token>"
+            parts = auth_header.split()
+            if len(parts) == 2 and parts[0].lower() == 'bearer':
+                return parts[1]
+        except Exception:
+            pass
     
-    try:
-        # Expected format: "Bearer <token>"
-        parts = auth_header.split()
-        if len(parts) == 2 and parts[0].lower() == 'bearer':
-            return parts[1]
-    except Exception:
-        pass
+    # Fallback to query parameter (for SSE/EventSource)
+    token = request.args.get('token')
+    if token:
+        return token
     
     return None
 

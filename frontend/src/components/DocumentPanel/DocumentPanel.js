@@ -246,11 +246,13 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const [pdfLoading, setPdfLoading] = useState(false);
   const [uploadingPdf, setUploadingPdf] = useState(false);
   const fileInputRef = useRef(null);
-  const pollingIntervalRef = useRef(null);
+  const sseEventSourceRef = useRef(null);
   const docMenuRef = useRef(null);
   const [isDocMenuOpen, setIsDocMenuOpen] = useState(false);
   // Track pending background refreshes to prevent duplicates
   const pendingBackgroundRefreshesRef = useRef(new Map()); // key -> timestamp
+  // Track PDFs currently being extracted to prevent unnecessary GET requests
+  const extractingPdfsRef = useRef(new Set()); // Set of pdf_id strings
   
   // Research Output Documents state
   const [researchDocsTabs, setResearchDocsTabs] = useState([]); // Array of { id, createdAt }
@@ -286,52 +288,140 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const hasRestoredTabsRef = useRef(false);
   const restoredProjectIdRef = useRef(null);
 
-  // Auto-poll for PDF extraction status updates
+  // Set up SSE connection for real-time extraction status updates (closed-loop system)
   useEffect(() => {
-    const pollForUpdates = async () => {
-      // Check if any PDFs in current project are still processing
-      if (selectedProjectId && pdfs.some(pdf => pdf.extraction_status === 'processing')) {
-        try {
-          const response = await pdfAPI.getPDFs(selectedProjectId);
-          setPdfs(response.data.pdfs || []);
-        } catch (err) {
-          console.error('Failed to poll PDF status:', err);
-        }
+    if (!selectedProjectId) {
+      // Close SSE connection if no project selected
+      if (sseEventSourceRef.current) {
+        console.log('[SSE] Closing connection - no project selected');
+        sseEventSourceRef.current.close();
+        sseEventSourceRef.current = null;
       }
-
-      // Also check if currently viewing a PDF that's still processing
-      const activePdfTab = pdfTabs.find(tab => tab.id === activeTabId);
-      if (activePdfTab?.selectedPdfData?.extractionStatus === 'processing') {
-        try {
-          const response = await pdfAPI.getHighlights(activePdfTab.selectedPdfData.pdf.pdf_id);
-          setPdfTabs(prev => prev.map(tab => 
-            tab.id === activeTabId ? {
-              ...tab,
-              selectedPdfData: {
-                ...tab.selectedPdfData,
-                highlights: response.data.highlights || [],
-                extractionStatus: response.data.extraction_status,
-                extractionError: response.data.extraction_error
-              }
-            } : tab
-          ));
-        } catch (err) {
-          console.error('Failed to poll PDF highlights:', err);
-        }
-      }
-    };
-
-    // Start polling if we're on a PDF tab
-    if (activeTabType === 'pdf') {
-      pollingIntervalRef.current = setInterval(pollForUpdates, 3000); // Poll every 3 seconds
+      return;
     }
 
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
+    // Get token first - if no token, can't connect
+    const token = getToken();
+    if (!token) {
+      console.warn('[SSE] No token available, skipping SSE connection');
+      return;
+    }
+
+    // Set up SSE connection
+    const eventSourceUrl = pdfAPI.getSSEEventSourceUrl();
+    console.log('[SSE] Connecting to:', eventSourceUrl.replace(/token=[^&]+/, 'token=***'));
+    
+    let eventSource;
+    try {
+      eventSource = new EventSource(eventSourceUrl);
+      sseEventSourceRef.current = eventSource;
+    } catch (err) {
+      console.error('[SSE] Failed to create EventSource:', err);
+      return;
+    }
+
+    // Handle connection open
+    eventSource.onopen = () => {
+      console.log('[SSE] Connection established successfully');
+    };
+
+    // Handle incoming events
+    eventSource.onmessage = (event) => {
+      try {
+        // Skip keepalive pings
+        if (event.data.trim() === '' || event.data.startsWith(':')) {
+          return;
+        }
+        
+        const data = JSON.parse(event.data);
+        console.log('[SSE] Received event:', data);
+
+        if (data.type === 'extraction_complete') {
+          // Extraction completed - refresh PDFs list immediately
+          console.log('[SSE] Extraction complete for PDF:', data.data.pdf_id);
+          // Remove from extracting set
+          extractingPdfsRef.current.delete(data.data.pdf_id);
+          if (selectedProjectId) {
+            // Force refresh with cache bypass - add timestamp to ensure fresh data
+            console.log('[SSE] Forcing PDF list refresh after extraction completion');
+            // Small delay to ensure backend cache invalidation has propagated
+            setTimeout(() => {
+              loadPdfsForProject(selectedProjectId, true);
+            }, 500);
+          }
+        } else if (data.type === 'extraction_failed') {
+          // Extraction failed - refresh to show error status
+          console.log('[SSE] Extraction failed for PDF:', data.data.pdf_id);
+          // Remove from extracting set
+          extractingPdfsRef.current.delete(data.data.pdf_id);
+          if (selectedProjectId) {
+            loadPdfsForProject(selectedProjectId, true);
+          }
+        } else if (data.type === 'extraction_started') {
+          // Extraction started - update UI to show processing status
+          console.log('[SSE] Extraction started for PDF:', data.data.pdf_id);
+          // Track that this PDF is being extracted
+          extractingPdfsRef.current.add(data.data.pdf_id);
+          // Update the specific PDF in the list to show processing status
+          setPdfs(prev => prev.map(pdf => 
+            pdf.pdf_id === data.data.pdf_id 
+              ? { ...pdf, extraction_status: 'processing' }
+              : pdf
+          ));
+        } else if (data.type === 'connected') {
+          console.log('[SSE] Server confirmed connection:', data.message);
+        }
+      } catch (err) {
+        console.error('[SSE] Error parsing event data:', err, 'Raw data:', event.data);
       }
     };
-  }, [activeTabType, activeTabId, selectedProjectId, pdfs, pdfTabs]);
+
+    // Handle connection errors
+    eventSource.onerror = (error) => {
+      console.error('[SSE] Connection error:', error);
+      console.error('[SSE] EventSource readyState:', eventSource.readyState);
+      // readyState: 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
+      if (eventSource.readyState === EventSource.CLOSED) {
+        console.error('[SSE] Connection closed, will not auto-reconnect');
+        // Clean up
+        if (sseEventSourceRef.current === eventSource) {
+          sseEventSourceRef.current = null;
+        }
+      }
+      // EventSource will automatically attempt to reconnect if readyState is CONNECTING
+    };
+
+    // Cleanup on unmount or project change
+    return () => {
+      if (eventSource) {
+        console.log('[SSE] Closing connection (cleanup)');
+        eventSource.close();
+        if (sseEventSourceRef.current === eventSource) {
+          sseEventSourceRef.current = null;
+        }
+      }
+    };
+  }, [selectedProjectId]); // Reconnect when project changes
+
+  // Refresh PDFs list when user switches to sources/PDF tab (event-driven, no polling)
+  // Only refresh if there are processing PDFs AND we're not already tracking them via SSE
+  useEffect(() => {
+    if (activeTabType === 'pdf' && selectedProjectId) {
+      // User switched to sources tab - check once if any PDFs are processing
+      // But don't refresh if we're already tracking them via SSE (they'll be updated when extraction completes)
+      const hasProcessingPdfs = pdfs.some(pdf => 
+        (pdf.extraction_status === 'processing' || pdf.extraction_status === 'pending') &&
+        !extractingPdfsRef.current.has(pdf.pdf_id)
+      );
+      if (hasProcessingPdfs) {
+        // Only refresh if we're not already tracking these PDFs via SSE
+        console.log('[TAB SWITCH] Refreshing PDFs list - found processing PDFs not tracked by SSE');
+        loadPdfsForProject(selectedProjectId, true);
+      } else {
+        console.log('[TAB SWITCH] No refresh needed - all processing PDFs are tracked by SSE or none processing');
+      }
+    }
+  }, [activeTabType]); // Only when user switches tabs (user action), not continuously
 
   // Helper function to get localStorage key for tabs (per project)
   const getTabsStorageKey = (projectId) => {
@@ -695,22 +785,61 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   };
 
   // Load PDFs for current project
-  const loadPdfsForProject = async (projectId) => {
+  const loadPdfsForProject = async (projectId, forceRefresh = false) => {
     const ttl = 300; // 5 minutes
-    const minBackgroundRefreshInterval = 30; // 30 seconds minimum between background refreshes
+    const minBackgroundRefreshInterval = 10; // 10 seconds minimum between background refreshes (reduced from 30)
     try {
-      console.log('[CACHE] loadPdfsForProject: Cache check');
       const key = getCacheKey('pdfs', projectId);
+      
+      // If force refresh, clear cache and fetch fresh
+      if (forceRefresh) {
+        console.log('[CACHE] loadPdfsForProject: Force refresh, clearing cache');
+        try {
+          localStorage.removeItem(key);
+        } catch (e) {
+          console.warn('Failed to clear cache:', e);
+        }
+        setPdfLoading(true);
+        const response = await pdfAPI.getPDFs(projectId);
+        const data = response.data.pdfs || [];
+        
+        // Log extraction_status for each PDF to debug
+        data.forEach(pdf => {
+          console.log(`[PDF] ${pdf.filename || pdf.pdf_id}: extraction_status=${pdf.extraction_status}, highlights=${pdf.highlights?.length || 0}`);
+        });
+        
+        setPdfs(data);
+        console.log('[CACHE] loadPdfsForProject: Caching fresh data (force refresh)');
+        setCachedData(key, data, ttl);
+        pendingBackgroundRefreshesRef.current.set(key, Date.now());
+        setPdfLoading(false);
+        return;
+      }
+      
+      console.log('[CACHE] loadPdfsForProject: Cache check');
       const cached = getCachedData(key);
       if (cached && isCacheValid(cached, ttl)) {
         console.log('[CACHE] loadPdfsForProject: Cache hit, showing UI immediately');
         setPdfs(cached.data || []);
         setPdfLoading(false);
-        // Background refresh - only if not already pending or recently refreshed
+        
+        // Check if any PDFs are currently being extracted
+        const hasExtractingPdfs = cached.data?.some(pdf => 
+          pdf.extraction_status === 'processing' || 
+          pdf.extraction_status === 'pending' ||
+          extractingPdfsRef.current.has(pdf.pdf_id)
+        );
+        
+        // Background refresh - only if:
+        // 1. Not already pending or recently refreshed
+        // 2. No PDFs are currently being extracted (SSE will notify us when done)
         const now = Date.now();
         const lastRefresh = pendingBackgroundRefreshesRef.current.get(key) || 0;
         const timeSinceLastRefresh = (now - lastRefresh) / 1000; // seconds
-        if (timeSinceLastRefresh >= minBackgroundRefreshInterval) {
+        
+        if (hasExtractingPdfs) {
+          console.log('[CACHE] loadPdfsForProject: Skipping background refresh - PDFs are being extracted (SSE will notify when done)');
+        } else if (timeSinceLastRefresh >= minBackgroundRefreshInterval) {
           console.log('[CACHE] loadPdfsForProject: Fetching fresh data in background');
           pendingBackgroundRefreshesRef.current.set(key, now);
           pdfAPI.getPDFs(projectId)
@@ -747,33 +876,67 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
   const handlePdfClick = async (pdf) => {
     try {
-      // Fetch highlights for the PDF
-      const highlightsResponse = await pdfAPI.getHighlights(pdf.pdf_id);
-      const selectedData = {
+      // Set PDF data immediately (so PDF viewer can start loading)
+      const initialData = {
         projectId: selectedProjectId,
         pdf,
-        highlights: highlightsResponse.data.highlights || [],
-        extractionStatus: highlightsResponse.data.extraction_status,
-        extractionError: highlightsResponse.data.extraction_error
+        highlights: [],
+        extractionStatus: 'pending',
+        extractionError: null
       };
       
       // If we're in pending state (no tab created yet), create a new tab with the selected data
       if (pendingNewTabType === 'pdf') {
         const newTabId = `pdf-${Date.now()}`;
-        const newTab = { id: newTabId, selectedPdfData: selectedData, createdAt: Date.now() };
+        const newTab = { id: newTabId, selectedPdfData: initialData, createdAt: Date.now() };
         setPdfTabs(prev => [...prev, newTab]);
         setTabOrder(prev => [...prev, { id: newTabId, type: 'pdf' }]);
         setActiveTabId(newTabId);
         setPendingNewTabType(null); // Clear pending state
       } else {
-        // Update the selectedPdfData for the active PDF tab
+        // Update the selectedPdfData for the active PDF tab immediately
+        setPdfTabs(prev => prev.map(tab => 
+          tab.id === activeTabId ? { ...tab, selectedPdfData: initialData } : tab
+        ));
+      }
+      
+      // Then fetch highlights in the background (non-blocking)
+      try {
+        const highlightsResponse = await pdfAPI.getHighlights(pdf.pdf_id);
+        const selectedData = {
+          projectId: selectedProjectId,
+          pdf,
+          highlights: highlightsResponse.data.highlights || [],
+          extractionStatus: highlightsResponse.data.extraction_status,
+          extractionError: highlightsResponse.data.extraction_error
+        };
+        
+        // Update with full data including highlights
         setPdfTabs(prev => prev.map(tab => 
           tab.id === activeTabId ? { ...tab, selectedPdfData: selectedData } : tab
         ));
+        
+        // Also refresh the PDFs list to update extraction status in the table
+        if (selectedProjectId) {
+          loadPdfsForProject(selectedProjectId, true);
+        }
+      } catch (err) {
+        console.error('Failed to load PDF highlights:', err);
+        // Update with error state but keep PDF loaded
+        setPdfTabs(prev => prev.map(tab => 
+          tab.id === activeTabId ? { 
+            ...tab, 
+            selectedPdfData: {
+              ...tab.selectedPdfData,
+              extractionStatus: 'failed',
+              extractionError: 'Failed to load highlights'
+            }
+          } : tab
+        ));
       }
     } catch (err) {
-      console.error('Failed to load PDF highlights:', err);
-      setError('Failed to load PDF highlights.');
+      console.error('Failed to load PDF:', err);
+      setError('Failed to load PDF.');
     }
   };
 
@@ -818,7 +981,14 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       setUploadingPdf(true);
       setError('');
       
-      await pdfAPI.uploadPDF(selectedProjectId, file);
+      const response = await pdfAPI.uploadPDF(selectedProjectId, file);
+      const pdfId = response.data?.pdf_id;
+      
+      // Track that this PDF is being extracted (SSE will notify when done)
+      if (pdfId) {
+        extractingPdfsRef.current.add(pdfId);
+        console.log('[UPLOAD] Tracking PDF extraction:', pdfId);
+      }
       
       // Invalidate PDFs cache
       try {
@@ -830,8 +1000,12 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
         console.warn('Failed to invalidate cache after PDF upload:', e);
       }
       
-      // Reload PDFs for the project
-      await loadPdfsForProject(selectedProjectId);
+      // Reload PDFs for the project (one time after upload)
+      await loadPdfsForProject(selectedProjectId, true); // Force refresh
+      
+      // No additional refreshes needed - SSE will notify us when extraction completes
+      // The SSE connection (set up in useEffect) will automatically refresh the list
+      // when it receives the 'extraction_complete' event from the backend
       
       // Clear file input
       if (fileInputRef.current) {
@@ -853,6 +1027,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
     try {
       await pdfAPI.deletePDF(pdfId);
+      // Remove from extracting set if it was being tracked
+      extractingPdfsRef.current.delete(pdfId);
       // Invalidate PDFs cache
       try {
         console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
@@ -2768,8 +2944,17 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                     style={{ display: 'none' }}
                   />
                   
-                  {/* Upload button - right aligned in separate div */}
+                  {/* Upload and Refresh buttons - right aligned in separate div */}
                   <div className={`highlights-upload-section ${isChatCollapsed && activeTabType === 'pdf' ? 'chat-collapsed' : ''}`}>
+                    <button
+                      className="highlights-refresh-button"
+                      onClick={() => selectedProjectId && loadPdfsForProject(selectedProjectId, true)}
+                      disabled={pdfLoading}
+                      title="Refresh PDF list"
+                    >
+                      <RefreshIcon />
+                      <span>{pdfLoading ? 'Refreshing...' : 'Refresh'}</span>
+                    </button>
                     <button
                       className="highlights-upload-button"
                       onClick={() => fileInputRef.current?.click()}
@@ -2926,7 +3111,13 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                                       </div>
                                     </td>
                                     <td className="highlights-table-cell highlights-table-highlights-cell">
-                                      {data.highlights?.length || 0}
+                                      {isPdf && (data.extraction_status === 'processing' || data.extraction_status === 'pending') ? (
+                                        <div className="highlights-loading-spinner">
+                                          <div className="spinner-small"></div>
+                                        </div>
+                                      ) : (
+                                        data.highlights?.length || 0
+                                      )}
                                     </td>
                                     <td className="highlights-table-cell highlights-table-used-in-cell">
                                       <div className="highlights-table-used-in-content">
@@ -3171,15 +3362,48 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                 onOpenPdfDocument={(pdf) => {
                   // Create a new PDF tab and open this PDF
                   const newTabId = `pdf-${Date.now()}`;
-                  const newTab = { id: newTabId, selectedPdfData: null, createdAt: Date.now() };
+                  // Set initial PDF data immediately so PDF viewer can start loading
+                  const initialData = {
+                    projectId: selectedProjectId,
+                    pdf,
+                    highlights: [],
+                    extractionStatus: 'pending',
+                    extractionError: null
+                  };
+                  const newTab = { id: newTabId, selectedPdfData: initialData, createdAt: Date.now() };
                   setPdfTabs(prev => [...prev, newTab]);
                   setTabOrder(prev => [...prev, { id: newTabId, type: 'pdf' }]);
                   setActiveTabId(newTabId);
                   setActiveTabType('pdf');
                   setShowDocumentList(false);
-                  // After tab is created, select the PDF
+                  // After tab is created, fetch highlights in background
                   setTimeout(() => {
-                    handlePdfClick(pdf);
+                    pdfAPI.getHighlights(pdf.pdf_id)
+                      .then((highlightsResponse) => {
+                        const selectedData = {
+                          projectId: selectedProjectId,
+                          pdf,
+                          highlights: highlightsResponse.data.highlights || [],
+                          extractionStatus: highlightsResponse.data.extraction_status,
+                          extractionError: highlightsResponse.data.extraction_error
+                        };
+                        setPdfTabs(prev => prev.map(tab => 
+                          tab.id === newTabId ? { ...tab, selectedPdfData: selectedData } : tab
+                        ));
+                      })
+                      .catch((err) => {
+                        console.error('Failed to load PDF highlights:', err);
+                        setPdfTabs(prev => prev.map(tab => 
+                          tab.id === newTabId ? { 
+                            ...tab, 
+                            selectedPdfData: {
+                              ...tab.selectedPdfData,
+                              extractionStatus: 'failed',
+                              extractionError: 'Failed to load highlights'
+                            }
+                          } : tab
+                        ));
+                      });
                   }, 50);
                 }}
                 onUploadPdf={() => {
