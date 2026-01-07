@@ -1,12 +1,14 @@
 from flask import Blueprint, request, jsonify
-from models.database import HighlightModel, ProjectModel
+from models.database import HighlightModel, ProjectModel, PDFDocumentModel
 from utils.auth import get_user_id_from_token, log_auth_info
 from services.s3_service import S3Service
 from services.redis_service import get_redis_service
 from services.sse_service import SSEService
 from config import Config
+from datetime import datetime
 import base64
 import io
+import re
 
 # Try to import PIL for image processing
 try:
@@ -271,6 +273,7 @@ def get_highlights():
     Query params:
         project_id: string (required)
         source_url: string (optional)
+        limit: int (optional) - limit number of results (for initial load)
     
     Returns: { highlights: [...] }
     """
@@ -280,6 +283,7 @@ def get_highlights():
     
     project_id = request.args.get('project_id')
     source_url = request.args.get('source_url')
+    limit = request.args.get('limit', type=int)
     
     if not project_id:
         return jsonify({'error': 'project_id is required'}), 400
@@ -292,15 +296,19 @@ def get_highlights():
     if not project or project.get('user_id') != user_id:
         return jsonify({'error': 'Project not found or access denied'}), 404
     
-    # Generate cache key
+    # Generate cache key (include limit in cache key if specified)
     if source_url:
         cache_key = f"cache:highlights:{user_id}:{project_id}:{source_url}"
+    elif limit:
+        cache_key = f"cache:highlights:{user_id}:{project_id}:limit:{limit}"
     else:
         cache_key = f"cache:highlights:{user_id}:{project_id}"
     
-    # Check Redis cache first
+    # Check Redis cache first (only if no limit specified, to avoid caching limited results)
     redis_service = get_redis_service()
-    cached_data = redis_service.get(cache_key)
+    cached_data = None
+    if not limit:
+        cached_data = redis_service.get(cache_key)
     
     if cached_data is not None:
         print(f"[REDIS] get_highlights: Cache hit")
@@ -327,10 +335,11 @@ def get_highlights():
         )
         highlights = [highlight_doc] if highlight_doc else []
     else:
-        # Get all highlights for project
+        # Get highlights for project (with optional limit)
         highlights = HighlightModel.get_highlights_by_project(
             user_id=user_id,
-            project_id=project_id
+            project_id=project_id,
+            limit=limit
         )
     
     # Convert ObjectId to string for JSON serialization and fix URLs
@@ -345,9 +354,113 @@ def get_highlights():
     
     response_data = {'highlights': highlights}
     
-    # Cache the result
-    redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)
-    print(f"[REDIS] get_highlights: Cached {len(highlights)} highlights")
+    # Cache the result (only if no limit specified)
+    if not limit:
+        redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)
+        print(f"[REDIS] get_highlights: Cached {len(highlights)} highlights")
+    
+    return jsonify(response_data), 200
+
+
+@highlight_bp.route('/search', methods=['GET'])
+def search_highlights():
+    """
+    Search highlights across all sources (web and PDF) for a project.
+    Searches in highlight text, notes, source URLs, page titles, and PDF filenames.
+    
+    Query params:
+        project_id: string (required)
+        query: string (required) - search query
+        limit: int (optional, default 10) - max number of results to return
+    
+    Returns: { 
+        highlights: [
+            {
+                type: 'web' | 'pdf',
+                source_url: string (for web),
+                pdf_id: string (for PDF),
+                page_title: string (for web),
+                filename: string (for PDF),
+                highlights: [...]  # matching highlights only
+            }
+        ]
+    }
+    """
+    user_id = get_user_id_from_token()
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    project_id = request.args.get('project_id')
+    query = request.args.get('query', '').strip()
+    limit = request.args.get('limit', type=int) or 10
+    
+    if not project_id:
+        return jsonify({'error': 'project_id is required'}), 400
+    
+    if not query:
+        return jsonify({'highlights': []}), 200
+    
+    # Validate project belongs to user
+    project = ProjectModel.get_project(project_id)
+    if not project or project.get('user_id') != user_id:
+        return jsonify({'error': 'Project not found or access denied'}), 404
+    
+    # Generate cache key for search results (short TTL since searches are dynamic)
+    cache_key = f"cache:highlights:search:{user_id}:{project_id}:{query.lower()}:{limit}"
+    
+    # Check Redis cache first (short TTL for search results)
+    redis_service = get_redis_service()
+    cached_data = redis_service.get(cache_key)
+    
+    if cached_data is not None:
+        print(f"[REDIS] search_highlights: Cache hit for query: {query}")
+        # Fix URLs in cached data before returning
+        for h_doc in cached_data.get('highlights', []):
+            if 'highlights' in h_doc:
+                for h in h_doc['highlights']:
+                    if 'preview_image_url' in h and h['preview_image_url']:
+                        h['preview_image_url'] = S3Service.fix_s3_url_region(h['preview_image_url'])
+        return jsonify(cached_data), 200
+    
+    # Cache miss - search MongoDB
+    print(f"[SEARCH] Searching highlights for query: '{query}' in project {project_id}")
+    
+    # Search web highlights
+    web_results = HighlightModel.search_highlights(
+        user_id=user_id,
+        project_id=project_id,
+        query=query,
+        limit=limit
+    )
+    
+    # Search PDF highlights
+    pdf_results = PDFDocumentModel.search_highlights(
+        user_id=user_id,
+        project_id=project_id,
+        query=query,
+        limit=limit
+    )
+    
+    # Combine results (we want up to limit total sources, not limit per type)
+    # Sort by updated_at descending
+    all_results = web_results + pdf_results
+    all_results.sort(key=lambda x: x.get('updated_at') or datetime.min, reverse=True)
+    all_results = all_results[:limit]
+    
+    # Convert ObjectId to string and fix URLs
+    for h_doc in all_results:
+        if '_id' in h_doc:
+            h_doc['_id'] = str(h_doc['_id'])
+        if 'highlights' in h_doc:
+            for h in h_doc['highlights']:
+                if 'preview_image_url' in h and h['preview_image_url']:
+                    h['preview_image_url'] = S3Service.fix_s3_url_region(h['preview_image_url'])
+    
+    response_data = {'highlights': all_results}
+    
+    # Cache the result with short TTL (30 seconds for search results)
+    redis_service.set(cache_key, response_data, ttl=30)
+    print(f"[REDIS] search_highlights: Cached {len(all_results)} results for query: {query}")
     
     return jsonify(response_data), 200
 

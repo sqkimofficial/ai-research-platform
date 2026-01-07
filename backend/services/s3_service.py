@@ -133,10 +133,13 @@ class S3Service:
         """
         Fix an S3 URL to use the correct region.
         
+        Uses the configured region (Config.AWS_S3_REGION) as the authoritative source.
+        Only attempts verification if the URL's region doesn't match the configured region.
+        
         Args:
             url: S3 URL that may have wrong region
-            is_pdf_highlight: If True, prioritize us-east-2 check first. If False (URL highlights), 
-                           trust the URL's existing region first.
+            is_pdf_highlight: If True, prioritize configured region check first. If False (URL highlights), 
+                           trust the URL's existing region if it matches configured region.
         
         Returns:
             str: URL with correct region, or original URL if parsing fails
@@ -148,75 +151,27 @@ class S3Service:
         if not bucket_name or not key:
             return url
         
-        # For URL highlights: If URL already has a region, verify it works first
-        # For PDF highlights: Check us-east-2 first (as requested)
-        if not is_pdf_highlight and current_region:
-            # URL highlight - verify the existing region works
-            try:
-                client = cls.get_client(region=current_region)
-                if client:
-                    # Try a simple operation to verify the region is correct
-                    client.head_bucket(Bucket=bucket_name)
-                    # If successful, the region is correct - return URL as-is
-                    return url
-            except (ClientError, Exception):
-                # Region verification failed, continue to detection
-                pass
+        # Get the configured region as the authoritative source
+        configured_region = Config.AWS_S3_REGION or 'us-east-2'
         
-        # Get the correct region for this specific bucket
-        # For PDF highlights, get_bucket_region already checks us-east-2 first
-        # For URL highlights, we'll try the URL's region first if it exists
-        correct_region = None
-        
-        if is_pdf_highlight:
-            # PDF highlights: use get_bucket_region which checks us-east-2 first
-            correct_region = cls.get_bucket_region(bucket_name=bucket_name)
-        else:
-            # URL highlights: if URL has a region, try that first before detection
-            if current_region:
-                try:
-                    client = cls.get_client(region=current_region)
-                    if client:
-                        client.head_bucket(Bucket=bucket_name)
-                        # If successful, use the URL's region
-                        correct_region = current_region
-                except (ClientError, Exception):
-                    # URL's region doesn't work, try detection
-                    pass
-            
-            # If URL's region didn't work, try detection
-            if not correct_region:
-                correct_region = cls.get_bucket_region(bucket_name=bucket_name)
-        
-        # If detection failed, use fallbacks
-        if not correct_region:
-            if is_pdf_highlight:
-                # PDF highlights: fallback to us-east-2
-                if current_region != 'us-east-2':
-                    correct_region = 'us-east-2'
-            else:
-                # URL highlights: if URL had a region, try us-east-2 as fallback
-                if current_region and current_region != 'us-east-2':
-                    correct_region = 'us-east-2'
-                elif not current_region:
-                    # No region in URL, try us-east-2
-                    correct_region = 'us-east-2'
-        
-        # If we still don't have a region, return original URL (only log if we tried everything)
-        if not correct_region:
-            if current_region:
-                # Only log if we've exhausted all options
-                print(f"[S3] Warning: Could not verify or detect bucket region for {bucket_name}. URL may have incorrect region: {current_region}")
+        # If URL's region matches configured region, trust it without verification
+        # This avoids expensive head_bucket calls for every URL
+        if current_region == configured_region:
             return url
         
-        # If region is already correct, return as-is
-        if current_region == correct_region:
-            return url
+        # If URL has a different region, use the configured region
+        # This is the most reliable approach since we know the bucket is in the configured region
+        correct_region = configured_region
         
-        # Rewrite URL with correct region
-        fixed_url = f"https://{bucket_name}.s3.{correct_region}.amazonaws.com/{key}"
-        print(f"[S3] Fixed URL region: {current_region} -> {correct_region} for bucket {bucket_name}")
-        return fixed_url
+        # Only rewrite URL if region is different
+        if current_region != correct_region:
+            fixed_url = f"https://{bucket_name}.s3.{correct_region}.amazonaws.com/{key}"
+            # Only log if we're actually changing the region (not on every call)
+            if current_region:  # Only log if URL had a region to begin with
+                print(f"[S3] Fixed URL region: {current_region} -> {correct_region} for bucket {bucket_name}")
+            return fixed_url
+        
+        return url
     
     @classmethod
     def get_client(cls, region=None):

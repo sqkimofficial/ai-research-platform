@@ -269,12 +269,18 @@ export const documentAPI = {
 
 // Highlights API
 export const highlightsAPI = {
-  getHighlights: (projectId, sourceUrl = null) => {
+  getHighlights: (projectId, sourceUrl = null, limit = null) => {
     let url = `/api/highlights?project_id=${projectId}`;
     if (sourceUrl) {
       url += `&source_url=${encodeURIComponent(sourceUrl)}`;
     }
+    if (limit !== null) {
+      url += `&limit=${limit}`;
+    }
     return api.get(url);
+  },
+  searchHighlights: (projectId, query, limit = 10) => {
+    return api.get(`/api/highlights/search?project_id=${projectId}&query=${encodeURIComponent(query)}&limit=${limit}`);
   },
   deleteHighlight: (projectId, sourceUrl, highlightId) => {
     return api.delete('/api/highlights', {

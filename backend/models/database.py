@@ -696,14 +696,19 @@ class HighlightModel:
         return highlight_id
     
     @staticmethod
-    def get_highlights_by_project(user_id, project_id):
+    def get_highlights_by_project(user_id, project_id, limit=None):
         """Get all highlights for a project (excludes archived)"""
         db = Database.get_db()
-        return list(db.highlights.find({
+        query = db.highlights.find({
             'user_id': user_id,
             'project_id': project_id,
             'archived': {'$ne': True}  # Excludes archived=True, includes False, None, or missing
-        }).sort('updated_at', -1))
+        }).sort('updated_at', -1)
+        
+        if limit:
+            query = query.limit(limit)
+        
+        return list(query)
     
     @staticmethod
     def get_highlights_by_url(user_id, project_id, source_url):
@@ -714,6 +719,61 @@ class HighlightModel:
             'project_id': project_id,
             'source_url': source_url
         })
+    
+    @staticmethod
+    def search_highlights(user_id, project_id, query, limit=10):
+        """
+        Search highlights across all web sources for a project.
+        Searches in highlight text, notes, source URLs, and page titles.
+        
+        Returns list of highlight documents with only matching highlights included.
+        """
+        import re
+        db = Database.get_db()
+        
+        # Create case-insensitive regex pattern
+        query_pattern = re.compile(re.escape(query), re.IGNORECASE)
+        
+        # Find all highlight documents for the project
+        all_docs = list(db.highlights.find({
+            'user_id': user_id,
+            'project_id': project_id,
+            'archived': {'$ne': True}
+        }))
+        
+        results = []
+        for doc in all_docs:
+            # Check if source matches (page_title or source_url)
+            source_matches = (
+                (doc.get('page_title') and query_pattern.search(doc.get('page_title', ''))) or
+                (doc.get('source_url') and query_pattern.search(doc.get('source_url', '')))
+            )
+            
+            # Filter highlights that match
+            matching_highlights = []
+            for highlight in doc.get('highlights', []):
+                highlight_matches = (
+                    (highlight.get('text') and query_pattern.search(highlight.get('text', ''))) or
+                    (highlight.get('note') and query_pattern.search(highlight.get('note', '')))
+                )
+                if highlight_matches or source_matches:
+                    matching_highlights.append(highlight)
+            
+            # Only include document if it has matching highlights or source matches
+            if matching_highlights or source_matches:
+                result_doc = {
+                    'type': 'web',
+                    'source_url': doc.get('source_url'),
+                    'page_title': doc.get('page_title'),
+                    'highlights': matching_highlights if matching_highlights else doc.get('highlights', []),
+                    '_id': doc.get('_id'),
+                    'updated_at': doc.get('updated_at')
+                }
+                results.append(result_doc)
+        
+        # Sort by updated_at descending and limit
+        results.sort(key=lambda x: x.get('updated_at') or datetime.min, reverse=True)
+        return results[:limit]
     
     @staticmethod
     def delete_highlight(user_id, project_id, source_url, highlight_id):
@@ -1002,6 +1062,60 @@ class PDFDocumentModel:
             }
         )
         return result.modified_count > 0
+    
+    @staticmethod
+    def search_highlights(user_id, project_id, query, limit=10):
+        """
+        Search highlights across all PDF documents for a project.
+        Searches in highlight text, notes, and PDF filenames.
+        
+        Returns list of PDF documents with only matching highlights included.
+        """
+        import re
+        db = Database.get_db()
+        
+        # Create case-insensitive regex pattern
+        query_pattern = re.compile(re.escape(query), re.IGNORECASE)
+        
+        # Find all PDF documents for the project
+        all_docs = list(db.pdf_documents.find({
+            'user_id': user_id,
+            'project_id': project_id,
+            'archived': {'$ne': True}
+        }, {'file_data': 0}))  # Exclude file_data for performance
+        
+        results = []
+        for doc in all_docs:
+            # Check if filename matches
+            filename_matches = (
+                doc.get('filename') and query_pattern.search(doc.get('filename', ''))
+            )
+            
+            # Filter highlights that match
+            matching_highlights = []
+            for highlight in doc.get('highlights', []):
+                highlight_matches = (
+                    (highlight.get('text') and query_pattern.search(highlight.get('text', ''))) or
+                    (highlight.get('note') and query_pattern.search(highlight.get('note', '')))
+                )
+                if highlight_matches or filename_matches:
+                    matching_highlights.append(highlight)
+            
+            # Only include document if it has matching highlights or filename matches
+            if matching_highlights or filename_matches:
+                result_doc = {
+                    'type': 'pdf',
+                    'pdf_id': doc.get('pdf_id'),
+                    'filename': doc.get('filename'),
+                    'highlights': matching_highlights if matching_highlights else doc.get('highlights', []),
+                    '_id': doc.get('_id'),
+                    'updated_at': doc.get('updated_at')
+                }
+                results.append(result_doc)
+        
+        # Sort by updated_at descending and limit
+        results.sort(key=lambda x: x.get('updated_at') or datetime.min, reverse=True)
+        return results[:limit]
     
     @staticmethod
     def update_highlight_note(pdf_id, highlight_id, note):

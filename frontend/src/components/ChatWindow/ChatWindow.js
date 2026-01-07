@@ -124,6 +124,8 @@ const ChatWindow = ({
   const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
   const [urlHighlights, setUrlHighlights] = useState([]);
   const [pdfDocuments, setPdfDocuments] = useState([]);
+  const [searchResults, setSearchResults] = useState([]); // Server-side search results
+  const [isSearching, setIsSearching] = useState(false);
   
   // Preview panel state
   const [previewImage, setPreviewImage] = useState(null);
@@ -401,16 +403,16 @@ const ChatWindow = ({
     }
   }, [messages.length, selectedProjectId, sessionId]);
 
-  // Fetch URL highlights and PDF documents for @ mention feature
+  // Fetch URL highlights and PDF documents for @ mention feature (top 5 only for initial load)
   useEffect(() => {
     const fetchSourcesForMention = async () => {
       if (selectedProjectId) {
         try {
-          // Fetch URL highlights (web sources)
-          const highlightsResponse = await highlightsAPI.getHighlights(selectedProjectId);
+          // Fetch only top 5 URL highlights (web sources) for initial load
+          const highlightsResponse = await highlightsAPI.getHighlights(selectedProjectId, null, 5);
           setUrlHighlights(highlightsResponse.data.highlights || []);
           
-          // Fetch PDF documents
+          // Fetch PDF documents (we'll limit these too if needed, but for now keep all)
           const pdfsResponse = await pdfAPI.getPDFs(selectedProjectId);
           setPdfDocuments(pdfsResponse.data.pdfs || []);
         } catch (error) {
@@ -479,22 +481,101 @@ const ChatWindow = ({
     }
   }, []);
 
+  // Debounced search for highlights when user types in mention input
+  useEffect(() => {
+    if (!selectedProjectId || !mentionQuery.trim()) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    // Debounce search - wait 300ms after user stops typing
+    const searchTimeout = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const response = await highlightsAPI.searchHighlights(selectedProjectId, mentionQuery.trim(), 10);
+        const results = response.data.highlights || [];
+        setSearchResults(results);
+      } catch (error) {
+        console.error('Failed to search highlights:', error);
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(searchTimeout);
+  }, [mentionQuery, selectedProjectId]);
+
   // Build mention dropdown items based on search query
   const mentionItems = useMemo(() => {
     const items = [];
-    const query = mentionQuery.toLowerCase();
+    const query = mentionQuery.toLowerCase().trim();
     
-    // Process URL highlights (web sources)
-    urlHighlights.forEach(urlDoc => {
-      const sourceName = urlDoc.page_title || extractDomain(urlDoc.source_url);
-      const sourceMatches = !query || searchMatch(query, sourceName) || searchMatch(query, urlDoc.source_url);
-      
-      // Check if source matches or any highlight matches
-      const matchingHighlights = (urlDoc.highlights || []).filter(h => 
-        searchMatch(query, h.text) || searchMatch(query, h.note || '')
-      );
-      
-      if (sourceMatches || matchingHighlights.length > 0) {
+    // If there's a search query, use server-side search results
+    if (query && searchResults.length > 0) {
+      searchResults.forEach(result => {
+        if (result.type === 'web') {
+          const sourceName = result.page_title || extractDomain(result.source_url);
+          // Add source item
+          items.push({
+            type: 'source',
+            sourceType: 'web',
+            id: `web-${result.source_url}`,
+            title: sourceName,
+            sourceUrl: result.source_url,
+            data: result,
+            highlights: result.highlights || []
+          });
+          
+          // Add highlight items under this source
+          (result.highlights || []).forEach(highlight => {
+            items.push({
+              type: 'highlight',
+              sourceType: 'web',
+              id: `web-highlight-${highlight.highlight_id || highlight.text.substring(0, 20)}`,
+              parentId: `web-${result.source_url}`,
+              title: highlight.text,
+              note: highlight.note,
+              sourceTitle: sourceName,
+              sourceUrl: result.source_url,
+              data: highlight
+            });
+          });
+        } else if (result.type === 'pdf') {
+          const sourceName = result.filename;
+          // Add source item
+          items.push({
+            type: 'source',
+            sourceType: 'pdf',
+            id: `pdf-${result.pdf_id}`,
+            title: sourceName,
+            pdfId: result.pdf_id,
+            data: result,
+            highlights: result.highlights || []
+          });
+          
+          // Add highlight items under this source
+          (result.highlights || []).forEach(highlight => {
+            items.push({
+              type: 'highlight',
+              sourceType: 'pdf',
+              id: `pdf-highlight-${highlight.highlight_id || highlight.text.substring(0, 20)}`,
+              parentId: `pdf-${result.pdf_id}`,
+              title: highlight.text,
+              note: highlight.note,
+              sourceTitle: sourceName,
+              pdfId: result.pdf_id,
+              data: highlight
+            });
+          });
+        }
+      });
+    } else if (!query) {
+      // No query - show initial top 5 highlights from local state
+      // Process URL highlights (web sources)
+      urlHighlights.forEach(urlDoc => {
+        const sourceName = urlDoc.page_title || extractDomain(urlDoc.source_url);
         // Add source item
         items.push({
           type: 'source',
@@ -506,9 +587,8 @@ const ChatWindow = ({
           highlights: urlDoc.highlights || []
         });
         
-        // Add highlight items under this source (either matching highlights or all if source matches)
-        const highlightsToShow = query && !sourceMatches ? matchingHighlights : (urlDoc.highlights || []);
-        highlightsToShow.forEach(highlight => {
+        // Add highlight items under this source
+        (urlDoc.highlights || []).forEach(highlight => {
           items.push({
             type: 'highlight',
             sourceType: 'web',
@@ -521,20 +601,11 @@ const ChatWindow = ({
             data: highlight
           });
         });
-      }
-    });
-    
-    // Process PDF documents
-    pdfDocuments.forEach(pdf => {
-      const sourceName = pdf.filename;
-      const sourceMatches = !query || searchMatch(query, sourceName);
+      });
       
-      // Check if source matches or any highlight matches
-      const matchingHighlights = (pdf.highlights || []).filter(h => 
-        searchMatch(query, h.text) || searchMatch(query, h.note || '')
-      );
-      
-      if (sourceMatches || matchingHighlights.length > 0) {
+      // Process PDF documents (show top 5 PDFs with highlights)
+      pdfDocuments.slice(0, 5).forEach(pdf => {
+        const sourceName = pdf.filename;
         // Add source item
         items.push({
           type: 'source',
@@ -546,9 +617,8 @@ const ChatWindow = ({
           highlights: pdf.highlights || []
         });
         
-        // Add highlight items under this source
-        const highlightsToShow = query && !sourceMatches ? matchingHighlights : (pdf.highlights || []);
-        highlightsToShow.forEach(highlight => {
+        // Add highlight items under this source (limit to top 5 highlights per PDF)
+        (pdf.highlights || []).slice(0, 5).forEach(highlight => {
           items.push({
             type: 'highlight',
             sourceType: 'pdf',
@@ -561,11 +631,11 @@ const ChatWindow = ({
             data: highlight
           });
         });
-      }
-    });
+      });
+    }
     
     return items;
-  }, [mentionQuery, urlHighlights, pdfDocuments, extractDomain]);
+  }, [mentionQuery, urlHighlights, pdfDocuments, searchResults, extractDomain]);
 
   // Reset selected index when items change
   useEffect(() => {
