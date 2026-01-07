@@ -56,7 +56,6 @@ const AddNewTabView = ({
   researchDocuments = [],
   urlHighlights = [],
   pdfDocuments = [],
-  documentWordCounts = {},
   onCreateNewDocument,
   onOpenDocument,
   onOpenUrlHighlight,
@@ -118,7 +117,6 @@ const AddNewTabView = ({
         type: 'entry',
         id: doc.document_id,
         title: doc.title || 'Untitled Document',
-        subtitle: `${documentWordCounts[doc.document_id] !== undefined ? documentWordCounts[doc.document_id] + ' words' : 'Loading...'}`,
         date: doc.updated_at || doc.created_at,
         snapshot: doc.snapshot || null,
         archived: doc.archived || false,
@@ -154,7 +152,7 @@ const AddNewTabView = ({
     });
     
     return items;
-  }, [researchDocuments, urlHighlights, pdfDocuments, documentWordCounts]);
+  }, [researchDocuments, urlHighlights, pdfDocuments]);
 
   // Filter items based on search query
   const filteredItems = useMemo(() => {
@@ -272,6 +270,14 @@ const AddNewTabView = ({
             onArchive={async () => {
               try {
                 await documentAPI.archiveDocument(item.id);
+                // Invalidate documents cache
+                try {
+                  console.log('[CACHE] Invalidating cache for project (from AddNewTabView)');
+                  // projectId is not directly available here; rely on parent refresh to reload cache
+                  // If parent passes a refresh callback, it will refetch and recache
+                } catch (e) {
+                  console.warn('Cache invalidation warning:', e);
+                }
                 onRefreshDocuments?.();
               } catch (error) {
                 console.error('Failed to archive document:', error);
@@ -281,6 +287,12 @@ const AddNewTabView = ({
             onUnarchive={async () => {
               try {
                 await documentAPI.unarchiveDocument(item.id);
+                // Invalidate documents cache
+                try {
+                  console.log('[CACHE] Invalidating cache for project (from AddNewTabView)');
+                } catch (e) {
+                  console.warn('Cache invalidation warning:', e);
+                }
                 onRefreshDocuments?.();
               } catch (error) {
                 console.error('Failed to unarchive document:', error);

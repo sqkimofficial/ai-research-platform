@@ -28,6 +28,7 @@ import { ReactComponent as SearchIconSvg } from '../../assets/search.svg';
 import { ReactComponent as ChevronMdSvg } from '../../assets/chevron-md.svg';
 import highlightsImageIcon from '../../assets/highlights-image-icon.svg';
 import highlightsPdfIcon from '../../assets/highlights-pdf-icon.svg';
+import { getCacheKey, getCachedData, setCachedData, isCacheValid } from '../../utils/cache';
 
 // Asset-based icon components
 const CloseIcon = () => <CancelIconSvg className="dp-icon" />;
@@ -248,10 +249,11 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const pollingIntervalRef = useRef(null);
   const docMenuRef = useRef(null);
   const [isDocMenuOpen, setIsDocMenuOpen] = useState(false);
+  // Track pending background refreshes to prevent duplicates
+  const pendingBackgroundRefreshesRef = useRef(new Map()); // key -> timestamp
   
   // Research Output Documents state
   const [researchDocsTabs, setResearchDocsTabs] = useState([]); // Array of { id, createdAt }
-  const [documentWordCounts, setDocumentWordCounts] = useState({}); // { document_id: wordCount }
   
   // Pending new tab view state - shows the list view without creating an actual tab
   // Can be 'highlights', 'pdf', 'researchdocs', or null
@@ -535,43 +537,57 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
   // Load available documents for the project
   const loadAvailableDocuments = async (projectId) => {
+    const ttl = 300; // 5 minutes
+    const minBackgroundRefreshInterval = 30; // 30 seconds minimum between background refreshes
     try {
+      console.log('[CACHE] loadAvailableDocuments: Cache check');
+      const key = getCacheKey('documents', projectId);
+      const cached = getCachedData(key);
+      if (cached && isCacheValid(cached, ttl)) {
+        console.log('[CACHE] loadAvailableDocuments: Cache hit, showing UI immediately');
+        const docs = cached.data || [];
+        setAvailableDocuments(docs);
+        setError('');
+        // Background refresh - only if not already pending or recently refreshed
+        const now = Date.now();
+        const lastRefresh = pendingBackgroundRefreshesRef.current.get(key) || 0;
+        const timeSinceLastRefresh = (now - lastRefresh) / 1000; // seconds
+        if (timeSinceLastRefresh >= minBackgroundRefreshInterval) {
+          console.log('[CACHE] loadAvailableDocuments: Fetching fresh data in background');
+          pendingBackgroundRefreshesRef.current.set(key, now);
+          documentAPI.getAllResearchDocuments(projectId)
+            .then((response) => {
+              const freshDocs = response.data.documents || [];
+              setAvailableDocuments(freshDocs);
+              console.log('[CACHE] loadAvailableDocuments: Caching fresh data');
+              setCachedData(key, freshDocs, ttl);
+            })
+            .catch((err) => {
+              console.error('Failed background refresh for documents:', err);
+            })
+            .finally(() => {
+              // Keep the timestamp so we don't refresh too frequently
+            });
+        } else {
+          console.log(`[CACHE] loadAvailableDocuments: Skipping background refresh (refreshed ${Math.floor(timeSinceLastRefresh)}s ago, min interval: ${minBackgroundRefreshInterval}s)`);
+        }
+        return;
+      }
+      console.log('[CACHE] loadAvailableDocuments: Cache miss, fetching from API');
       const response = await documentAPI.getAllResearchDocuments(projectId);
       const docs = response.data.documents || [];
       setAvailableDocuments(docs);
       setError(''); // Clear any previous errors
-      
-      // Fetch word counts for documents
-      fetchWordCountsForDocuments(docs);
+      console.log('[CACHE] loadAvailableDocuments: Caching fresh data');
+      setCachedData(key, docs, ttl);
+      // Update refresh timestamp for cache miss too
+      pendingBackgroundRefreshesRef.current.set(key, Date.now());
     } catch (err) {
       console.error('Failed to load available documents:', err);
       const errorMessage = err.response?.data?.error || err.message || 'Failed to load documents';
       setError(errorMessage);
     }
   };
-
-  // Fetch word counts for a list of documents
-  const fetchWordCountsForDocuments = async (docs) => {
-    const wordCounts = { ...documentWordCounts };
-    
-    // Fetch content for each document that doesn't have a word count yet
-    for (const doc of docs) {
-      if (wordCounts[doc.document_id] === undefined) {
-        try {
-          const response = await documentAPI.getDocument(doc.document_id);
-          const content = response.data.content || '';
-          // getWordCount now handles HTML properly, so we can pass it directly
-          wordCounts[doc.document_id] = getWordCount(content);
-        } catch (err) {
-          console.error(`Failed to fetch content for document ${doc.document_id}:`, err);
-          wordCounts[doc.document_id] = 0;
-        }
-      }
-    }
-    
-    setDocumentWordCounts(wordCounts);
-  };
-
 
   // Show pending highlights view when trigger changes (no tab created yet)
   // NOTE: This is now handled by pdfTabTrigger - web highlights are shown in PDF tab
@@ -629,10 +645,47 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
   // Load highlights (URLs) for current project
   const loadHighlightsForProject = async (projectId) => {
+    const ttl = 300; // 5 minutes
+    const minBackgroundRefreshInterval = 30; // 30 seconds minimum between background refreshes
     try {
+      console.log('[CACHE] loadHighlightsForProject: Cache check');
+      const key = getCacheKey('highlights', projectId);
+      const cached = getCachedData(key);
+      if (cached && isCacheValid(cached, ttl)) {
+        console.log('[CACHE] loadHighlightsForProject: Cache hit, showing UI immediately');
+        setHighlightsUrls(cached.data || []);
+        setHighlightsLoading(false);
+        // Background refresh - only if not already pending or recently refreshed
+        const now = Date.now();
+        const lastRefresh = pendingBackgroundRefreshesRef.current.get(key) || 0;
+        const timeSinceLastRefresh = (now - lastRefresh) / 1000; // seconds
+        if (timeSinceLastRefresh >= minBackgroundRefreshInterval) {
+          console.log('[CACHE] loadHighlightsForProject: Fetching fresh data in background');
+          pendingBackgroundRefreshesRef.current.set(key, now);
+          highlightsAPI.getHighlights(projectId)
+            .then((response) => {
+              const fresh = response.data.highlights || [];
+              setHighlightsUrls(fresh);
+              console.log('[CACHE] loadHighlightsForProject: Caching fresh data');
+              setCachedData(key, fresh, ttl);
+            })
+            .catch((err) => {
+              console.error('Failed background refresh for highlights:', err);
+            });
+        } else {
+          console.log(`[CACHE] loadHighlightsForProject: Skipping background refresh (refreshed ${Math.floor(timeSinceLastRefresh)}s ago, min interval: ${minBackgroundRefreshInterval}s)`);
+        }
+        return;
+      }
       setHighlightsLoading(true);
+      console.log('[CACHE] loadHighlightsForProject: Cache miss, fetching from API');
       const response = await highlightsAPI.getHighlights(projectId);
-      setHighlightsUrls(response.data.highlights || []);
+      const data = response.data.highlights || [];
+      setHighlightsUrls(data);
+      console.log('[CACHE] loadHighlightsForProject: Caching fresh data');
+      setCachedData(key, data, ttl);
+      // Update refresh timestamp for cache miss too
+      pendingBackgroundRefreshesRef.current.set(key, Date.now());
     } catch (err) {
       console.error('Failed to load highlights:', err);
       setError('Failed to load highlights.');
@@ -643,10 +696,47 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
   // Load PDFs for current project
   const loadPdfsForProject = async (projectId) => {
+    const ttl = 300; // 5 minutes
+    const minBackgroundRefreshInterval = 30; // 30 seconds minimum between background refreshes
     try {
+      console.log('[CACHE] loadPdfsForProject: Cache check');
+      const key = getCacheKey('pdfs', projectId);
+      const cached = getCachedData(key);
+      if (cached && isCacheValid(cached, ttl)) {
+        console.log('[CACHE] loadPdfsForProject: Cache hit, showing UI immediately');
+        setPdfs(cached.data || []);
+        setPdfLoading(false);
+        // Background refresh - only if not already pending or recently refreshed
+        const now = Date.now();
+        const lastRefresh = pendingBackgroundRefreshesRef.current.get(key) || 0;
+        const timeSinceLastRefresh = (now - lastRefresh) / 1000; // seconds
+        if (timeSinceLastRefresh >= minBackgroundRefreshInterval) {
+          console.log('[CACHE] loadPdfsForProject: Fetching fresh data in background');
+          pendingBackgroundRefreshesRef.current.set(key, now);
+          pdfAPI.getPDFs(projectId)
+            .then((response) => {
+              const fresh = response.data.pdfs || [];
+              setPdfs(fresh);
+              console.log('[CACHE] loadPdfsForProject: Caching fresh data');
+              setCachedData(key, fresh, ttl);
+            })
+            .catch((err) => {
+              console.error('Failed background refresh for PDFs:', err);
+            });
+        } else {
+          console.log(`[CACHE] loadPdfsForProject: Skipping background refresh (refreshed ${Math.floor(timeSinceLastRefresh)}s ago, min interval: ${minBackgroundRefreshInterval}s)`);
+        }
+        return;
+      }
       setPdfLoading(true);
+      console.log('[CACHE] loadPdfsForProject: Cache miss, fetching from API');
       const response = await pdfAPI.getPDFs(projectId);
-      setPdfs(response.data.pdfs || []);
+      const data = response.data.pdfs || [];
+      setPdfs(data);
+      console.log('[CACHE] loadPdfsForProject: Caching fresh data');
+      setCachedData(key, data, ttl);
+      // Update refresh timestamp for cache miss too
+      pendingBackgroundRefreshesRef.current.set(key, Date.now());
     } catch (err) {
       console.error('Failed to load PDFs:', err);
       setError('Failed to load PDFs.');
@@ -730,6 +820,16 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       
       await pdfAPI.uploadPDF(selectedProjectId, file);
       
+      // Invalidate PDFs cache
+      try {
+        console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
+        const keys = [getCacheKey('pdfs', selectedProjectId)];
+        keys.forEach(k => localStorage.removeItem(k));
+        console.log('[CACHE] Cleared cache keys:', keys);
+      } catch (e) {
+        console.warn('Failed to invalidate cache after PDF upload:', e);
+      }
+      
       // Reload PDFs for the project
       await loadPdfsForProject(selectedProjectId);
       
@@ -753,6 +853,15 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
     try {
       await pdfAPI.deletePDF(pdfId);
+      // Invalidate PDFs cache
+      try {
+        console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
+        const keys = [getCacheKey('pdfs', selectedProjectId)];
+        keys.forEach(k => localStorage.removeItem(k));
+        console.log('[CACHE] Cleared cache keys:', keys);
+      } catch (e) {
+        console.warn('Failed to invalidate cache after PDF delete:', e);
+      }
       if (selectedProjectId) {
         await loadPdfsForProject(selectedProjectId);
       }
@@ -770,6 +879,16 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
 
     try {
       await pdfAPI.deleteHighlight(pdfId, highlightId);
+      
+      // Invalidate highlights cache
+      try {
+        console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
+        const keys = [getCacheKey('highlights', selectedProjectId)];
+        keys.forEach(k => localStorage.removeItem(k));
+        console.log('[CACHE] Cleared cache keys:', keys);
+      } catch (e) {
+        console.warn('Failed to invalidate cache after PDF highlight delete:', e);
+      }
       
       // Update the selected PDF data
       const activePdfTab = getActivePdfTab();
@@ -1160,6 +1279,11 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     return expandedUrlTimeSections[sectionKey] !== false;
   };
 
+  // One-time notice for removal of word counter feature
+  useEffect(() => {
+    console.log('[CACHE] Word counter removed - no longer fetching document content for word counts');
+  }, []);
+
   // Group research documents: sort by updated_at descending (newest first)
   const groupDocsByTime = (docList) => {
     const sorted = [...docList];
@@ -1177,26 +1301,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     };
   };
 
-  // Calculate word count from content (approximate)
-  // Handles both HTML and markdown content
-  const getWordCount = (content) => {
-    if (!content) return 0;
-    
-    // If content looks like HTML (contains tags), extract text first
-    let text = content;
-    if (content.includes('<') && content.includes('>')) {
-      // It's HTML, extract text content
-      const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = content;
-      text = tempDiv.textContent || tempDiv.innerText || '';
-    } else {
-      // It's markdown or plain text, strip markdown syntax
-      text = content.replace(/[#*_~`\[\](){}|>]/g, '').trim();
-    }
-    
-    if (!text) return 0;
-    return text.split(/\s+/).filter(word => word.length > 0).length;
-  };
+  // Word counter utilities removed
 
   const handleDeleteHighlight = async (sourceUrl, highlightId) => {
     if (!window.confirm('Are you sure you want to delete this highlight?')) {
@@ -1205,6 +1310,15 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     
     try {
       await highlightsAPI.deleteHighlight(selectedProjectId, sourceUrl, highlightId);
+      // Invalidate highlights cache
+      try {
+        console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
+        const keys = [getCacheKey('highlights', selectedProjectId)];
+        keys.forEach(k => localStorage.removeItem(k));
+        console.log('[CACHE] Cleared cache keys:', keys);
+      } catch (e) {
+        console.warn('Failed to invalidate cache after URL highlight delete:', e);
+      }
       if (selectedProjectId) {
         await loadHighlightsForProject(selectedProjectId);
       }
@@ -1618,14 +1732,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
         performSave(queuedContent);
       }
       
-      // Update word count for this document
-      const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = htmlContentToSave;
-      const textContent = tempDiv.textContent || tempDiv.innerText || '';
-      setDocumentWordCounts(prev => ({
-        ...prev,
-        [activeDocumentId]: getWordCount(textContent)
-      }));
+      // Word count tracking removed
     } catch (err) {
       // Handle version conflict - refetch and retry
       if (err.response?.status === 409) {
@@ -1902,11 +2009,15 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       setNewDocumentTitle('');
       setPendingNewTabType(null); // Clear any pending state
       
-      // Set initial word count for new document (0 words)
-      setDocumentWordCounts(prev => ({
-        ...prev,
-        [newDocId]: 0
-      }));
+      // Invalidate documents cache
+      try {
+        console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
+        const keys = [getCacheKey('documents', selectedProjectId)];
+        keys.forEach(k => localStorage.removeItem(k));
+        console.log('[CACHE] Cleared cache keys:', keys);
+      } catch (e) {
+        console.warn('Failed to invalidate cache after document create:', e);
+      }
       
       // Reload available documents
       await loadAvailableDocuments(selectedProjectId);
@@ -2415,6 +2526,15 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                                   })
                                 });
                                 if (!response.ok) throw new Error('Archive failed');
+                                // Invalidate highlights cache
+                                try {
+                                  console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
+                                  const keys = [getCacheKey('highlights', selectedProjectId)];
+                                  keys.forEach(k => localStorage.removeItem(k));
+                                  console.log('[CACHE] Cleared cache keys:', keys);
+                                } catch (e) {
+                                  console.warn('Failed to invalidate cache after highlight archive:', e);
+                                }
                                 if (selectedProjectId) {
                                   loadHighlightsForProject(selectedProjectId);
                                 }
@@ -2439,6 +2559,15 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                                   })
                                 });
                                 if (!response.ok) throw new Error('Unarchive failed');
+                                // Invalidate highlights cache
+                                try {
+                                  console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
+                                  const keys = [getCacheKey('highlights', selectedProjectId)];
+                                  keys.forEach(k => localStorage.removeItem(k));
+                                  console.log('[CACHE] Cleared cache keys:', keys);
+                                } catch (e) {
+                                  console.warn('Failed to invalidate cache after highlight unarchive:', e);
+                                }
                                 if (selectedProjectId) {
                                   loadHighlightsForProject(selectedProjectId);
                                 }
@@ -2903,6 +3032,15 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                             onArchive={async () => {
                               try {
                                 await documentAPI.archiveDocument(doc.document_id);
+                                // Invalidate documents cache
+                                try {
+                                  console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
+                                  const keys = [getCacheKey('documents', selectedProjectId)];
+                                  keys.forEach(k => localStorage.removeItem(k));
+                                  console.log('[CACHE] Cleared cache keys:', keys);
+                                } catch (e) {
+                                  console.warn('Failed to invalidate cache after archive:', e);
+                                }
                                 if (selectedProjectId) {
                                   loadAvailableDocuments(selectedProjectId);
                                 }
@@ -2914,6 +3052,15 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                             onUnarchive={async () => {
                               try {
                                 await documentAPI.unarchiveDocument(doc.document_id);
+                                // Invalidate documents cache
+                                try {
+                                  console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
+                                  const keys = [getCacheKey('documents', selectedProjectId)];
+                                  keys.forEach(k => localStorage.removeItem(k));
+                                  console.log('[CACHE] Cleared cache keys:', keys);
+                                } catch (e) {
+                                  console.warn('Failed to invalidate cache after unarchive:', e);
+                                }
                                 if (selectedProjectId) {
                                   loadAvailableDocuments(selectedProjectId);
                                 }
@@ -2999,7 +3146,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                 researchDocuments={availableDocuments}
                 urlHighlights={highlightsUrls}
                 pdfDocuments={pdfs}
-                documentWordCounts={documentWordCounts}
                 onCreateNewDocument={() => {
                   // Create a new research document and open it
                   handleCreateNewDocument();
