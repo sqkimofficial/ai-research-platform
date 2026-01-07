@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from models.database import ChatSessionModel, DocumentTypeModel, Database, DocumentModel, ProjectModel, ResearchDocumentModel
+from models.database import ChatSessionModel, Database, ProjectModel, ResearchDocumentModel
 from services.perplexity_service import PerplexityService
 from services.vector_service import VectorService
 from utils.auth import get_user_id_from_token, log_auth_info
@@ -14,24 +14,6 @@ import re
 chat_bp = Blueprint('chat', __name__)
 perplexity_service = PerplexityService()  # Used for content generation
 vector_service = VectorService()
-
-# Initialize document types on module load
-_initialized_types = False
-
-def ensure_types_initialized():
-    """Ensure document types are initialized"""
-    global _initialized_types
-    if not _initialized_types:
-        try:
-            Database.connect()
-            DocumentTypeModel.initialize_default_types()
-            _initialized_types = True
-            print("Document types initialized")
-        except Exception as e:
-            print(f"Warning: Failed to initialize document types: {e}")
-
-# Initialize on import
-ensure_types_initialized()
 
 # get_user_id_from_token is now imported from utils.auth
 
@@ -394,12 +376,6 @@ def send_message():
             with open(doc_path, 'r', encoding='utf-8') as f:
                 document_content = f.read()
         
-        # Get available document types (needed for system prompt)
-        available_types = DocumentTypeModel.get_all_types()
-        type_names = [t['type_name'] for t in available_types]
-        type_descriptions = {t['type_name']: t['description'] for t in available_types}
-        types_list = '\n'.join([f"- {name}: {type_descriptions.get(name, '')}" for name in type_names])
-        
         # Build context with document using semantic search
         # Use vector semantic search to find and send only relevant chunks
         use_semantic_search = True  # Enabled: Only send relevant document chunks
@@ -627,22 +603,6 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         
         # Parse JSON response
         parsed_response = perplexity_service.parse_json_response(ai_response_content)
-        
-        # Handle new document types from AI response
-        new_types = parsed_response.get('new_types', [])
-        for new_type in new_types:
-            if isinstance(new_type, dict) and new_type.get('type_name'):
-                try:
-                    type_id = DocumentTypeModel.create_type(
-                        type_name=new_type.get('type_name'),
-                        description=new_type.get('description', ''),
-                        metadata_schema=new_type.get('metadata_schema', {}),
-                        is_system=False
-                    )
-                    if type_id:
-                        print(f"DEBUG: Created new document type: {new_type.get('type_name')}")
-                except Exception as e:
-                    print(f"DEBUG: Failed to create document type {new_type.get('type_name')}: {e}")
         
         # Log parsed response (without raw content)
         print("DEBUG: Parsed Response:")

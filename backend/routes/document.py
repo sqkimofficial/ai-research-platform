@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, send_file
 from utils.file_helpers import get_session_dir
-from models.database import ChatSessionModel, DocumentModel, ResearchDocumentModel, ProjectModel
+from models.database import ChatSessionModel, ResearchDocumentModel, ProjectModel
 from services.vector_service import VectorService
 from utils.auth import get_user_id_from_token, log_auth_info
 from reportlab.lib.pagesizes import letter
@@ -20,70 +20,45 @@ document_bp = Blueprint('document', __name__)
 
 @document_bp.route('/document', methods=['GET'])
 def get_document():
-    """Get document content - supports both session_id (legacy) and document_id"""
+    """Get document content with version for delta sync"""
     try:
         user_id = get_user_id_from_token()
         if not user_id:
             return jsonify({'error': 'Unauthorized'}), 401
         
         document_id = request.args.get('document_id')
-        session_id = request.args.get('session_id')  # Legacy support
         
-        # New approach: use document_id
-        if document_id:
-            document = ResearchDocumentModel.get_document(document_id)
-            if not document:
-                return jsonify({'error': 'Document not found'}), 404
-            
-            if document['user_id'] != user_id:
-                return jsonify({'error': 'Unauthorized'}), 403
-            
-            # Log auth info for Chrome extension
-            project_id = document.get('project_id')
-            log_auth_info(project_id)
-            
-            # Return HTML content directly (stored in markdown_content field for backward compatibility)
-            return jsonify({
-                'content': document.get('markdown_content', ''),  # Actually HTML now
-                'structure': [],  # Structure removed - kept for backward compatibility
-                'title': document.get('title', 'Untitled'),
-                'document_id': document_id
-            }), 200
+        if not document_id:
+            return jsonify({'error': 'document_id is required'}), 400
         
-        # Legacy approach: use session_id
-        if session_id:
-            # Verify user owns this session
-            session = ChatSessionModel.get_session(session_id)
-            if not session:
-                return jsonify({'error': 'Session not found'}), 404
-            
-            if session['user_id'] != user_id:
-                return jsonify({'error': 'Unauthorized'}), 403
-            
-            # Get document file path
-            session_dir = get_session_dir(session_id)
-            doc_path = session_dir / 'doc.md'
-            
-            # Read document content
-            if os.path.exists(doc_path):
-                with open(doc_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-            else:
-                content = ''
-            
-            return jsonify({
-                'content': content,
-                'structure': []  # Structure removed - kept for backward compatibility
-            }), 200
+        document = ResearchDocumentModel.get_document(document_id)
+        if not document:
+            return jsonify({'error': 'Document not found'}), 404
         
-        return jsonify({'error': 'document_id or session_id is required'}), 400
+        if document['user_id'] != user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Log auth info for Chrome extension
+        project_id = document.get('project_id')
+        log_auth_info(project_id)
+        
+        # Get content - support both old (markdown_content) and new (content) field names
+        content = document.get('content', '') or document.get('markdown_content', '')
+        version = document.get('version', 0)
+        
+        return jsonify({
+            'content': content,
+            'version': version,
+            'title': document.get('title', 'Untitled'),
+            'document_id': document_id
+        }), 200
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document', methods=['POST'])
 def save_document():
-    """Save document content - supports both session_id (legacy) and document_id"""
+    """Save document using delta patches for efficiency"""
     try:
         user_id = get_user_id_from_token()
         if not user_id:
@@ -91,106 +66,71 @@ def save_document():
         
         data = request.get_json()
         document_id = data.get('document_id')
-        session_id = data.get('session_id')  # Legacy support
-        content = data.get('content', '')
-        mode = data.get('mode', 'replace')  # 'append' or 'replace'
+        patches = data.get('patches', '')  # Patch text from diff-match-patch
+        version = data.get('version', 0)  # Expected version for optimistic locking
         title = data.get('title')
         
-        # New approach: use document_id
-        if document_id:
-            document = ResearchDocumentModel.get_document(document_id)
-            if not document:
-                return jsonify({'error': 'Document not found'}), 404
-            
-            if document['user_id'] != user_id:
-                return jsonify({'error': 'Unauthorized'}), 403
-            
-            # Log auth info for Chrome extension
-            project_id = document.get('project_id')
-            log_auth_info(project_id)
-            
-            # Get current content (stored as HTML in markdown_content field)
-            current_content = document.get('markdown_content', '')
-            
-            # Apply mode
-            if mode == 'append':
-                new_content = current_content + content
-            else:
-                new_content = content
-            
-            # Generate snapshot from HTML content
-            snapshot = None
-            try:
-                from services.snapshot_service import get_snapshot_service
-                snapshot_service = get_snapshot_service()
-                snapshot = snapshot_service.generate_snapshot(new_content)
-            except Exception as snapshot_error:
-                print(f"Warning: Failed to generate snapshot: {snapshot_error}")
-                # Continue without snapshot - document will still be saved
-            
-            # Update document (storing HTML in markdown_content field for backward compatibility)
-            ResearchDocumentModel.update_document(
-                document_id,
-                markdown_content=new_content,  # Actually HTML now
-                title=title,
-                snapshot=snapshot
-            )
-            
-            # Index document for semantic search (will strip HTML tags in vector service)
-            try:
-                vector_service.index_document(document_id, new_content)
-            except Exception as index_error:
-                print(f"Warning: Failed to index document: {index_error}")
-            
-            return jsonify({'status': 'ok'}), 200
+        if not document_id:
+            return jsonify({'error': 'document_id is required'}), 400
         
-        # Legacy approach: use session_id
-        if session_id:
-            # Verify user owns this session
-            session = ChatSessionModel.get_session(session_id)
-            if not session:
-                return jsonify({'error': 'Session not found'}), 404
-            
-            if session['user_id'] != user_id:
-                return jsonify({'error': 'Unauthorized'}), 403
-            
-            # Log auth info for Chrome extension
-            project_id = session.get('project_id')
-            log_auth_info(project_id)
-            
-            # Get document file path
-            session_dir = get_session_dir(session_id)
-            doc_path = session_dir / 'doc.md'
-            
-            # Ensure directory exists
-            os.makedirs(session_dir, exist_ok=True)
-            
-            # Write document content
-            if mode == 'append':
-                # Append mode: add content to existing file
-                with open(doc_path, 'a', encoding='utf-8') as f:
-                    f.write(content)
-                # Read full document for indexing
-                with open(doc_path, 'r', encoding='utf-8') as f:
-                    full_content = f.read()
-            else:
-                # Replace mode: overwrite file
-                with open(doc_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                full_content = content
-            
-            # Index document for semantic search
-            try:
-                vector_service.index_document(session_id, full_content)
-            except Exception as index_error:
-                # Log but don't fail if indexing fails
-                print(f"Warning: Failed to index document: {index_error}")
-            
-            return jsonify({'status': 'ok'}), 200
+        document = ResearchDocumentModel.get_document(document_id)
+        if not document:
+            return jsonify({'error': 'Document not found'}), 404
         
-        return jsonify({'error': 'document_id or session_id is required'}), 400
+        if document['user_id'] != user_id:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Log auth info for Chrome extension
+        project_id = document.get('project_id')
+        log_auth_info(project_id)
+        
+        # Apply delta patches
+        result = ResearchDocumentModel.apply_delta(document_id, patches, version)
+        
+        if not result['success']:
+            error_msg = result.get('error', 'Unknown error')
+            if 'Version mismatch' in error_msg:
+                return jsonify({
+                    'error': 'Version mismatch',
+                    'current_version': result.get('current_version')
+                }), 409  # Conflict
+            return jsonify({'error': error_msg}), 400
+        
+        new_version = result['new_version']
+        new_content_length = result['new_content_length']
+        
+        # Update title if provided (separate from delta)
+        if title:
+            ResearchDocumentModel.rename_document(document_id, title)
+        
+        # Get the new content for snapshot and indexing
+        updated_doc = ResearchDocumentModel.get_document(document_id)
+        new_content = updated_doc.get('content', '')
+        
+        # Generate snapshot from HTML content (don't fail save if this fails)
+        try:
+            from services.snapshot_service import get_snapshot_service
+            snapshot_service = get_snapshot_service()
+            snapshot = snapshot_service.generate_snapshot(new_content)
+            if snapshot:
+                ResearchDocumentModel.update_document(document_id, snapshot=snapshot)
+        except Exception as snapshot_error:
+            print(f"Warning: Failed to generate snapshot: {snapshot_error}")
+        
+        # Index document for semantic search (don't fail save if this fails)
+        try:
+            vector_service.index_document(document_id, new_content)
+        except Exception as index_error:
+            print(f"Warning: Failed to index document: {index_error}")
+        
+        return jsonify({
+            'status': 'ok',
+            'version': new_version,
+            'content_length': new_content_length
+        }), 200
     
     except Exception as e:
+        print(f"[DELTA SAVE] Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document/pdf', methods=['GET'])
@@ -338,8 +278,8 @@ def download_research_document_pdf(document_id):
         if document['user_id'] != user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         
-        # Get content (stored as HTML in markdown_content field)
-        html_content = document.get('markdown_content', '')
+        # Get content (support both old and new field names)
+        html_content = document.get('content', '') or document.get('markdown_content', '')
         
         # Strip HTML tags to get plain text for PDF
         from utils.html_helpers import strip_html_tags
@@ -593,8 +533,8 @@ def generate_snapshot_for_document(document_id):
         if document['user_id'] != user_id:
             return jsonify({'error': 'Unauthorized'}), 403
         
-        # Get document content
-        html_content = document.get('markdown_content', '')
+        # Get document content (support both old and new field names)
+        html_content = document.get('content', '') or document.get('markdown_content', '')
         
         if not html_content or not html_content.strip():
             return jsonify({'error': 'Document has no content to generate snapshot from'}), 400

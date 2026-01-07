@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { documentAPI, projectAPI, highlightsAPI, pdfAPI } from '../../services/api';
 import { getToken } from '../../utils/auth';
+import DiffMatchPatch from 'diff-match-patch';
 // Note: markdownToHtml is not needed here anymore - content is stored as HTML
 // It's still used in ChatWindow.js for converting AI's Markdown output to HTML
 import RichTextEditor from './RichTextEditor';
@@ -213,6 +214,18 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const maxIntervalTimerRef = useRef(null);
   const lastSaveTimeRef = useRef(Date.now());
   const pendingContentRef = useRef(null);
+  
+  // Refs for delta save
+  const lastSavedContentRef = useRef('');  // Content after last successful save
+  const documentVersionRef = useRef(0);     // Version for optimistic locking
+  const dmpRef = useRef(new DiffMatchPatch());  // diff-match-patch instance
+  const lastSkipTimeRef = useRef(null);    // Timestamp when we last skipped a save
+  const skipTimerRef = useRef(null);       // Timer for 10-second skip force save
+  const skippedContentRef = useRef(null);  // Content that was skipped, to save when timer fires
+  
+  // Phase 2: Save queuing refs
+  const saveInProgressRef = useRef(false); // Track if a save is currently in progress
+  const pendingSaveQueueRef = useRef(null); // Queue for saves during active save
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showDocumentList, setShowDocumentList] = useState(false);
@@ -1232,6 +1245,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     if (!documentId) {
       setContent('');
       setHtmlContent('');
+      lastSavedContentRef.current = '';
+      documentVersionRef.current = 0;
       return;
     }
 
@@ -1248,14 +1263,21 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     setLoading(true);
     setError('');
     try {
-      const response = await documentAPI.getDocument(null, documentId);
-      // Content is now HTML directly (stored in markdown_content field for backward compatibility)
+      const response = await documentAPI.getDocument(documentId);
       const htmlContent = response.data.content || '';
-      setContent(htmlContent); // Store HTML in state
-      setHtmlContent(htmlContent); // Set HTML directly for TipTap
+      const version = response.data.version || 0;
+      
+      setContent(htmlContent);
+      setHtmlContent(htmlContent);
       setSaveStatus('saved');
       lastSaveTimeRef.current = Date.now();
       pendingContentRef.current = null;
+      
+      // Initialize delta tracking
+      lastSavedContentRef.current = htmlContent;
+      documentVersionRef.current = version;
+      
+      console.log(`[DELTA] Document loaded: ${documentId}, version: ${version}, content length: ${htmlContent.length}`);
     } catch (err) {
       const errorMessage = err.response?.data?.error || err.message || 'Failed to load document';
       setError(errorMessage);
@@ -1323,9 +1345,10 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   };
 
 
-  // Auto-save constants
-  const DEBOUNCE_DELAY = 2000; // 2 seconds after user stops typing
+  // Auto-save constants (Phase 2: increased debounce)
+  const DEBOUNCE_DELAY = 3000; // 3 seconds after user stops typing (Phase 2)
   const MAX_SAVE_INTERVAL = 30000; // Force save every 30 seconds
+  const MIN_SAVE_INTERVAL = 10000; // Force save after 10 seconds if we skipped
 
   // Handle document name update
   const handleDocumentNameUpdate = async (newName) => {
@@ -1378,20 +1401,172 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     }
   };
 
-  // Perform the actual save operation
+  // Perform the actual save operation using delta patches
   const performSave = useCallback(async (htmlContentToSave) => {
-    if (!activeDocumentId || !htmlContentToSave) {
+    if (!activeDocumentId || htmlContentToSave === undefined || htmlContentToSave === null) {
       return;
     }
 
+    // Compute diff between last saved content and new content
+    const dmp = dmpRef.current;
+    const patches = dmp.patch_make(lastSavedContentRef.current, htmlContentToSave);
+    
+    // If no changes, skip save
+    if (patches.length === 0) {
+      console.log('[DELTA] No changes detected, skipping save');
+      pendingContentRef.current = null;
+      return;
+    }
+    
+    const patchText = dmp.patch_toText(patches);
+    const fullContentLength = htmlContentToSave.length;
+    const patchLength = patchText.length;
+    const savings = fullContentLength > 0 ? ((1 - patchLength / fullContentLength) * 100).toFixed(1) : 0;
+    
+    console.log('[DELTA] Computing delta...');
+    console.log(`[DELTA] Patch size: ${patchLength} bytes`);
+    console.log(`[DELTA] Full content would be: ${fullContentLength} bytes`);
+    console.log(`[DELTA] Savings: ${savings}%`);
+
+    // Check if enough time has passed since last skip to force save
+    // Only apply this timer if we previously skipped a save
+    const wasTimerRunning = lastSkipTimeRef.current !== null;
+    const timeSinceLastSkip = wasTimerRunning ? (Date.now() - lastSkipTimeRef.current) : null;
+    const shouldForceSave = wasTimerRunning && timeSinceLastSkip >= MIN_SAVE_INTERVAL;
+
+    // Debug logging
+    console.log(`[DELTA] Skip check: patchLength=${patchLength}, wasTimerRunning=${wasTimerRunning}, timeSinceLastSkip=${timeSinceLastSkip}, shouldForceSave=${shouldForceSave}`);
+
+    // Phase 2: Skip if content hasn't changed
+    if (htmlContentToSave === lastSavedContentRef.current) {
+      console.log('[DELTA] Skipping save: no changes');
+      lastSaveTimeRef.current = Date.now(); // Update to prevent MAX_SAVE_INTERVAL from triggering
+      pendingContentRef.current = null;
+      return;
+    }
+
+    // Phase 2: Queue save if another save is in progress
+    if (saveInProgressRef.current) {
+      console.log('[DELTA] Save queued: save already in progress');
+      pendingSaveQueueRef.current = htmlContentToSave;
+      return;
+    }
+
+    // Phase 1: Skip saves for tiny patches (unless enough time has passed since last skip)
+    if (patchLength < 200 && !shouldForceSave) {
+      const timerJustStarted = lastSkipTimeRef.current === null;
+      lastSkipTimeRef.current = Date.now(); // Track when we skipped
+      lastSaveTimeRef.current = Date.now(); // Update last save time to prevent MAX_SAVE_INTERVAL from triggering
+      console.log('[DELTA] Skipping save: patch too small (<200 bytes)');
+      if (timerJustStarted) {
+        console.log(`[DELTA] Timer started: will force save after ${MIN_SAVE_INTERVAL}ms if no successful save`);
+        // Store the content to save when timer fires
+        skippedContentRef.current = htmlContentToSave;
+        // Set actual timer to fire after 10 seconds
+        if (skipTimerRef.current) {
+          clearTimeout(skipTimerRef.current);
+        }
+        skipTimerRef.current = setTimeout(() => {
+          if (skippedContentRef.current) {
+            console.log(`[DELTA] Skip timer fired after ${MIN_SAVE_INTERVAL}ms, forcing save`);
+            const contentToSave = skippedContentRef.current;
+            skippedContentRef.current = null; // Clear it before saving
+            performSave(contentToSave);
+          }
+        }, MIN_SAVE_INTERVAL);
+      } else {
+        // Timer already running, update the content to save
+        skippedContentRef.current = htmlContentToSave;
+      }
+      pendingContentRef.current = null;
+      return;
+    }
+
+    // Skip save if patch is inefficient (>80% of new content size)
+    // But still save if enough time has passed since last skip
+    if (fullContentLength > 0 && patchLength > fullContentLength * 0.8 && !shouldForceSave) {
+      const timerJustStarted = lastSkipTimeRef.current === null;
+      lastSkipTimeRef.current = Date.now(); // Track when we skipped
+      lastSaveTimeRef.current = Date.now(); // Update last save time to prevent MAX_SAVE_INTERVAL from triggering
+      console.log('[DELTA] Skipping save: patch too large (>80% of content size)');
+      if (timerJustStarted) {
+        console.log(`[DELTA] Timer started: will force save after ${MIN_SAVE_INTERVAL}ms if no successful save`);
+        // Store the content to save when timer fires
+        skippedContentRef.current = htmlContentToSave;
+        // Set actual timer to fire after 10 seconds
+        if (skipTimerRef.current) {
+          clearTimeout(skipTimerRef.current);
+        }
+        skipTimerRef.current = setTimeout(() => {
+          if (skippedContentRef.current) {
+            console.log(`[DELTA] Skip timer fired after ${MIN_SAVE_INTERVAL}ms, forcing save`);
+            const contentToSave = skippedContentRef.current;
+            skippedContentRef.current = null; // Clear it before saving
+            performSave(contentToSave);
+          }
+        }, MIN_SAVE_INTERVAL);
+      } else {
+        // Timer already running, update the content to save
+        skippedContentRef.current = htmlContentToSave;
+      }
+      pendingContentRef.current = null;
+      return;
+    }
+
+    // Log if forcing save due to time since last skip (timer ended)
+    if (shouldForceSave) {
+      const timeSinceSkip = Date.now() - lastSkipTimeRef.current;
+      console.log(`[DELTA] Timer ended: ${timeSinceSkip}ms elapsed, forcing save (patch: ${patchLength} bytes)`);
+      // Clear the skip timer since we're forcing the save
+      if (skipTimerRef.current) {
+        clearTimeout(skipTimerRef.current);
+        skipTimerRef.current = null;
+      }
+    } else {
+      // Normal save (not forced by timer)
+      console.log('[DELTA] Saving document...');
+    }
+
+    // Phase 2: Mark save as in progress
+    saveInProgressRef.current = true;
     setSaveStatus('saving');
     try {
-      // Save HTML directly (no conversion needed)
-      await documentAPI.saveDocument(null, htmlContentToSave, 'replace', activeDocumentId);
-      setContent(htmlContentToSave); // Store HTML in state
+      const response = await documentAPI.saveDocument(
+        activeDocumentId, 
+        patchText, 
+        documentVersionRef.current
+      );
+      
+      // Update tracking refs with successful save
+      const newVersion = response.data.version;
+      const hadTimer = lastSkipTimeRef.current !== null;
+      lastSavedContentRef.current = htmlContentToSave;
+      documentVersionRef.current = newVersion;
+      lastSkipTimeRef.current = null; // Clear skip timer on successful save
+      skippedContentRef.current = null; // Clear skipped content
+      if (skipTimerRef.current) {
+        clearTimeout(skipTimerRef.current);
+        skipTimerRef.current = null;
+      }
+      
+      console.log(`[DELTA] Save successful, new version: ${newVersion}`);
+      if (hadTimer) {
+        console.log('[DELTA] Timer cleared: successful save completed');
+      }
+      
+      setContent(htmlContentToSave);
       setSaveStatus('saved');
       lastSaveTimeRef.current = Date.now();
       pendingContentRef.current = null;
+      
+      // Phase 2: Process queued save if there is one
+      saveInProgressRef.current = false;
+      if (pendingSaveQueueRef.current) {
+        const queuedContent = pendingSaveQueueRef.current;
+        pendingSaveQueueRef.current = null;
+        console.log('[DELTA] Processing queued save');
+        performSave(queuedContent);
+      }
       
       // Update word count for this document
       const tempDiv = document.createElement('div');
@@ -1402,8 +1577,67 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
         [activeDocumentId]: getWordCount(textContent)
       }));
     } catch (err) {
+      // Handle version conflict - refetch and retry
+      if (err.response?.status === 409) {
+        console.log('[DELTA] Version conflict detected, refetching document...');
+        try {
+          const freshDoc = await documentAPI.getDocument(activeDocumentId);
+          lastSavedContentRef.current = freshDoc.data.content || '';
+          documentVersionRef.current = freshDoc.data.version || 0;
+          
+          // Re-compute patches with fresh content
+          const newPatches = dmp.patch_make(lastSavedContentRef.current, htmlContentToSave);
+          if (newPatches.length > 0) {
+            const newPatchText = dmp.patch_toText(newPatches);
+            const retryResponse = await documentAPI.saveDocument(
+              activeDocumentId,
+              newPatchText,
+              documentVersionRef.current
+            );
+            lastSavedContentRef.current = htmlContentToSave;
+            documentVersionRef.current = retryResponse.data.version;
+            const hadTimer = lastSkipTimeRef.current !== null;
+            lastSkipTimeRef.current = null; // Clear skip timer on successful retry
+            skippedContentRef.current = null; // Clear skipped content
+            if (skipTimerRef.current) {
+              clearTimeout(skipTimerRef.current);
+              skipTimerRef.current = null;
+            }
+            console.log(`[DELTA] Retry successful, new version: ${retryResponse.data.version}`);
+            if (hadTimer) {
+              console.log('[DELTA] Timer cleared: successful retry save completed');
+            }
+            setSaveStatus('saved');
+            lastSaveTimeRef.current = Date.now();
+            pendingContentRef.current = null;
+            
+            // Phase 2: Process queued save if there is one
+            saveInProgressRef.current = false;
+            if (pendingSaveQueueRef.current) {
+              const queuedContent = pendingSaveQueueRef.current;
+              pendingSaveQueueRef.current = null;
+              console.log('[DELTA] Processing queued save');
+              performSave(queuedContent);
+            }
+            return;
+          }
+        } catch (retryErr) {
+          console.error('[DELTA] Retry failed:', retryErr);
+        }
+      }
+      
+      // Phase 2: Clear save in progress flag on error
+      saveInProgressRef.current = false;
       setSaveStatus('error');
-      console.error('Failed to save document:', err);
+      console.error('[DELTA] Failed to save document:', err);
+      
+      // Phase 2: Process queued save if there is one (even after error)
+      if (pendingSaveQueueRef.current) {
+        const queuedContent = pendingSaveQueueRef.current;
+        pendingSaveQueueRef.current = null;
+        console.log('[DELTA] Processing queued save after error');
+        performSave(queuedContent);
+      }
     }
   }, [activeDocumentId]);
 
@@ -1417,34 +1651,42 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       clearTimeout(debounceTimerRef.current);
     }
 
-    // Set new debounce timer (save after 2s of inactivity)
+    // Set new debounce timer (save after 3s of inactivity - Phase 2)
     debounceTimerRef.current = setTimeout(() => {
       if (pendingContentRef.current) {
+        console.log('[DELTA] Debounce timer fired, calling performSave');
         performSave(pendingContentRef.current);
       }
     }, DEBOUNCE_DELAY);
+    console.log(`[DELTA] Debounce timer set for ${DEBOUNCE_DELAY}ms`);
 
-    // Check if we need to force save (max interval)
-    const timeSinceLastSave = Date.now() - lastSaveTimeRef.current;
-    if (timeSinceLastSave >= MAX_SAVE_INTERVAL) {
-      // Clear debounce and save immediately
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-      performSave(newHtmlContent);
-    } else if (!maxIntervalTimerRef.current) {
-      // Set max interval timer if not already set
-      const remainingTime = MAX_SAVE_INTERVAL - timeSinceLastSave;
-      maxIntervalTimerRef.current = setTimeout(() => {
-        if (pendingContentRef.current) {
-          // Clear debounce timer
-          if (debounceTimerRef.current) {
-            clearTimeout(debounceTimerRef.current);
-          }
-          performSave(pendingContentRef.current);
+    // Phase 2: Check MAX_SAVE_INTERVAL only if no save is in progress
+    // Don't trigger if skip timer is running (let skip timer handle it)
+    // This prevents triggering saves while another save is happening or while we're skipping
+    if (!saveInProgressRef.current && lastSkipTimeRef.current === null) {
+      const timeSinceLastSave = Date.now() - lastSaveTimeRef.current;
+      if (timeSinceLastSave >= MAX_SAVE_INTERVAL) {
+        // Clear debounce and save immediately (but only if not in progress and not skipping)
+        console.log(`[DELTA] MAX_SAVE_INTERVAL exceeded (${timeSinceLastSave}ms), saving immediately`);
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
         }
-        maxIntervalTimerRef.current = null;
-      }, remainingTime);
+        performSave(newHtmlContent);
+      } else if (!maxIntervalTimerRef.current) {
+        // Set max interval timer if not already set
+        const remainingTime = MAX_SAVE_INTERVAL - timeSinceLastSave;
+        maxIntervalTimerRef.current = setTimeout(() => {
+          if (pendingContentRef.current && !saveInProgressRef.current && lastSkipTimeRef.current === null) {
+            // Clear debounce timer
+            if (debounceTimerRef.current) {
+              clearTimeout(debounceTimerRef.current);
+            }
+            console.log('[DELTA] MAX_SAVE_INTERVAL timer fired');
+            performSave(pendingContentRef.current);
+          }
+          maxIntervalTimerRef.current = null;
+        }, remainingTime);
+      }
     }
   }, [performSave]);
 
@@ -1507,15 +1749,22 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (pendingContentRef.current && activeDocumentId) {
-        // Save HTML directly (no conversion needed)
-        navigator.sendBeacon(
-          `/api/document`,
-          JSON.stringify({
-            document_id: activeDocumentId,
-            content: pendingContentRef.current, // HTML content
-            mode: 'replace'
-          })
-        );
+        // Compute delta for beacon save
+        const dmp = dmpRef.current;
+        const patches = dmp.patch_make(lastSavedContentRef.current, pendingContentRef.current);
+        
+        if (patches.length > 0) {
+          const patchText = dmp.patch_toText(patches);
+          navigator.sendBeacon(
+            `/api/document`,
+            JSON.stringify({
+              document_id: activeDocumentId,
+              patches: patchText,
+              version: documentVersionRef.current
+            })
+          );
+          console.log('[DELTA] Sent beacon with patches on unload');
+        }
       }
     };
 

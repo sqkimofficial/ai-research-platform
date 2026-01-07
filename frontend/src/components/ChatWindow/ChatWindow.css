@@ -2193,16 +2193,14 @@
 }
 
 .mention-dropdown {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
+  position: relative; /* Relative within fixed container */
   width: 240px;
   background: var(--color-white);
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 20px;
   padding: 8px;
   box-shadow: 4px 4px 4px rgba(0, 0, 0, 0.08);
-  z-index: 1000;
+  z-index: 9999;
 }
 
 .mention-dropdown-items {
@@ -2343,10 +2341,9 @@
 
 /* Mention Dropdown Container with Preview Panel */
 .mention-dropdown-container {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  z-index: 1000;
+  position: fixed; /* Use fixed positioning to escape parent overflow:hidden */
+  z-index: 9999; /* Highest z-index to ensure it's on top of everything */
+  /* Note: position is set dynamically via JS based on input position */
 }
 
 /* Preview Panel Styles - absolutely positioned to the LEFT of the dropdown */
@@ -2363,7 +2360,7 @@
   padding: 8px;
   box-shadow: 4px 4px 8px rgba(0, 0, 0, 0.08);
   overflow: visible;
-  z-index: 1001;
+  z-index: 10000; /* Higher than container to ensure visibility */
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -2439,7 +2436,7 @@
   position: relative;
   bottom: auto;
   left: auto;
-  z-index: 1000;
+  z-index: 9999;
   overflow: visible; /* Allow preview to extend outside */
 }
 

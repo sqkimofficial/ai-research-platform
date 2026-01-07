@@ -524,28 +524,32 @@ const ChatWindow = ({
     }
   }, [showMentionDropdown]);
 
-  // Position dropdown container: ensure dropdown doesn't overflow right edge
+  // Position dropdown container using fixed positioning to escape parent overflow:hidden
   // Only reposition when dropdown opens, NOT when preview changes
   useEffect(() => {
-    if (showMentionDropdown && mentionContainerRef.current && mentionDropdownRef.current) {
+    if (showMentionDropdown && mentionContainerRef.current && textareaRef.current) {
       const container = mentionContainerRef.current;
-      const dropdown = mentionDropdownRef.current;
+      const textareaRect = textareaRef.current.getBoundingClientRect();
       
-      // Reset any previous adjustments first
-      container.style.transform = '';
+      // Position above the textarea with 8px gap
+      const dropdownGap = 8;
       
-      // Force reflow to get accurate position
+      // Set fixed position based on textarea location
+      container.style.left = `${textareaRect.left}px`;
+      container.style.bottom = `${window.innerHeight - textareaRect.top + dropdownGap}px`;
+      
+      // Force reflow to get accurate dropdown dimensions
       void container.offsetHeight;
       
       // Check if dropdown would overflow right edge (24px min margin)
       const viewportWidth = window.innerWidth;
-      const dropdownRect = dropdown.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
       const minRightMargin = 24;
-      const rightOverflow = dropdownRect.right - (viewportWidth - minRightMargin);
+      const rightOverflow = containerRect.right - (viewportWidth - minRightMargin);
       
       if (rightOverflow > 0) {
         // Shift container left by the overflow amount
-        container.style.transform = `translateX(-${rightOverflow}px)`;
+        container.style.left = `${textareaRect.left - rightOverflow}px`;
       }
     }
   }, [showMentionDropdown]); // Only run when dropdown opens/closes, NOT when preview changes
@@ -1355,7 +1359,12 @@ const ChatWindow = ({
                         ) : (
                           <img 
                             src={previewImage.startsWith('http') ? previewImage : `data:image/jpeg;base64,${previewImage}`} 
-                            alt="Highlight context preview" 
+                            alt="Highlight context preview"
+                            crossOrigin="anonymous"
+                            onError={(e) => {
+                              console.error('[PREVIEW] Image failed to load:', e.target.src);
+                              console.error('[PREVIEW] This is likely a CORS issue. Check S3 bucket CORS configuration.');
+                            }}
                           />
                         )}
                       </div>

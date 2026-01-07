@@ -20,6 +20,7 @@
     "@tiptap/react": "^3.14.0",
     "@tiptap/starter-kit": "^3.14.0",
     "axios": "^1.6.0",
+    "diff-match-patch": "^1.0.5",
     "highlight.js": "^11.11.1",
     "jwt-decode": "^4.0.0",
     "lowlight": "^3.3.0",

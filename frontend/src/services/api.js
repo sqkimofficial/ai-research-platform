@@ -203,17 +203,23 @@ export const chatAPI = {
 
 // Document API
 export const documentAPI = {
-  getDocument: (sessionId, documentId = null) => {
-    if (documentId) {
-      return api.get(`/api/document?document_id=${documentId}`);
-    }
-    return api.get(`/api/document?session_id=${sessionId}`);
+  getDocument: (documentId) => {
+    return api.get(`/api/document?document_id=${documentId}`);
   },
-  saveDocument: (sessionId, content, mode = 'replace', documentId = null, structure = null, title = null) => {
-    if (documentId) {
-      return api.post('/api/document', { document_id: documentId, content, mode, structure, title });
-    }
-    return api.post('/api/document', { session_id: sessionId, content, mode });
+  /**
+   * Save document using delta patches
+   * @param {string} documentId - Document ID
+   * @param {string} patches - Patch text from diff-match-patch
+   * @param {number} version - Current version for optimistic locking
+   * @param {string} title - Optional title update
+   */
+  saveDocument: (documentId, patches, version, title = null) => {
+    return api.post('/api/document', { 
+      document_id: documentId, 
+      patches, 
+      version,
+      title 
+    });
   },
   downloadPDF: (sessionId) => {
     return api.get(`/api/document/pdf?session_id=${sessionId}`, {

@@ -408,8 +408,8 @@ class ResearchDocumentModel:
             'project_id': project_id,
             'document_id': document_id,
             'title': title or f'Research Document {datetime.utcnow().strftime("%Y-%m-%d %H:%M")}',
-            'markdown_content': '',
-            'structure': [],  # Document structure tree (flat list)
+            'content': '',  # HTML content
+            'version': 0,  # Version for delta sync
             'snapshot': None,  # Base64 encoded image snapshot
             'archived': False,  # Archive flag (only true when user manually archives)
             'created_at': datetime.utcnow(),
@@ -437,15 +437,13 @@ class ResearchDocumentModel:
         return documents
     
     @staticmethod
-    def update_document(document_id, markdown_content=None, structure=None, title=None, snapshot=None, archived=None):
-        """Update document content, structure, title, snapshot, and/or archived status"""
+    def update_document(document_id, content=None, title=None, snapshot=None, archived=None):
+        """Update document content, title, snapshot, and/or archived status"""
         db = Database.get_db()
         update_data = {'updated_at': datetime.utcnow()}
         
-        if markdown_content is not None:
-            update_data['markdown_content'] = markdown_content
-        if structure is not None:
-            update_data['structure'] = structure
+        if content is not None:
+            update_data['content'] = content
         if title is not None:
             update_data['title'] = title
         if snapshot is not None:
@@ -459,12 +457,79 @@ class ResearchDocumentModel:
         )
     
     @staticmethod
-    def get_document_structure(document_id):
-        """Get document structure for a document"""
-        doc = ResearchDocumentModel.get_document(document_id)
-        if doc:
-            return doc.get('structure', [])
-        return []
+    def apply_delta(document_id, patches_text, expected_version):
+        """
+        Apply delta patches to document content using diff-match-patch.
+        
+        Args:
+            document_id: The document ID
+            patches_text: Patch text from diff-match-patch (frontend)
+            expected_version: The version the client expects (for optimistic locking)
+        
+        Returns:
+            dict with 'success', 'new_version', 'new_content_length', 'error'
+        """
+        from diff_match_patch import diff_match_patch
+        
+        db = Database.get_db()
+        doc = db.research_documents.find_one({'document_id': document_id})
+        
+        if not doc:
+            return {'success': False, 'error': 'Document not found'}
+        
+        current_version = doc.get('version', 0)
+        current_content = doc.get('content', '') or doc.get('markdown_content', '')  # Fallback for old schema
+        
+        # Version check (optimistic locking)
+        if current_version != expected_version:
+            print(f"[DELTA SAVE] Version mismatch: expected {expected_version}, got {current_version}")
+            return {
+                'success': False, 
+                'error': 'Version mismatch',
+                'current_version': current_version
+            }
+        
+        # Apply patches
+        dmp = diff_match_patch()
+        try:
+            patches = dmp.patch_fromText(patches_text)
+            new_content, results = dmp.patch_apply(patches, current_content)
+            
+            print(f"[DELTA SAVE] Document: {document_id}")
+            print(f"[DELTA SAVE] Received patch: {len(patches_text)} bytes")
+            print(f"[DELTA SAVE] Current content: {len(current_content)} bytes")
+            print(f"[DELTA SAVE] New content: {len(new_content)} bytes")
+            print(f"[DELTA SAVE] All patches applied successfully: {results}")
+            
+            # Check if all patches applied successfully
+            if not all(results):
+                print(f"[DELTA SAVE] Warning: Some patches failed to apply: {results}")
+            
+            new_version = current_version + 1
+            print(f"[DELTA SAVE] Version: {current_version} -> {new_version}")
+            
+            # Update document with new content and incremented version
+            db.research_documents.update_one(
+                {'document_id': document_id},
+                {
+                    '$set': {
+                        'content': new_content,
+                        'version': new_version,
+                        'updated_at': datetime.utcnow()
+                    }
+                }
+            )
+            
+            return {
+                'success': True,
+                'new_version': new_version,
+                'new_content_length': len(new_content),
+                'patches_applied': results
+            }
+            
+        except Exception as e:
+            print(f"[DELTA SAVE] Error applying patches: {e}")
+            return {'success': False, 'error': str(e)}
     
     @staticmethod
     def delete_document(document_id):
@@ -502,97 +567,6 @@ class ResearchDocumentModel:
             {'$set': {'title': new_title, 'updated_at': datetime.utcnow()}}
         )
         return result.modified_count > 0
-
-class DocumentModel:
-    @staticmethod
-    def create_document(user_id, session_id):
-        """Create a new document (DEPRECATED - use ResearchDocumentModel instead)"""
-        db = Database.get_db()
-        document_id = str(uuid.uuid4())
-        document = {
-            'user_id': user_id,
-            'session_id': session_id,
-            'document_id': document_id,
-            'markdown_content': '',
-            'structure': [],  # Document structure tree (flat list)
-            'created_at': datetime.utcnow(),
-            'updated_at': datetime.utcnow()
-        }
-        db.documents.insert_one(document)
-        return document_id
-    
-    @staticmethod
-    def get_document(document_id):
-        """Get document by document_id"""
-        db = Database.get_db()
-        return db.documents.find_one({'document_id': document_id})
-    
-    @staticmethod
-    def get_document_by_session(session_id):
-        """Get document by session_id (using session_id as document_id for now)"""
-        db = Database.get_db()
-        # For now, use session_id as document identifier
-        # In the future, we might want a separate mapping
-        return db.documents.find_one({'session_id': session_id})
-    
-    @staticmethod
-    def update_document(document_id, markdown_content, structure=None):
-        """Update document content and structure"""
-        db = Database.get_db()
-        update_data = {
-            'markdown_content': markdown_content,
-            'updated_at': datetime.utcnow()
-        }
-        if structure is not None:
-            update_data['structure'] = structure
-        
-        db.documents.update_one(
-            {'document_id': document_id},
-            {'$set': update_data}
-        )
-    
-    @staticmethod
-    def update_document_structure(session_id, structure, user_id=None):
-        """Update document structure for a session. Creates document if it doesn't exist."""
-        db = Database.get_db()
-        doc = DocumentModel.get_document_by_session(session_id)
-        
-        if doc:
-            # Update existing document
-            db.documents.update_one(
-                {'session_id': session_id},
-                {
-                    '$set': {
-                        'structure': structure,
-                        'updated_at': datetime.utcnow()
-                    }
-                }
-            )
-        else:
-            # Create new document entry if user_id is provided
-            if user_id:
-                document_id = str(uuid.uuid4())
-                document = {
-                    'user_id': user_id,
-                    'session_id': session_id,
-                    'document_id': document_id,
-                    'markdown_content': '',
-                    'structure': structure,
-                    'created_at': datetime.utcnow(),
-                    'updated_at': datetime.utcnow()
-                }
-                db.documents.insert_one(document)
-            else:
-                # Can't create without user_id - this should be handled in the route
-                print(f"Warning: Cannot create document for session {session_id} without user_id")
-    
-    @staticmethod
-    def get_document_structure(session_id):
-        """Get document structure for a session"""
-        doc = DocumentModel.get_document_by_session(session_id)
-        if doc:
-            return doc.get('structure', [])
-        return []
 
 class DocumentEmbeddingModel:
     @staticmethod
@@ -1056,175 +1030,4 @@ class PDFDocumentModel:
         return result.deleted_count > 0
 
 
-class DocumentTypeModel:
-    """Model for managing document element types globally across all sessions"""
-    
-    @staticmethod
-    def create_type(type_name, description, metadata_schema=None, is_system=False):
-        """
-        Create a new document type.
-        
-        Args:
-            type_name: Unique name for the type (e.g., 'section', 'code_block', 'custom_type')
-            description: Human-readable description of what this type represents
-            metadata_schema: Optional JSON schema defining expected metadata fields
-            is_system: Whether this is a system type (cannot be deleted)
-        
-        Returns:
-            type_id if created, None if type already exists
-        """
-        db = Database.get_db()
-        type_id = str(uuid.uuid4())
-        
-        # Check if type already exists
-        existing = db.document_types.find_one({'type_name': type_name})
-        if existing:
-            return None
-        
-        type_doc = {
-            'type_id': type_id,
-            'type_name': type_name,
-            'description': description,
-            'metadata_schema': metadata_schema or {},
-            'is_system': is_system,
-            'usage_count': 0,
-            'created_at': datetime.utcnow(),
-            'updated_at': datetime.utcnow()
-        }
-        
-        try:
-            db.document_types.insert_one(type_doc)
-            return type_id
-        except DuplicateKeyError:
-            return None
-    
-    @staticmethod
-    def get_type(type_name):
-        """Get a document type by name"""
-        db = Database.get_db()
-        return db.document_types.find_one({'type_name': type_name})
-    
-    @staticmethod
-    def get_all_types():
-        """Get all document types, sorted by usage count descending"""
-        db = Database.get_db()
-        return list(db.document_types.find().sort('usage_count', -1))
-    
-    @staticmethod
-    def get_available_types():
-        """Get all available types as a simple list of names"""
-        types = DocumentTypeModel.get_all_types()
-        return [t['type_name'] for t in types]
-    
-    @staticmethod
-    def increment_usage(type_name):
-        """Increment usage count for a type"""
-        db = Database.get_db()
-        db.document_types.update_one(
-            {'type_name': type_name},
-            {
-                '$inc': {'usage_count': 1},
-                '$set': {'updated_at': datetime.utcnow()}
-            }
-        )
-    
-    @staticmethod
-    def update_type(type_name, description=None, metadata_schema=None):
-        """Update an existing type (cannot update system types)"""
-        db = Database.get_db()
-        update_data = {'updated_at': datetime.utcnow()}
-        
-        if description is not None:
-            update_data['description'] = description
-        if metadata_schema is not None:
-            update_data['metadata_schema'] = metadata_schema
-        
-        result = db.document_types.update_one(
-            {'type_name': type_name, 'is_system': False},
-            {'$set': update_data}
-        )
-        return result.modified_count > 0
-    
-    @staticmethod
-    def delete_type(type_name):
-        """Delete a type (cannot delete system types)"""
-        db = Database.get_db()
-        result = db.document_types.delete_one({'type_name': type_name, 'is_system': False})
-        return result.deleted_count > 0
-    
-    @staticmethod
-    def initialize_default_types():
-        """Initialize default system types if they don't exist"""
-        default_types = [
-            {
-                'type_name': 'section',
-                'description': 'Main section heading (##)',
-                'metadata_schema': {'title': 'string', 'level': 'integer'},
-                'is_system': True
-            },
-            {
-                'type_name': 'subsection',
-                'description': 'Subsection heading (###)',
-                'metadata_schema': {'title': 'string', 'level': 'integer'},
-                'is_system': True
-            },
-            {
-                'type_name': 'paragraph',
-                'description': 'Regular paragraph text',
-                'metadata_schema': {},
-                'is_system': True
-            },
-            {
-                'type_name': 'table',
-                'description': 'Markdown table',
-                'metadata_schema': {'caption': 'string'},
-                'is_system': True
-            },
-            {
-                'type_name': 'code_block',
-                'description': 'Code snippet with syntax highlighting',
-                'metadata_schema': {'language': 'string'},
-                'is_system': True
-            },
-            {
-                'type_name': 'image',
-                'description': 'Image with optional caption',
-                'metadata_schema': {'alt': 'string', 'url': 'string', 'caption': 'string'},
-                'is_system': True
-            },
-            {
-                'type_name': 'list',
-                'description': 'Ordered or unordered list',
-                'metadata_schema': {'ordered': 'boolean'},
-                'is_system': True
-            },
-            {
-                'type_name': 'blockquote',
-                'description': 'Blockquote for citations or emphasis',
-                'metadata_schema': {'source': 'string'},
-                'is_system': True
-            },
-            {
-                'type_name': 'heading',
-                'description': 'Generic heading (can be any level)',
-                'metadata_schema': {'title': 'string', 'level': 'integer'},
-                'is_system': True
-            }
-        ]
-        
-        db = Database.get_db()
-        initialized_count = 0
-        
-        for type_def in default_types:
-            existing = db.document_types.find_one({'type_name': type_def['type_name']})
-            if not existing:
-                DocumentTypeModel.create_type(
-                    type_name=type_def['type_name'],
-                    description=type_def['description'],
-                    metadata_schema=type_def['metadata_schema'],
-                    is_system=type_def['is_system']
-                )
-                initialized_count += 1
-        
-        return initialized_count
 
