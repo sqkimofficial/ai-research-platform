@@ -827,6 +827,19 @@ class HighlightModel:
             {'$set': {'archived': False, 'updated_at': datetime.utcnow()}}
         )
         return result.modified_count > 0
+    
+    @staticmethod
+    def delete_source(user_id, project_id, source_url):
+        """Delete an entire source document and all its highlights from the database"""
+        db = Database.get_db()
+        result = db.highlights.delete_one(
+            {
+                'user_id': user_id,
+                'project_id': project_id,
+                'source_url': source_url
+            }
+        )
+        return result.deleted_count > 0
 
 
 class PDFDocumentModel:

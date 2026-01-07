@@ -291,6 +291,14 @@ export const highlightsAPI = {
       }
     });
   },
+  deleteSource: (projectId, sourceUrl) => {
+    return api.delete('/api/highlights/source', {
+      data: {
+        project_id: projectId,
+        source_url: sourceUrl
+      }
+    });
+  },
   // Get preview image for a web highlight
   getHighlightPreview: (highlightId, projectId, sourceUrl) => {
     return api.get(`/api/highlights/preview/${highlightId}?project_id=${projectId}&source_url=${encodeURIComponent(sourceUrl)}`);

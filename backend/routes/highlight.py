@@ -663,6 +663,66 @@ def unarchive_highlight():
         return jsonify({'error': 'Highlight not found'}), 404
 
 
+@highlight_bp.route('/source', methods=['DELETE'])
+def delete_source():
+    """
+    Delete an entire source document and all its highlights from the database.
+    
+    Body: {
+        project_id: string (required),
+        source_url: string (required)
+    }
+    
+    Returns: { success: true, message: string }
+    """
+    user_id = get_user_id_from_token()
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    # Validate required fields
+    required_fields = ['project_id', 'source_url']
+    for field in required_fields:
+        if not data.get(field):
+            return jsonify({'error': f'Missing required field: {field}'}), 400
+    
+    project_id = data['project_id']
+    source_url = data['source_url']
+    
+    # Log auth info for Chrome extension
+    log_auth_info(project_id)
+    
+    # Validate project belongs to user
+    project = ProjectModel.get_project(project_id)
+    if not project or project.get('user_id') != user_id:
+        return jsonify({'error': 'Project not found or access denied'}), 404
+    
+    # Delete source and all highlights
+    success = HighlightModel.delete_source(
+        user_id=user_id,
+        project_id=project_id,
+        source_url=source_url
+    )
+    
+    if success:
+        # Invalidate cache
+        redis_service = get_redis_service()
+        redis_service.delete(f"cache:highlights:{user_id}:{project_id}")
+        redis_service.delete(f"cache:highlights:{user_id}:{project_id}:{source_url}")
+        print(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
+        print(f"[REDIS] Cache invalidated successfully")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Source and all highlights deleted successfully'
+        }), 200
+    else:
+        return jsonify({'error': 'Source not found'}), 404
+
+
 @highlight_bp.route('/preview/<highlight_id>', methods=['GET'])
 def get_highlight_preview(highlight_id):
     """

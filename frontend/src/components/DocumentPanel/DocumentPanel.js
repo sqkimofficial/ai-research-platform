@@ -28,6 +28,8 @@ import { ReactComponent as SearchIconSvg } from '../../assets/search.svg';
 import { ReactComponent as ChevronMdSvg } from '../../assets/chevron-md.svg';
 import highlightsImageIcon from '../../assets/highlights-image-icon.svg';
 import highlightsPdfIcon from '../../assets/highlights-pdf-icon.svg';
+import moreMenuIcon from '../../assets/document-menu-icons/More_Horizontal.svg';
+import deleteIcon from '../../assets/delete-icon.svg';
 import { getCacheKey, getCachedData, setCachedData, isCacheValid } from '../../utils/cache';
 
 // Asset-based icon components
@@ -283,6 +285,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
   const [pdfSearchQuery, setPdfSearchQuery] = useState('');
   const [visibleRowsCount, setVisibleRowsCount] = useState(15); // Lazy loading: start with 15 rows
   const tableScrollRef = useRef(null);
+  const [openSourceMenuId, setOpenSourceMenuId] = useState(null); // Track which source menu is open
+  const sourceMenuRefs = useRef({}); // Refs for menu dropdowns
 
   // Ref to track if we've restored tabs from localStorage (prevents saving empty arrays on mount)
   const hasRestoredTabsRef = useRef(false);
@@ -625,11 +629,21 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       if (docMenuRef.current && !docMenuRef.current.contains(event.target)) {
         setIsDocMenuOpen(false);
       }
+      
+      // Close source menu if clicking outside
+      if (openSourceMenuId !== null) {
+        const menuRef = sourceMenuRefs.current[openSourceMenuId];
+        const buttonRef = event.target.closest('.source-menu-button');
+        if (menuRef && !menuRef.contains(event.target) && !buttonRef) {
+          setOpenSourceMenuId(null);
+        }
+      }
     };
 
     const handleEscape = (event) => {
       if (event.key === 'Escape') {
         setIsDocMenuOpen(false);
+        setOpenSourceMenuId(null);
       }
     };
 
@@ -640,7 +654,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keyup', handleEscape);
     };
-  }, []);
+  }, [openSourceMenuId]);
 
 
   // Load available documents for the project
@@ -1533,6 +1547,70 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     } catch (err) {
       console.error('Failed to delete highlight:', err);
       setError('Failed to delete highlight. Please try again.');
+    }
+  };
+
+  const handleDeleteSource = async (data, isPdf = false) => {
+    if (!window.confirm('Are you sure you want to delete this source and all its highlights? This action cannot be undone.')) {
+      return;
+    }
+    
+    try {
+      if (isPdf) {
+        // For PDFs, use the PDF delete endpoint
+        if (data.pdf_id) {
+          await pdfAPI.deletePDF(data.pdf_id);
+        }
+        // Invalidate PDFs cache
+        try {
+          console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
+          const keys = [getCacheKey('pdfs', selectedProjectId)];
+          keys.forEach(k => localStorage.removeItem(k));
+          console.log('[CACHE] Cleared cache keys:', keys);
+        } catch (e) {
+          console.warn('Failed to invalidate cache after PDF delete:', e);
+        }
+        if (selectedProjectId) {
+          await loadPdfsForProject(selectedProjectId, true);
+        }
+        
+        // Close any tabs viewing this PDF
+        setPdfTabs(prev => prev.filter(tab => {
+          if (tab.selectedPdfData && tab.selectedPdfData.pdf.pdf_id === data.pdf_id) {
+            return false;
+          }
+          return true;
+        }));
+      } else {
+        // For web sources, use the delete source endpoint
+        const sourceUrl = data.source_url;
+        await highlightsAPI.deleteSource(selectedProjectId, sourceUrl);
+        // Invalidate highlights cache
+        try {
+          console.log('[CACHE] Invalidating cache for project:', selectedProjectId);
+          const keys = [getCacheKey('highlights', selectedProjectId)];
+          keys.forEach(k => localStorage.removeItem(k));
+          console.log('[CACHE] Cleared cache keys:', keys);
+        } catch (e) {
+          console.warn('Failed to invalidate cache after source delete:', e);
+        }
+        if (selectedProjectId) {
+          await loadHighlightsForProject(selectedProjectId);
+        }
+        
+        // Close any tabs viewing this URL
+        setHighlightsTabs(prev => prev.filter(tab => {
+          if (tab.selectedUrlData && tab.selectedUrlData.urlDoc.source_url === sourceUrl) {
+            return false;
+          }
+          return true;
+        }));
+      }
+      
+      setOpenSourceMenuId(null);
+    } catch (err) {
+      console.error('Failed to delete source:', err);
+      setError('Failed to delete source. Please try again.');
     }
   };
 
@@ -2525,18 +2603,6 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                         >
                           <ArrowRightIcon />
                         </button>
-                        <button 
-                          className="browser-nav-btn"
-                          onClick={() => {
-                            const iframe = document.querySelector('.highlights-iframe');
-                            if (iframe) {
-                              iframe.src = iframe.src;
-                            }
-                          }}
-                          title="Refresh"
-                        >
-                          <RefreshIcon />
-                        </button>
                       </div>
                       <div className="browser-url-bar">
                         <span className="browser-url-text">{getSelectedUrlData().urlDoc.source_url}</span>
@@ -2956,17 +3022,8 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                     style={{ display: 'none' }}
                   />
                   
-                  {/* Upload and Refresh buttons - right aligned in separate div */}
+                  {/* Upload button - right aligned in separate div */}
                   <div className={`highlights-upload-section ${isChatCollapsed && activeTabType === 'pdf' ? 'chat-collapsed' : ''}`}>
-                    <button
-                      className="highlights-refresh-button"
-                      onClick={() => selectedProjectId && loadPdfsForProject(selectedProjectId, true)}
-                      disabled={pdfLoading}
-                      title="Refresh PDF list"
-                    >
-                      <RefreshIcon />
-                      <span>{pdfLoading ? 'Refreshing...' : 'Refresh'}</span>
-                    </button>
                     <button
                       className="highlights-upload-button"
                       onClick={() => fileInputRef.current?.click()}
@@ -3138,7 +3195,71 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                                       </div>
                                     </td>
                                     <td className="highlights-table-cell highlights-table-date-cell">
-                                      {formatTableDate(data.updated_at || data.created_at)}
+                                      <div>
+                                        <span>{formatTableDate(data.updated_at || data.created_at)}</span>
+                                        <div style={{ position: 'relative' }}>
+                                          <button
+                                            className="source-menu-button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              const menuId = `${item.type}-${idx}`;
+                                              if (openSourceMenuId === menuId) {
+                                                setOpenSourceMenuId(null);
+                                              } else {
+                                                setOpenSourceMenuId(menuId);
+                                                // Calculate position for fixed dropdown
+                                                setTimeout(() => {
+                                                  const button = e.currentTarget;
+                                                  if (button && button.getBoundingClientRect) {
+                                                    const rect = button.getBoundingClientRect();
+                                                    const menuRef = sourceMenuRefs.current[menuId];
+                                                    if (menuRef) {
+                                                      menuRef.style.top = `${rect.bottom + 4}px`;
+                                                      menuRef.style.right = `${window.innerWidth - rect.right}px`;
+                                                    }
+                                                  }
+                                                }, 0);
+                                              }
+                                            }}
+                                            style={{
+                                              opacity: openSourceMenuId === `${item.type}-${idx}` ? 1 : 0.5
+                                            }}
+                                          >
+                                            <img src={moreMenuIcon} alt="More options" />
+                                          </button>
+                                          {openSourceMenuId === `${item.type}-${idx}` && (
+                                            <div
+                                              ref={(el) => {
+                                                if (el) {
+                                                  sourceMenuRefs.current[`${item.type}-${idx}`] = el;
+                                                  // Calculate position on mount
+                                                  setTimeout(() => {
+                                                    const parent = el.parentElement;
+                                                    const button = parent?.querySelector('.source-menu-button');
+                                                    if (button && button.getBoundingClientRect) {
+                                                      const rect = button.getBoundingClientRect();
+                                                      el.style.top = `${rect.bottom + 4}px`;
+                                                      el.style.right = `${window.innerWidth - rect.right}px`;
+                                                    }
+                                                  }, 0);
+                                                }
+                                              }}
+                                              className="source-menu-dropdown"
+                                            >
+                                              <button
+                                                className="source-menu-item"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleDeleteSource(data, isPdf);
+                                                }}
+                                              >
+                                                <img src={deleteIcon} alt="Delete" />
+                                                <span>Delete</span>
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
                                     </td>
                                   </tr>
                                 );
