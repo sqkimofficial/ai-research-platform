@@ -3,7 +3,7 @@ Highlight Document Routes for handling PDF/Image uploads, viewing, and highlight
 Supports PDF, JPG, and PNG files.
 """
 from flask import Blueprint, request, jsonify, send_file, Response, stream_with_context
-from models.database import PDFDocumentModel, ProjectModel
+from models.database import PDFDocumentModel, ProjectModel, HighlightModel
 from utils.auth import get_user_id_from_token
 from services.pdf_extraction_service import get_highlight_extraction_service
 from services.redis_service import get_redis_service
@@ -113,7 +113,14 @@ def extract_highlights_async(doc_id, file_base64_data=None, content_type='applic
             updated_doc = PDFDocumentModel.get_pdf_document(doc_id)
             if updated_doc:
                 actual_status = updated_doc.get('extraction_status')
-                actual_highlight_count = len(updated_doc.get('highlights', []))
+                # Get highlight count from highlights collection
+                file_url = updated_doc.get('file_url')
+                project_id = updated_doc.get('project_id')
+                actual_highlight_count = 0
+                if file_url:
+                    highlight_doc = HighlightModel.get_highlights_by_url(user_id, project_id, file_url)
+                    if highlight_doc:
+                        actual_highlight_count = len(highlight_doc.get('highlights', []))
                 print(f"[VERIFY] PDF {doc_id} status in DB: {actual_status}, highlights: {actual_highlight_count}")
                 if actual_status != 'completed':
                     print(f"[ERROR] Extraction status is {actual_status}, expected 'completed'")
@@ -353,6 +360,16 @@ def get_pdfs():
         if not pdf or pdf.get('user_id') != user_id:
             return jsonify({'error': 'PDF not found or access denied'}), 404
         
+        # Get highlights from highlights collection
+        file_url = pdf.get('file_url')
+        project_id = pdf.get('project_id')
+        highlights = []
+        if file_url:
+            highlight_doc = HighlightModel.get_highlights_by_url(user_id, project_id, file_url)
+            if highlight_doc:
+                highlights = highlight_doc.get('highlights', [])
+        pdf['highlights'] = highlights
+        
         # Convert ObjectId and datetime
         pdf['_id'] = str(pdf['_id'])
         if 'created_at' in pdf:
@@ -425,7 +442,7 @@ def get_pdfs():
         # Get all PDFs for user
         pdfs = PDFDocumentModel.get_all_pdf_documents(user_id)
     
-    # Convert ObjectId and datetime
+    # Convert ObjectId and datetime, and fetch highlights from highlights collection
     for pdf in pdfs:
         pdf['_id'] = str(pdf['_id'])
         if 'created_at' in pdf:
@@ -433,12 +450,22 @@ def get_pdfs():
         if 'updated_at' in pdf:
             pdf['updated_at'] = pdf['updated_at'].isoformat()
         
+        # Get highlights from highlights collection using file_url as source_url
+        file_url = pdf.get('file_url')
+        project_id = pdf.get('project_id')
+        highlights = []
+        if file_url:
+            highlight_doc = HighlightModel.get_highlights_by_url(user_id, project_id, file_url)
+            if highlight_doc:
+                highlights = highlight_doc.get('highlights', [])
+        pdf['highlights'] = highlights
+        
         # Ensure extraction_status is included and log it for debugging
         extraction_status = pdf.get('extraction_status', 'unknown')
-        highlight_count = len(pdf.get('highlights', []))
+        highlight_count = len(highlights)
         print(f"[GET_PDFS] PDF {pdf.get('pdf_id', 'unknown')}: status={extraction_status}, highlights={highlight_count}")
         
-        for h in pdf.get('highlights', []):
+        for h in highlights:
             if 'timestamp' in h:
                 h['timestamp'] = h['timestamp'].isoformat()
             # Fix preview_image_url region if present
@@ -524,7 +551,7 @@ def get_pdf_file(pdf_id):
 @pdf_bp.route('/highlights/<pdf_id>', methods=['GET'])
 def get_pdf_highlights(pdf_id):
     """
-    Get highlights for a specific PDF.
+    Get highlights for a specific PDF (reads from highlights collection).
     
     Returns: { highlights: [...], extraction_status: string }
     """
@@ -536,13 +563,23 @@ def get_pdf_highlights(pdf_id):
     if not pdf or pdf.get('user_id') != user_id:
         return jsonify({'error': 'PDF not found or access denied'}), 404
     
-    highlights = pdf.get('highlights', [])
+    # Get highlights from highlights collection using file_url as source_url
+    file_url = pdf.get('file_url')
+    project_id = pdf.get('project_id')
+    
+    highlights = []
+    if file_url:
+        highlight_doc = HighlightModel.get_highlights_by_url(user_id, project_id, file_url)
+        if highlight_doc:
+            highlights = highlight_doc.get('highlights', [])
+    
+    # Format timestamps and fix preview URLs
     for h in highlights:
         if 'timestamp' in h:
             h['timestamp'] = h['timestamp'].isoformat()
         # Fix preview_image_url region if present
         if 'preview_image_url' in h and h['preview_image_url']:
-            h['preview_image_url'] = S3Service.fix_s3_url_region(h['preview_image_url'])
+            h['preview_image_url'] = S3Service.fix_s3_url_region(h['preview_image_url'], is_pdf_highlight=True)
     
     return jsonify({
         'highlights': highlights,
@@ -939,8 +976,18 @@ def get_highlight_preview(pdf_id, highlight_id):
     if not pdf or pdf.get('user_id') != user_id:
         return jsonify({'error': 'PDF not found or access denied'}), 404
     
+    # Get highlights from highlights collection
+    file_url = pdf.get('file_url')
+    project_id = pdf.get('project_id')
+    if not file_url:
+        return jsonify({'error': 'PDF has no file_url'}), 404
+    
+    highlight_doc = HighlightModel.get_highlights_by_url(user_id, project_id, file_url)
+    if not highlight_doc:
+        return jsonify({'error': 'Highlight not found'}), 404
+    
     # Find the specific highlight
-    for highlight in pdf.get('highlights', []):
+    for highlight in highlight_doc.get('highlights', []):
         if highlight.get('highlight_id') == highlight_id:
             preview_url = highlight.get('preview_image_url')
             if preview_url:

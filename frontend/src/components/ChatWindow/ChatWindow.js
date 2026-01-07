@@ -606,6 +606,14 @@ const ChatWindow = ({
       // Process PDF documents (show top 5 PDFs with highlights)
       pdfDocuments.slice(0, 5).forEach(pdf => {
         const sourceName = pdf.filename;
+        // Sort highlights by timestamp descending (most recent first) and limit to top 2
+        const sortedHighlights = [...(pdf.highlights || [])].sort((a, b) => {
+          const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+          const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+          return timeB - timeA;
+        });
+        const topHighlights = sortedHighlights.slice(0, 2);
+        
         // Add source item
         items.push({
           type: 'source',
@@ -614,11 +622,11 @@ const ChatWindow = ({
           title: sourceName,
           pdfId: pdf.pdf_id,
           data: pdf,
-          highlights: pdf.highlights || []
+          highlights: topHighlights
         });
         
-        // Add highlight items under this source (limit to top 5 highlights per PDF)
-        (pdf.highlights || []).slice(0, 5).forEach(highlight => {
+        // Add highlight items under this source (limit to top 2 highlights per PDF)
+        topHighlights.forEach(highlight => {
           items.push({
             type: 'highlight',
             sourceType: 'pdf',

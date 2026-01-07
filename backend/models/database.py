@@ -626,7 +626,7 @@ class HighlightModel:
     """Model for managing web highlights from Chrome extension"""
     
     @staticmethod
-    def save_highlight(user_id, project_id, source_url, page_title, highlight_text, note=None, tags=None, preview_image_url=None, highlight_id=None):
+    def save_highlight(user_id, project_id, source_url, page_title, highlight_text, note=None, tags=None, preview_image_url=None, highlight_id=None, page_number=None, color_tag=None):
         """
         Save a highlight. If document for this URL already exists, append to highlights array.
         Otherwise create new document.
@@ -634,13 +634,15 @@ class HighlightModel:
         Args:
             user_id: User ID
             project_id: Project ID
-            source_url: URL of the page
+            source_url: URL of the page (web URL or S3 URL for PDFs)
             page_title: Title of the page
             highlight_text: The highlighted text
             note: Optional note
             tags: Optional list of tags
             preview_image_url: Optional S3 URL for the preview image (new highlights use this)
             highlight_id: Optional pre-generated highlight ID (used when uploading to S3 first)
+            page_number: Optional page number (for PDF highlights)
+            color_tag: Optional color tag (for PDF highlights)
         
         Returns: highlight_id
         """
@@ -658,6 +660,12 @@ class HighlightModel:
             'tags': tags or [],
             'preview_image_url': preview_image_url  # S3 URL for the preview image
         }
+        
+        # Add PDF-specific fields if provided
+        if page_number is not None:
+            highlight_obj['page_number'] = page_number
+        if color_tag is not None:
+            highlight_obj['color_tag'] = color_tag
         
         # Check if document exists for this user+project+url combination
         existing = db.highlights.find_one({
@@ -723,7 +731,7 @@ class HighlightModel:
     @staticmethod
     def search_highlights(user_id, project_id, query, limit=10):
         """
-        Search highlights across all web sources for a project.
+        Search highlights across all sources (web URLs and PDF S3 URLs) for a project.
         Searches in highlight text, notes, source URLs, and page titles.
         
         Returns list of highlight documents with only matching highlights included.
@@ -912,7 +920,7 @@ class PDFDocumentModel:
             'file_url': file_url,  # S3 URL for the file (new uploads)
             'file_data': file_data,  # Base64 encoded PDF data (legacy - only for backward compatibility)
             'content_type': content_type,
-            'highlights': [],  # Will be populated by AI extraction
+            # Highlights are now stored in highlights collection, not here
             'extraction_status': 'pending',  # pending, processing, completed, failed
             'archived': False,  # Archive flag (only true when user manually archives)
             'created_at': datetime.utcnow(),
@@ -967,29 +975,59 @@ class PDFDocumentModel:
     @staticmethod
     def update_highlights(pdf_id, highlights):
         """
-        Update the highlights for a PDF document.
+        Update the highlights for a PDF document by saving them to the highlights collection.
         Each highlight should have: text, color_tag, page_number (optional), position (optional)
         """
         db = Database.get_db()
         
-        # Normalize colors for all highlights
-        normalized_highlights = []
+        # Get PDF document to retrieve metadata
+        pdf_doc = PDFDocumentModel.get_pdf_document(pdf_id)
+        if not pdf_doc:
+            print(f"[DB] ERROR: PDF {pdf_id} does not exist in database")
+            return False
+        
+        user_id = pdf_doc.get('user_id')
+        project_id = pdf_doc.get('project_id')
+        file_url = pdf_doc.get('file_url')
+        filename = pdf_doc.get('filename', 'Untitled Document')
+        
+        if not file_url:
+            print(f"[DB] ERROR: PDF {pdf_id} has no file_url (S3 URL)")
+            return False
+        
+        # Normalize colors and save each highlight to highlights collection
+        saved_count = 0
         for h in highlights:
             normalized_h = h.copy()
             normalized_h['color_tag'] = PDFDocumentModel.normalize_color(h.get('color', h.get('color_tag', 'yellow')))
+            
             # Preserve highlight_id if it exists (from extraction service), otherwise generate new one
-            if 'highlight_id' not in normalized_h:
-                normalized_h['highlight_id'] = str(uuid.uuid4())
-            # Preserve timestamp if it exists, otherwise set new one
-            if 'timestamp' not in normalized_h:
-                normalized_h['timestamp'] = datetime.utcnow()
-            normalized_highlights.append(normalized_h)
+            highlight_id = normalized_h.get('highlight_id')
+            if not highlight_id:
+                highlight_id = str(uuid.uuid4())
+                normalized_h['highlight_id'] = highlight_id
+            
+            # Save to highlights collection using HighlightModel
+            HighlightModel.save_highlight(
+                user_id=user_id,
+                project_id=project_id,
+                source_url=file_url,  # Use S3 URL as source_url
+                page_title=filename,
+                highlight_text=normalized_h.get('text', ''),
+                note=normalized_h.get('note'),
+                tags=normalized_h.get('tags', []),
+                preview_image_url=normalized_h.get('preview_image_url'),
+                highlight_id=highlight_id,
+                page_number=normalized_h.get('page_number'),
+                color_tag=normalized_h.get('color_tag')
+            )
+            saved_count += 1
         
+        # Update extraction_status in pdf_documents (but not highlights array)
         result = db.pdf_documents.update_one(
             {'pdf_id': pdf_id},
             {
                 '$set': {
-                    'highlights': normalized_highlights,
                     'extraction_status': 'completed',
                     'updated_at': datetime.utcnow()
                 }
@@ -998,17 +1036,11 @@ class PDFDocumentModel:
         
         # Log the update result for debugging
         if result.modified_count > 0:
-            print(f"[DB] Successfully updated PDF {pdf_id} with {len(normalized_highlights)} highlights, status: completed")
+            print(f"[DB] Successfully saved {saved_count} highlights to highlights collection for PDF {pdf_id}, status: completed")
         else:
-            print(f"[DB] WARNING: Update operation returned modified_count={result.modified_count} for PDF {pdf_id}")
-            # Check if document exists
-            doc = db.pdf_documents.find_one({'pdf_id': pdf_id})
-            if not doc:
-                print(f"[DB] ERROR: PDF {pdf_id} does not exist in database")
-            else:
-                print(f"[DB] PDF {pdf_id} exists but was not modified (maybe no changes?)")
+            print(f"[DB] WARNING: Failed to update extraction_status for PDF {pdf_id}")
         
-        return result.modified_count > 0
+        return saved_count > 0
     
     @staticmethod
     def update_extraction_status(pdf_id, status, error_message=None):
@@ -1028,46 +1060,78 @@ class PDFDocumentModel:
     
     @staticmethod
     def add_highlight(pdf_id, highlight_text, color, page_number=None, note=None):
-        """Add a single highlight to a PDF document"""
+        """Add a single highlight to a PDF document (saves to highlights collection)"""
+        # Get PDF document to retrieve metadata
+        pdf_doc = PDFDocumentModel.get_pdf_document(pdf_id)
+        if not pdf_doc:
+            raise ValueError(f"PDF {pdf_id} not found")
+        
+        user_id = pdf_doc.get('user_id')
+        project_id = pdf_doc.get('project_id')
+        file_url = pdf_doc.get('file_url')
+        filename = pdf_doc.get('filename', 'Untitled Document')
+        
+        if not file_url:
+            raise ValueError(f"PDF {pdf_id} has no file_url (S3 URL)")
+        
+        # Save to highlights collection using HighlightModel
+        highlight_id = HighlightModel.save_highlight(
+            user_id=user_id,
+            project_id=project_id,
+            source_url=file_url,  # Use S3 URL as source_url
+            page_title=filename,
+            highlight_text=highlight_text,
+            note=note,
+            tags=[],
+            preview_image_url=None,
+            highlight_id=None,  # Let it generate a new one
+            page_number=page_number,
+            color_tag=PDFDocumentModel.normalize_color(color)
+        )
+        
+        # Update updated_at in pdf_documents
         db = Database.get_db()
-        highlight_id = str(uuid.uuid4())
-        
-        highlight = {
-            'highlight_id': highlight_id,
-            'text': highlight_text,
-            'color_tag': PDFDocumentModel.normalize_color(color),
-            'page_number': page_number,
-            'note': note,
-            'timestamp': datetime.utcnow()
-        }
-        
         db.pdf_documents.update_one(
             {'pdf_id': pdf_id},
-            {
-                '$push': {'highlights': highlight},
-                '$set': {'updated_at': datetime.utcnow()}
-            }
+            {'$set': {'updated_at': datetime.utcnow()}}
         )
+        
         return highlight_id
     
     @staticmethod
     def delete_highlight(pdf_id, highlight_id):
-        """Delete a specific highlight from a PDF document"""
-        db = Database.get_db()
-        result = db.pdf_documents.update_one(
-            {'pdf_id': pdf_id},
-            {
-                '$pull': {'highlights': {'highlight_id': highlight_id}},
-                '$set': {'updated_at': datetime.utcnow()}
-            }
-        )
-        return result.modified_count > 0
+        """Delete a specific highlight from a PDF document (deletes from highlights collection)"""
+        # Get PDF document to retrieve file_url
+        pdf_doc = PDFDocumentModel.get_pdf_document(pdf_id)
+        if not pdf_doc:
+            return False
+        
+        user_id = pdf_doc.get('user_id')
+        project_id = pdf_doc.get('project_id')
+        file_url = pdf_doc.get('file_url')
+        
+        if not file_url:
+            return False
+        
+        # Delete from highlights collection using HighlightModel
+        deleted = HighlightModel.delete_highlight(user_id, project_id, file_url, highlight_id)
+        
+        # Update updated_at in pdf_documents
+        if deleted:
+            db = Database.get_db()
+            db.pdf_documents.update_one(
+                {'pdf_id': pdf_id},
+                {'$set': {'updated_at': datetime.utcnow()}}
+            )
+        
+        return deleted
     
     @staticmethod
     def search_highlights(user_id, project_id, query, limit=10):
         """
         Search highlights across all PDF documents for a project.
         Searches in highlight text, notes, and PDF filenames.
+        Reads highlights from highlights collection.
         
         Returns list of PDF documents with only matching highlights included.
         """
@@ -1091,9 +1155,17 @@ class PDFDocumentModel:
                 doc.get('filename') and query_pattern.search(doc.get('filename', ''))
             )
             
+            # Get highlights from highlights collection
+            file_url = doc.get('file_url')
+            highlights = []
+            if file_url:
+                highlight_doc = HighlightModel.get_highlights_by_url(user_id, project_id, file_url)
+                if highlight_doc:
+                    highlights = highlight_doc.get('highlights', [])
+            
             # Filter highlights that match
             matching_highlights = []
-            for highlight in doc.get('highlights', []):
+            for highlight in highlights:
                 highlight_matches = (
                     (highlight.get('text') and query_pattern.search(highlight.get('text', ''))) or
                     (highlight.get('note') and query_pattern.search(highlight.get('note', '')))
@@ -1107,7 +1179,7 @@ class PDFDocumentModel:
                     'type': 'pdf',
                     'pdf_id': doc.get('pdf_id'),
                     'filename': doc.get('filename'),
-                    'highlights': matching_highlights if matching_highlights else doc.get('highlights', []),
+                    'highlights': matching_highlights if matching_highlights else highlights,
                     '_id': doc.get('_id'),
                     'updated_at': doc.get('updated_at')
                 }
@@ -1119,10 +1191,28 @@ class PDFDocumentModel:
     
     @staticmethod
     def update_highlight_note(pdf_id, highlight_id, note):
-        """Update the note for a specific highlight"""
+        """Update the note for a specific highlight (updates in highlights collection)"""
+        # Get PDF document to retrieve file_url
+        pdf_doc = PDFDocumentModel.get_pdf_document(pdf_id)
+        if not pdf_doc:
+            return False
+        
+        user_id = pdf_doc.get('user_id')
+        project_id = pdf_doc.get('project_id')
+        file_url = pdf_doc.get('file_url')
+        
+        if not file_url:
+            return False
+        
+        # Update note in highlights collection
         db = Database.get_db()
-        result = db.pdf_documents.update_one(
-            {'pdf_id': pdf_id, 'highlights.highlight_id': highlight_id},
+        result = db.highlights.update_one(
+            {
+                'user_id': user_id,
+                'project_id': project_id,
+                'source_url': file_url,
+                'highlights.highlight_id': highlight_id
+            },
             {
                 '$set': {
                     'highlights.$.note': note,
@@ -1130,6 +1220,14 @@ class PDFDocumentModel:
                 }
             }
         )
+        
+        # Update updated_at in pdf_documents
+        if result.modified_count > 0:
+            db.pdf_documents.update_one(
+                {'pdf_id': pdf_id},
+                {'$set': {'updated_at': datetime.utcnow()}}
+            )
+        
         return result.modified_count > 0
     
     @staticmethod

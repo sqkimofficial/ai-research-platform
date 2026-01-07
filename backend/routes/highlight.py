@@ -343,9 +343,24 @@ def get_highlights():
         )
     
     # Convert ObjectId to string for JSON serialization and fix URLs
+    # Also limit highlights per document if limit is specified (for initial load)
+    highlights_per_source = 2  # Top 2 highlights per source
     for h_doc in highlights:
         if '_id' in h_doc:
             h_doc['_id'] = str(h_doc['_id'])
+        
+        # Limit highlights per document if limit is specified (for initial load)
+        if limit and 'highlights' in h_doc and h_doc['highlights']:
+            # Sort highlights by timestamp descending (most recent first)
+            # MongoDB returns datetime objects, which are directly comparable
+            sorted_highlights = sorted(
+                h_doc['highlights'],
+                key=lambda h: h.get('timestamp') or datetime.min,
+                reverse=True
+            )
+            # Take only top N highlights per source
+            h_doc['highlights'] = sorted_highlights[:highlights_per_source]
+        
         # Fix preview_image_url in nested highlights array
         if 'highlights' in h_doc:
             for h in h_doc['highlights']:
