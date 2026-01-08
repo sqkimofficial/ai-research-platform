@@ -56,6 +56,23 @@ class Config:
     REDIS_TTL_METADATA = int(os.getenv('REDIS_TTL_METADATA', 600))  # 10 min
     REDIS_TTL_VERSION = int(os.getenv('REDIS_TTL_VERSION', 60))  # 1 min
     
+    # CORS Configuration - Environment-aware
+    # In development: Allow localhost origins
+    # In production: Require ALLOWED_ORIGINS env var (comma-separated list)
+    if IS_PRODUCTION:
+        origins_env = os.getenv('ALLOWED_ORIGINS', '')
+        CORS_ALLOWED_ORIGINS = [o.strip() for o in origins_env.split(',') if o.strip()]
+        # Only validate in production if actually set to production
+        # This allows dev to continue working without production URLs
+    else:
+        # Development: Default to localhost origins
+        # Can be overridden with ALLOWED_ORIGINS env var if needed
+        dev_origins_env = os.getenv('ALLOWED_ORIGINS', '')
+        if dev_origins_env:
+            CORS_ALLOWED_ORIGINS = [o.strip() for o in dev_origins_env.split(',') if o.strip()]
+        else:
+            CORS_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000']
+    
     @staticmethod
     def get_required_env(var_name):
         """Get required environment variable or raise ValueError with clear message"""
@@ -108,6 +125,14 @@ class Config:
                 f"Missing required Auth0 environment variables: {', '.join(missing_auth0)}. "
                 "All Auth0 variables must be set (AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET)."
             )
+        
+        # Validate CORS configuration in production
+        if Config.IS_PRODUCTION:
+            if not Config.CORS_ALLOWED_ORIGINS:
+                raise ValueError(
+                    "ALLOWED_ORIGINS must be set in production. "
+                    "Set it as a comma-separated list of allowed origins (e.g., 'https://app.example.com,https://www.example.com')"
+                )
         
         # Set AUTH0_ISSUER after validation
         Config.AUTH0_ISSUER = f'https://{Config.AUTH0_DOMAIN}/'

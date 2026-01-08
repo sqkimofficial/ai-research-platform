@@ -4,7 +4,7 @@ import sys
 # Add current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
 from config import Config
 from routes.auth import auth_bp
@@ -18,7 +18,34 @@ from routes.pdf import pdf_bp
 Config.validate()
 
 app = Flask(__name__)
-CORS(app, origins="*")  # Allow all origins in development
+
+# Configure CORS with environment-aware settings
+CORS(app,
+     origins=Config.CORS_ALLOWED_ORIGINS,
+     supports_credentials=True,
+     methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+     allow_headers=['Content-Type', 'Authorization'],
+     max_age=3600)  # Cache preflight requests for 1 hour
+
+# CORS error handling and logging
+@app.before_request
+def log_cors_request():
+    """Log CORS-related request information for security monitoring"""
+    origin = request.headers.get('Origin')
+    if origin:
+        # Log if origin is not in allowed list (for security monitoring)
+        if origin not in Config.CORS_ALLOWED_ORIGINS:
+            print(f"[CORS] Blocked request from unauthorized origin: {origin}")
+            print(f"[CORS] Allowed origins: {Config.CORS_ALLOWED_ORIGINS}")
+
+@app.after_request
+def add_cors_headers(response):
+    """Add CORS headers to response and log CORS violations"""
+    origin = request.headers.get('Origin')
+    if origin and origin not in Config.CORS_ALLOWED_ORIGINS:
+        # Log CORS violation for security monitoring
+        print(f"[CORS] Rejected origin: {origin} (not in allowed list)")
+    return response
 
 # Register blueprints
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
