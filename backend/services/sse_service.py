@@ -9,6 +9,9 @@ import json
 import time
 from typing import Dict, Set
 from threading import Lock
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class SSEService:
@@ -24,7 +27,7 @@ class SSEService:
             if user_id not in cls._connections:
                 cls._connections[user_id] = set()
             cls._connections[user_id].add(queue)
-            print(f"[SSE] Added connection for user {user_id}. Total connections: {len(cls._connections[user_id])}")
+            logger.debug(f"[SSE] Added connection for user {user_id}. Total connections: {len(cls._connections[user_id])}")
     
     @classmethod
     def remove_connection(cls, user_id: str, queue):
@@ -34,14 +37,14 @@ class SSEService:
                 cls._connections[user_id].discard(queue)
                 if len(cls._connections[user_id]) == 0:
                     del cls._connections[user_id]
-                print(f"[SSE] Removed connection for user {user_id}")
+                logger.debug(f"[SSE] Removed connection for user {user_id}")
     
     @classmethod
     def broadcast_to_user(cls, user_id: str, event_type: str, data: dict):
         """Broadcast an event to all connections for a specific user."""
         with cls._lock:
             if user_id not in cls._connections:
-                print(f"[SSE] No connections for user {user_id}, skipping broadcast")
+                logger.debug(f"[SSE] No connections for user {user_id}, skipping broadcast")
                 return
             
             event_data = {
@@ -56,14 +59,14 @@ class SSEService:
                 try:
                     queue.put(event_data)
                 except Exception as e:
-                    print(f"[SSE] Error sending to connection: {e}")
+                    logger.warning(f"[SSE] Error sending to connection: {e}")
                     disconnected.append(queue)
             
             # Remove disconnected connections
             for queue in disconnected:
                 cls._connections[user_id].discard(queue)
             
-            print(f"[SSE] Broadcasted {event_type} to {len(cls._connections[user_id])} connections for user {user_id}")
+            logger.debug(f"[SSE] Broadcasted {event_type} to {len(cls._connections[user_id])} connections for user {user_id}")
     
     @classmethod
     def get_connection_count(cls, user_id: str = None) -> int:

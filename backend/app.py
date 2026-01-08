@@ -6,7 +6,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, request
 from flask_cors import CORS
+from werkzeug.serving import WSGIRequestHandler
 from config import Config
+from utils.logger import get_logger, log_security_event, sanitize_data
+import re
 from routes.auth import auth_bp
 from routes.chat import chat_bp
 from routes.document import document_bp
@@ -14,10 +17,49 @@ from routes.project import project_bp
 from routes.highlight import highlight_bp
 from routes.pdf import pdf_bp
 
+# Initialize logger
+logger = get_logger(__name__)
+
 # Validate configuration
 Config.validate()
 
 app = Flask(__name__)
+
+# Custom request handler to sanitize tokens in access logs
+class SanitizedRequestHandler(WSGIRequestHandler):
+    """Custom request handler that sanitizes sensitive data in access logs."""
+    
+    def log_request(self, code='-', size='-'):
+        """Override to sanitize tokens in the log message."""
+        # Get the original log line
+        msg = self.requestline
+        
+        # Sanitize tokens in query parameters (e.g., ?token=...)
+        # Match everything from token= until we hit a space, &, ", or HTTP
+        # Use a greedy match to capture the entire token value
+        
+        # Find the position of token= and match everything until the next delimiter
+        # This approach is more reliable than trying to match specific patterns
+        token_start = msg.find('token=')
+        if token_start != -1:
+            # Find where the token value ends (space, &, ", or HTTP)
+            token_value_start = token_start + 6  # len('token=')
+            # Look for the end of the token value
+            end_pos = len(msg)
+            for delimiter in [' ', '&', '"', 'HTTP']:
+                pos = msg.find(delimiter, token_value_start)
+                if pos != -1 and pos < end_pos:
+                    end_pos = pos
+            
+            # Replace the entire token value
+            if end_pos > token_value_start:
+                msg = msg[:token_value_start] + '***sanitized***' + msg[end_pos:]
+        
+        # Also sanitize Authorization headers if they appear in logs
+        msg = re.sub(r'Authorization:\s*Bearer\s+([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)',
+                    r'Authorization: Bearer ***sanitized***', msg)
+        
+        self.log('info', f'"{msg}" {code} {size}')
 
 # Configure CORS with environment-aware settings
 CORS(app,
@@ -35,8 +77,14 @@ def log_cors_request():
     if origin:
         # Log if origin is not in allowed list (for security monitoring)
         if origin not in Config.CORS_ALLOWED_ORIGINS:
-            print(f"[CORS] Blocked request from unauthorized origin: {origin}")
-            print(f"[CORS] Allowed origins: {Config.CORS_ALLOWED_ORIGINS}")
+            log_security_event(
+                logger,
+                'cors_blocked',
+                f"Blocked request from unauthorized origin: {origin}",
+                severity='WARNING',
+                origin=origin,
+                allowed_origins=Config.CORS_ALLOWED_ORIGINS
+            )
 
 @app.after_request
 def add_cors_headers(response):
@@ -44,7 +92,13 @@ def add_cors_headers(response):
     origin = request.headers.get('Origin')
     if origin and origin not in Config.CORS_ALLOWED_ORIGINS:
         # Log CORS violation for security monitoring
-        print(f"[CORS] Rejected origin: {origin} (not in allowed list)")
+        log_security_event(
+            logger,
+            'cors_rejected',
+            f"Rejected origin: {origin} (not in allowed list)",
+            severity='WARNING',
+            origin=origin
+        )
     return response
 
 # Register blueprints
@@ -62,5 +116,6 @@ def health_check():
 
 if __name__ == '__main__':
     port = int(os.getenv('FLASK_RUN_PORT', 5001))
-    app.run(debug=True, host='0.0.0.0', port=port)
+    # Use custom request handler to sanitize tokens in access logs
+    app.run(debug=True, host='0.0.0.0', port=port, request_handler=SanitizedRequestHandler)
 

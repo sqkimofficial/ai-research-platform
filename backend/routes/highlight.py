@@ -5,10 +5,13 @@ from services.s3_service import S3Service
 from services.redis_service import get_redis_service
 from services.sse_service import SSEService
 from config import Config
+from utils.logger import get_logger
 from datetime import datetime
 import base64
 import io
 import re
+
+logger = get_logger(__name__)
 
 # Try to import PIL for image processing
 try:
@@ -16,7 +19,7 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
-    print("Warning: Pillow not installed. Web highlight previews will not be generated.")
+    logger.warning("Pillow not installed. Web highlight previews will not be generated.")
 
 highlight_bp = Blueprint('highlight', __name__)
 
@@ -54,18 +57,18 @@ def generate_cropped_preview(preview_data, scale_factor=0.3):
         viewport_width = selection_rect.get('viewport_width', original_width)
         viewport_height = selection_rect.get('viewport_height', original_height)
         
-        print(f"Original screenshot: {original_width}x{original_height}")
-        print(f"Viewport: {viewport_width}x{viewport_height}")
+        logger.debug(f"Original screenshot: {original_width}x{original_height}")
+        logger.debug(f"Viewport: {viewport_width}x{viewport_height}")
         
         # Calculate device pixel ratio
         device_pixel_ratio = original_width / viewport_width if viewport_width > 0 else 1
-        print(f"Device pixel ratio: {device_pixel_ratio}")
+        logger.debug(f"Device pixel ratio: {device_pixel_ratio}")
         
         # STEP 1: Scale down by fixed factor (0.3 = 30% of original size)
         scaled_width = int(original_width * scale_factor)
         scaled_height = int(original_height * scale_factor)
         img = img.resize((scaled_width, scaled_height), Image.LANCZOS)
-        print(f"Scaled screenshot to: {scaled_width}x{scaled_height} (scale_factor: {scale_factor:.3f}, {scale_factor*100:.1f}% of original)")
+        logger.debug(f"Scaled screenshot to: {scaled_width}x{scaled_height} (scale_factor: {scale_factor:.3f}, {scale_factor*100:.1f}% of original)")
         
         # STEP 2: Calculate crop with 1:2 aspect ratio (height:width)
         # Get selection position in viewport coordinates
@@ -94,7 +97,7 @@ def generate_cropped_preview(preview_data, scale_factor=0.3):
         # Safety check: if scaled height is less than crop height, use scaled height
         if crop_height > scaled_height:
             crop_height = scaled_height
-            print(f"WARNING: Crop height {crop_height} exceeds scaled height {scaled_height}, using scaled height")
+            logger.debug(f"WARNING: Crop height {crop_height} exceeds scaled height {scaled_height}, using scaled height")
         
         # Crop area: full width, height = width/2, centered vertically on selection
         left = 0
@@ -102,13 +105,13 @@ def generate_cropped_preview(preview_data, scale_factor=0.3):
         right = scaled_width  # Full width
         bottom = min(scaled_height, top + crop_height)
         
-        print(f"Crop: left={left}, top={top}, right={right}, bottom={bottom} (width={right-left}, height={bottom-top}, aspect_ratio={((right-left)/(bottom-top)):.2f}:1)")
+        logger.debug(f"Crop: left={left}, top={top}, right={right}, bottom={bottom} (width={right-left}, height={bottom-top}, aspect_ratio={((right-left)/(bottom-top)):.2f}:1)")
         
         # STEP 3: Crop the image (1:2 aspect ratio)
         cropped = img.crop((int(left), int(top), int(right), int(bottom)))
         final_width, final_height = cropped.size
         
-        print(f"Final cropped image: {final_width}x{final_height}")
+        logger.debug(f"Final cropped image: {final_width}x{final_height}")
         
         # Convert to JPEG bytes (JPEG is much smaller than PNG for screenshots)
         buffer = io.BytesIO()
@@ -125,12 +128,12 @@ def generate_cropped_preview(preview_data, scale_factor=0.3):
         cropped.save(buffer, format='JPEG', quality=85, optimize=True)
         image_bytes = buffer.getvalue()
         
-        print(f"Final preview size: {len(image_bytes)} bytes (JPEG format)")
+        logger.debug(f"Final preview size: {len(image_bytes)} bytes (JPEG format)")
         
         return image_bytes
         
     except Exception as e:
-        print(f"Error generating cropped preview: {e}")
+        logger.debug(f"Error generating cropped preview: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -191,17 +194,17 @@ def save_highlight():
     # Process preview data to generate cropped preview image
     preview_image_url = None
     if preview_data:
-        print(f"[HIGHLIGHT] Received preview_data with keys: {preview_data.keys() if isinstance(preview_data, dict) else 'not a dict'}")
+        logger.debug(f"[HIGHLIGHT] Received preview_data with keys: {preview_data.keys() if isinstance(preview_data, dict) else 'not a dict'}")
         if isinstance(preview_data, dict):
             screenshot_len = len(preview_data.get('screenshot', '')) if preview_data.get('screenshot') else 0
-            print(f"[HIGHLIGHT] Screenshot base64 length: {screenshot_len}")
-            print(f"[HIGHLIGHT] Selection rect: {preview_data.get('selection_rect')}")
+            logger.debug(f"[HIGHLIGHT] Screenshot base64 length: {screenshot_len}")
+            logger.debug(f"[HIGHLIGHT] Selection rect: {preview_data.get('selection_rect')}")
         
         # Generate cropped preview image (returns bytes)
         image_bytes = generate_cropped_preview(preview_data)
         
         if image_bytes:
-            print(f"[HIGHLIGHT] Generated preview image: {len(image_bytes)} bytes")
+            logger.debug(f"[HIGHLIGHT] Generated preview image: {len(image_bytes)} bytes")
             
             # Upload to S3 if available
             if S3Service.is_available():
@@ -211,15 +214,15 @@ def save_highlight():
                     highlight_id=highlight_id
                 )
                 if preview_image_url:
-                    print(f"[HIGHLIGHT] Uploaded to S3: {preview_image_url}")
+                    logger.debug(f"[HIGHLIGHT] Uploaded to S3: {preview_image_url}")
                 else:
-                    print("[HIGHLIGHT] S3 upload failed, preview will not be saved")
+                    logger.debug("[HIGHLIGHT] S3 upload failed, preview will not be saved")
             else:
-                print("[HIGHLIGHT] S3 not configured, preview will not be saved")
+                logger.debug("[HIGHLIGHT] S3 not configured, preview will not be saved")
         else:
-            print("[HIGHLIGHT] Failed to generate preview image")
+            logger.debug("[HIGHLIGHT] Failed to generate preview image")
     else:
-        print("[HIGHLIGHT] No preview_data received")
+        logger.debug("[HIGHLIGHT] No preview_data received")
     
     # Parse timestamp if provided (from browser's local time as ISO string)
     timestamp = None
@@ -238,7 +241,7 @@ def save_highlight():
                     # Convert timezone-aware to naive UTC
                     timestamp = timestamp.astimezone(datetime.timezone.utc).replace(tzinfo=None)
         except (ValueError, AttributeError, TypeError) as e:
-            print(f"[HIGHLIGHT] Failed to parse timestamp '{timestamp_str}': {e}")
+            logger.debug(f"[HIGHLIGHT] Failed to parse timestamp '{timestamp_str}': {e}")
             # Will fall back to server time in save_highlight
     
     # Save highlight with S3 URL
@@ -259,8 +262,8 @@ def save_highlight():
     redis_service = get_redis_service()
     redis_service.delete(f"cache:highlights:{user_id}:{project_id}")
     redis_service.delete(f"cache:highlights:{user_id}:{project_id}:{source_url}")
-    print(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
-    print(f"[REDIS] Cache invalidated successfully")
+    logger.debug(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
+    logger.debug(f"[REDIS] Cache invalidated successfully")
     
     # Send SSE event to notify frontend that highlight was saved
     try:
@@ -273,11 +276,11 @@ def save_highlight():
                 'source_url': source_url
             }
         )
-        print(f"[SSE] Sent highlight_saved event for highlight {saved_highlight_id} in project {project_id}")
+        logger.debug(f"[SSE] Sent highlight_saved event for highlight {saved_highlight_id} in project {project_id}")
     except Exception as sse_error:
-        print(f"[SSE] Failed to send highlight_saved event: {sse_error}")
+        logger.debug(f"[SSE] Failed to send highlight_saved event: {sse_error}")
     
-    print(f"Highlight saved: {saved_highlight_id} for project {project_id}" + 
+    logger.debug(f"Highlight saved: {saved_highlight_id} for project {project_id}" + 
           (f" (with S3 preview: {preview_image_url})" if preview_image_url else " (no preview)"))
     
     return jsonify({
@@ -333,7 +336,7 @@ def get_highlights():
         cached_data = redis_service.get(cache_key)
     
     if cached_data is not None:
-        print(f"[REDIS] get_highlights: Cache hit")
+        logger.debug(f"[REDIS] get_highlights: Cache hit")
         # Fix URLs in cached data before returning
         if 'highlights' in cached_data:
             for h_doc in cached_data['highlights']:
@@ -344,8 +347,8 @@ def get_highlights():
         return jsonify(cached_data), 200
     
     # Cache miss - fetch from MongoDB
-    print(f"[REDIS] get_highlights: Cache key: {cache_key}")
-    print(f"[REDIS] get_highlights: Cache miss, fetching from MongoDB")
+    logger.debug(f"[REDIS] get_highlights: Cache key: {cache_key}")
+    logger.debug(f"[REDIS] get_highlights: Cache miss, fetching from MongoDB")
     
     # Get highlights based on filters
     if source_url:
@@ -402,7 +405,7 @@ def get_highlights():
     # Cache the result (only if no limit specified)
     if not limit:
         redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)
-        print(f"[REDIS] get_highlights: Cached {len(highlights)} highlights")
+        logger.debug(f"[REDIS] get_highlights: Cached {len(highlights)} highlights")
     
     return jsonify(response_data), 200
 
@@ -458,7 +461,7 @@ def search_highlights():
     cached_data = redis_service.get(cache_key)
     
     if cached_data is not None:
-        print(f"[REDIS] search_highlights: Cache hit for query: {query}")
+        logger.debug(f"[REDIS] search_highlights: Cache hit for query: {query}")
         # Fix URLs in cached data before returning
         for h_doc in cached_data.get('highlights', []):
             if 'highlights' in h_doc:
@@ -468,7 +471,7 @@ def search_highlights():
         return jsonify(cached_data), 200
     
     # Cache miss - search MongoDB
-    print(f"[SEARCH] Searching highlights for query: '{query}' in project {project_id}")
+    logger.debug(f"[SEARCH] Searching highlights for query: '{query}' in project {project_id}")
     
     # Search web highlights
     web_results = HighlightModel.search_highlights(
@@ -505,7 +508,7 @@ def search_highlights():
     
     # Cache the result with short TTL (30 seconds for search results)
     redis_service.set(cache_key, response_data, ttl=30)
-    print(f"[REDIS] search_highlights: Cached {len(all_results)} results for query: {query}")
+    logger.debug(f"[REDIS] search_highlights: Cached {len(all_results)} results for query: {query}")
     
     return jsonify(response_data), 200
 
@@ -562,8 +565,8 @@ def delete_highlight():
         redis_service = get_redis_service()
         redis_service.delete(f"cache:highlights:{user_id}:{project_id}")
         redis_service.delete(f"cache:highlights:{user_id}:{project_id}:{source_url}")
-        print(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({
             'success': True,
@@ -622,8 +625,8 @@ def archive_highlight():
         redis_service = get_redis_service()
         redis_service.delete(f"cache:highlights:{user_id}:{project_id}")
         redis_service.delete(f"cache:highlights:{user_id}:{project_id}:{source_url}")
-        print(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({
             'success': True,
@@ -682,8 +685,8 @@ def unarchive_highlight():
         redis_service = get_redis_service()
         redis_service.delete(f"cache:highlights:{user_id}:{project_id}")
         redis_service.delete(f"cache:highlights:{user_id}:{project_id}:{source_url}")
-        print(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({
             'success': True,
@@ -742,8 +745,8 @@ def delete_source():
         redis_service = get_redis_service()
         redis_service.delete(f"cache:highlights:{user_id}:{project_id}")
         redis_service.delete(f"cache:highlights:{user_id}:{project_id}:{source_url}")
-        print(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:highlights:{user_id}:{project_id}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({
             'success': True,
@@ -764,52 +767,52 @@ def get_highlight_preview(highlight_id):
     
     Returns: { preview_image_url: string } or { error: 'No preview available' }
     """
-    print(f"[PREVIEW] Fetching preview for highlight_id: {highlight_id}")
+    logger.debug(f"[PREVIEW] Fetching preview for highlight_id: {highlight_id}")
     
     user_id = get_user_id_from_token()
     if not user_id:
-        print(f"[PREVIEW] ERROR: Unauthorized - no user_id from token")
+        logger.debug(f"[PREVIEW] ERROR: Unauthorized - no user_id from token")
         return jsonify({'error': 'Unauthorized'}), 401
     
-    print(f"[PREVIEW] User ID: {user_id}")
+    logger.debug(f"[PREVIEW] User ID: {user_id}")
     
     project_id = request.args.get('project_id')
     source_url = request.args.get('source_url')
     
-    print(f"[PREVIEW] Project ID: {project_id}, Source URL: {source_url}")
+    logger.debug(f"[PREVIEW] Project ID: {project_id}, Source URL: {source_url}")
     
     if not project_id or not source_url:
-        print(f"[PREVIEW] ERROR: Missing required params - project_id: {project_id}, source_url: {source_url}")
+        logger.debug(f"[PREVIEW] ERROR: Missing required params - project_id: {project_id}, source_url: {source_url}")
         return jsonify({'error': 'project_id and source_url required'}), 400
     
     # Validate project belongs to user
     project = ProjectModel.get_project(project_id)
     if not project or project.get('user_id') != user_id:
-        print(f"[PREVIEW] ERROR: Project not found or access denied - project exists: {project is not None}")
+        logger.debug(f"[PREVIEW] ERROR: Project not found or access denied - project exists: {project is not None}")
         return jsonify({'error': 'Project not found or access denied'}), 404
     
     # Get highlights for this URL
     highlight_doc = HighlightModel.get_highlights_by_url(user_id, project_id, source_url)
     if not highlight_doc:
-        print(f"[PREVIEW] ERROR: No highlight document found for URL: {source_url}")
+        logger.debug(f"[PREVIEW] ERROR: No highlight document found for URL: {source_url}")
         return jsonify({'error': 'Not found'}), 404
     
-    print(f"[PREVIEW] Found highlight doc with {len(highlight_doc.get('highlights', []))} highlights")
+    logger.debug(f"[PREVIEW] Found highlight doc with {len(highlight_doc.get('highlights', []))} highlights")
     
     # Find the specific highlight
     for h in highlight_doc.get('highlights', []):
-        print(f"[PREVIEW] Checking highlight: {h.get('highlight_id')} - has preview_image_url: {h.get('preview_image_url') is not None}")
+        logger.debug(f"[PREVIEW] Checking highlight: {h.get('highlight_id')} - has preview_image_url: {h.get('preview_image_url') is not None}")
         if h.get('highlight_id') == highlight_id:
             # Only return S3 URL - no fallback to base64
             preview_url = h.get('preview_image_url')
             if preview_url:
                 # Fix URL region if needed
                 preview_url = S3Service.fix_s3_url_region(preview_url)
-                print(f"[PREVIEW] SUCCESS: Found preview URL: {preview_url}")
+                logger.debug(f"[PREVIEW] SUCCESS: Found preview URL: {preview_url}")
                 return jsonify({'preview_image_url': preview_url})
             
-            print(f"[PREVIEW] ERROR: Highlight found but no preview_image_url field. Keys in highlight: {list(h.keys())}")
+            logger.debug(f"[PREVIEW] ERROR: Highlight found but no preview_image_url field. Keys in highlight: {list(h.keys())}")
             return jsonify({'error': 'No preview available', 'reason': 'preview_image_url field is missing or empty'}), 404
     
-    print(f"[PREVIEW] ERROR: Highlight ID {highlight_id} not found in document")
+    logger.debug(f"[PREVIEW] ERROR: Highlight ID {highlight_id} not found in document")
     return jsonify({'error': 'Highlight not found'}), 404

@@ -9,6 +9,9 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 from config import Config
+from utils.logger import get_logger, log_error
+
+logger = get_logger(__name__)
 
 class Database:
     _client = None
@@ -23,9 +26,9 @@ class Database:
                 cls._db = cls._client['research_platform']
                 # Test connection
                 cls._client.admin.command('ping')
-                print("Successfully connected to MongoDB")
+                logger.info("Successfully connected to MongoDB")
             except ConnectionFailure as e:
-                print(f"Failed to connect to MongoDB: {e}")
+                log_error(logger, e, "Failed to connect to MongoDB")
                 raise
         return cls._db
     
@@ -499,7 +502,7 @@ class ResearchDocumentModel:
             
             # Check if all patches applied successfully
             if not all(results):
-                print(f"Warning: Some patches failed to apply: {results}")
+                logger.warning(f"Some patches failed to apply: {results}")
             
             new_version = current_version + 1
             
@@ -523,7 +526,7 @@ class ResearchDocumentModel:
             }
             
         except Exception as e:
-            print(f"Error applying patches: {e}")
+            log_error(logger, e, "Error applying patches")
             return {'success': False, 'error': str(e)}
     
     @staticmethod
@@ -1004,7 +1007,7 @@ class PDFDocumentModel:
         # Get PDF document to retrieve metadata
         pdf_doc = PDFDocumentModel.get_pdf_document(pdf_id)
         if not pdf_doc:
-            print(f"[DB] ERROR: PDF {pdf_id} does not exist in database")
+            logger.error(f"[DB] PDF {pdf_id} does not exist in database")
             return False
         
         user_id = pdf_doc.get('user_id')
@@ -1013,7 +1016,7 @@ class PDFDocumentModel:
         filename = pdf_doc.get('filename', 'Untitled Document')
         
         if not file_url:
-            print(f"[DB] ERROR: PDF {pdf_id} has no file_url (S3 URL)")
+            logger.error(f"[DB] PDF {pdf_id} has no file_url (S3 URL)")
             return False
         
         # Normalize colors and save each highlight to highlights collection
@@ -1057,9 +1060,9 @@ class PDFDocumentModel:
         
         # Log the update result for debugging
         if result.modified_count > 0:
-            print(f"[DB] Successfully saved {saved_count} highlights to highlights collection for PDF {pdf_id}, status: completed")
+            logger.info(f"[DB] Successfully saved {saved_count} highlights to highlights collection for PDF {pdf_id}, status: completed")
         else:
-            print(f"[DB] WARNING: Failed to update extraction_status for PDF {pdf_id}")
+            logger.warning(f"[DB] Failed to update extraction_status for PDF {pdf_id}")
         
         return saved_count > 0
     

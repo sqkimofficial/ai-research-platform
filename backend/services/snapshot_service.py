@@ -11,7 +11,13 @@ try:
     HTML2IMAGE_AVAILABLE = True
 except ImportError:
     HTML2IMAGE_AVAILABLE = False
-    print("Warning: html2image not installed. Install with: pip install html2image[playwright]")
+
+from utils.logger import get_logger, log_error
+
+logger = get_logger(__name__)
+
+if not HTML2IMAGE_AVAILABLE:
+    logger.warning("html2image not installed. Install with: pip install html2image[playwright]")
 
 
 class SnapshotService:
@@ -21,7 +27,7 @@ class SnapshotService:
         """Initialize the snapshot service"""
         if not HTML2IMAGE_AVAILABLE:
             self.hti = None
-            print("Warning: html2image not available. Snapshots will not be generated.")
+            logger.warning("html2image not available. Snapshots will not be generated.")
         else:
             try:
                 # html2image requires Chromium/Chrome to be installed
@@ -39,8 +45,8 @@ class SnapshotService:
                 # Height stays the same - zoom level is perfect
                 self.height = 1200  # Taller to show more content (zoomed out)
             except Exception as e:
-                print(f"Warning: Failed to initialize Html2Image: {e}")
-                print("Note: html2image requires Chromium/Chrome. Install with: pip install html2image[playwright] && playwright install chromium")
+                logger.warning(f"Failed to initialize Html2Image: {e}")
+                logger.warning("Note: html2image requires Chromium/Chrome. Install with: pip install html2image[playwright] && playwright install chromium")
                 self.hti = None
     
     def generate_snapshot(self, html_content: str) -> str:
@@ -58,7 +64,7 @@ class SnapshotService:
             return None
         
         if self.hti is None:
-            print("Html2Image not initialized - cannot generate snapshot")
+            logger.warning("Html2Image not initialized - cannot generate snapshot")
             return None
         
         temp_file = None
@@ -100,7 +106,7 @@ class SnapshotService:
             return data_uri
             
         except Exception as e:
-            print(f"Error generating snapshot: {e}")
+            log_error(logger, e, "Error generating snapshot")
             # Clean up temp file if it exists
             if temp_file and os.path.exists(temp_file.name):
                 try:

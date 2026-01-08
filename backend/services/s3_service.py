@@ -17,6 +17,9 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 from config import Config
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Try to import boto3
 try:
@@ -26,7 +29,7 @@ try:
     BOTO3_AVAILABLE = True
 except ImportError:
     BOTO3_AVAILABLE = False
-    print("Warning: boto3 not installed. S3 uploads will be disabled.")
+    logger.warning("boto3 not installed. S3 uploads will be disabled.")
 
 
 class S3Service:
@@ -68,7 +71,7 @@ class S3Service:
             client_us_east_2.head_bucket(Bucket=target_bucket)
             # If successful, bucket is in us-east-2
             cls._bucket_region = 'us-east-2'
-            print(f"[S3] Detected bucket region for {target_bucket}: us-east-2")
+            logger.debug(f"[S3] Detected bucket region for {target_bucket}: us-east-2")
             return 'us-east-2'
         except ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')
@@ -80,7 +83,7 @@ class S3Service:
                 if region_match:
                     region = region_match.group(1)
                     cls._bucket_region = region
-                    print(f"[S3] Detected bucket region from PermanentRedirect error: {region}")
+                    logger.debug(f"[S3] Detected bucket region from PermanentRedirect error: {region}")
                     return region
             # If it's not a PermanentRedirect, bucket is not in us-east-2, continue to API detection
         except Exception:
@@ -106,7 +109,7 @@ class S3Service:
                 region = 'us-east-2'
             
             cls._bucket_region = region
-            print(f"[S3] Detected bucket region for {target_bucket}: {region}")
+            logger.debug(f"[S3] Detected bucket region for {target_bucket}: {region}")
             return region
         except ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')
@@ -118,7 +121,7 @@ class S3Service:
                 if region_match:
                     region = region_match.group(1)
                     cls._bucket_region = region
-                    print(f"[S3] Detected bucket region from PermanentRedirect error: {region}")
+                    logger.debug(f"[S3] Detected bucket region from PermanentRedirect error: {region}")
                     return region
             
             # Don't log intermediate errors - we'll try fallback options
@@ -168,7 +171,7 @@ class S3Service:
             fixed_url = f"https://{bucket_name}.s3.{correct_region}.amazonaws.com/{key}"
             # Only log if we're actually changing the region (not on every call)
             if current_region:  # Only log if URL had a region to begin with
-                print(f"[S3] Fixed URL region: {current_region} -> {correct_region} for bucket {bucket_name}")
+                logger.debug(f"[S3] Fixed URL region: {current_region} -> {correct_region} for bucket {bucket_name}")
             return fixed_url
         
         return url
@@ -213,7 +216,7 @@ class S3Service:
             
             return client
         except Exception as e:
-            print(f"Error creating S3 client for region {target_region}: {e}")
+            logger.debug(f"Error creating S3 client for region {target_region}: {e}")
             return None
     
     @classmethod
@@ -258,12 +261,12 @@ class S3Service:
     def is_available(cls):
         """Check if S3 service is available and configured."""
         # Debug: Print what values we're seeing
-        print(f"[S3 DEBUG] boto3 available: {BOTO3_AVAILABLE}")
-        print(f"[S3 DEBUG] AWS_ACCESS_KEY_ID: {'SET' if Config.AWS_ACCESS_KEY_ID else 'NOT SET'}")
-        print(f"[S3 DEBUG] AWS_SECRET_ACCESS_KEY: {'SET' if Config.AWS_SECRET_ACCESS_KEY else 'NOT SET'}")
-        print(f"[S3 DEBUG] AWS_S3_BUCKET_NAME: {Config.AWS_S3_BUCKET_NAME or 'NOT SET'}")
-        print(f"[S3 DEBUG] AWS_S3_REGION: {Config.AWS_S3_REGION or 'NOT SET'}")
-        print(f"[S3 DEBUG] is_s3_configured(): {Config.is_s3_configured()}")
+        logger.debug(f"[S3 DEBUG] boto3 available: {BOTO3_AVAILABLE}")
+        logger.debug(f"[S3 DEBUG] AWS_ACCESS_KEY_ID: {'SET' if Config.AWS_ACCESS_KEY_ID else 'NOT SET'}")
+        logger.debug(f"[S3 DEBUG] AWS_SECRET_ACCESS_KEY: {'SET' if Config.AWS_SECRET_ACCESS_KEY else 'NOT SET'}")
+        logger.debug(f"[S3 DEBUG] AWS_S3_BUCKET_NAME: {Config.AWS_S3_BUCKET_NAME or 'NOT SET'}")
+        logger.debug(f"[S3 DEBUG] AWS_S3_REGION: {Config.AWS_S3_REGION or 'NOT SET'}")
+        logger.debug(f"[S3 DEBUG] is_s3_configured(): {Config.is_s3_configured()}")
         
         return BOTO3_AVAILABLE and Config.is_s3_configured() and cls.get_client() is not None
     
@@ -282,7 +285,7 @@ class S3Service:
         """
         client = cls.get_client()
         if not client:
-            print("[S3] S3 client not available, skipping upload")
+            logger.debug("[S3] S3 client not available, skipping upload")
             return None
         
         # Generate the S3 key (path within the bucket)
@@ -302,17 +305,17 @@ class S3Service:
             bucket_region = cls.get_bucket_region() or Config.AWS_S3_REGION
             url = f"https://{Config.AWS_S3_BUCKET_NAME}.s3.{bucket_region}.amazonaws.com/{s3_key}"
             
-            print(f"[S3] Successfully uploaded highlight image: {s3_key}")
+            logger.debug(f"[S3] Successfully uploaded highlight image: {s3_key}")
             return url
             
         except ClientError as e:
-            print(f"[S3] Error uploading to S3: {e}")
+            logger.debug(f"[S3] Error uploading to S3: {e}")
             return None
         except NoCredentialsError:
-            print("[S3] AWS credentials not found")
+            logger.debug("[S3] AWS credentials not found")
             return None
         except Exception as e:
-            print(f"[S3] Unexpected error during upload: {e}")
+            logger.debug(f"[S3] Unexpected error during upload: {e}")
             return None
     
     @classmethod
@@ -329,7 +332,7 @@ class S3Service:
         """
         client = cls.get_client()
         if not client:
-            print("[S3] S3 client not available, skipping deletion")
+            logger.debug("[S3] S3 client not available, skipping deletion")
             return False
         
         s3_key = f"highlights/{user_id}/{highlight_id}.jpg"
@@ -339,14 +342,14 @@ class S3Service:
                 Bucket=Config.AWS_S3_BUCKET_NAME,
                 Key=s3_key
             )
-            print(f"[S3] Successfully deleted highlight image: {s3_key}")
+            logger.debug(f"[S3] Successfully deleted highlight image: {s3_key}")
             return True
             
         except ClientError as e:
-            print(f"[S3] Error deleting from S3: {e}")
+            logger.debug(f"[S3] Error deleting from S3: {e}")
             return False
         except Exception as e:
-            print(f"[S3] Unexpected error during deletion: {e}")
+            logger.debug(f"[S3] Unexpected error during deletion: {e}")
             return False
     
     @classmethod
@@ -367,13 +370,13 @@ class S3Service:
         bucket_name, region, s3_key = cls.parse_s3_url(url)
         
         if not bucket_name or not region or not s3_key:
-            print(f"[S3] Failed to parse S3 URL: {url}")
+            logger.debug(f"[S3] Failed to parse S3 URL: {url}")
             return False
         
         # Get client for the correct region
         client = cls.get_client(region=region)
         if not client:
-            print(f"[S3] Failed to create S3 client for region: {region}")
+            logger.debug(f"[S3] Failed to create S3 client for region: {region}")
             return False
         
         try:
@@ -381,7 +384,7 @@ class S3Service:
                 Bucket=bucket_name,
                 Key=s3_key
             )
-            print(f"[S3] Successfully deleted highlight image: {s3_key} from region {region}")
+            logger.debug(f"[S3] Successfully deleted highlight image: {s3_key} from region {region}")
             return True
         except ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')
@@ -392,7 +395,7 @@ class S3Service:
                 region_match = re.search(r'\.s3[.-]([^.]+)\.amazonaws\.com', error_message)
                 if region_match:
                     correct_region = region_match.group(1)
-                    print(f"[S3] PermanentRedirect detected, retrying with region: {correct_region}")
+                    logger.debug(f"[S3] PermanentRedirect detected, retrying with region: {correct_region}")
                     client = cls.get_client(region=correct_region)
                     if client:
                         try:
@@ -400,15 +403,15 @@ class S3Service:
                                 Bucket=bucket_name,
                                 Key=s3_key
                             )
-                            print(f"[S3] Successfully deleted highlight image after redirect: {s3_key}")
+                            logger.debug(f"[S3] Successfully deleted highlight image after redirect: {s3_key}")
                             return True
                         except Exception as retry_e:
-                            print(f"[S3] Error retrying delete with correct region: {retry_e}")
+                            logger.debug(f"[S3] Error retrying delete with correct region: {retry_e}")
             
-            print(f"[S3] Error deleting highlight image: {error_code} - {error_message}")
+            logger.debug(f"[S3] Error deleting highlight image: {error_code} - {error_message}")
             return False
         except Exception as e:
-            print(f"[S3] Error deleting by URL: {e}")
+            logger.debug(f"[S3] Error deleting by URL: {e}")
             return False
     
     @classmethod
@@ -428,7 +431,7 @@ class S3Service:
         """
         client = cls.get_client()
         if not client:
-            print("[S3] S3 client not available, skipping file upload")
+            logger.debug("[S3] S3 client not available, skipping file upload")
             return None
         
         # Determine file extension from filename
@@ -462,17 +465,17 @@ class S3Service:
             bucket_region = cls.get_bucket_region() or Config.AWS_S3_REGION
             url = f"https://{Config.AWS_S3_BUCKET_NAME}.s3.{bucket_region}.amazonaws.com/{s3_key}"
             
-            print(f"[S3] Successfully uploaded document file: {s3_key} ({len(file_bytes)} bytes)")
+            logger.debug(f"[S3] Successfully uploaded document file: {s3_key} ({len(file_bytes)} bytes)")
             return url
             
         except ClientError as e:
-            print(f"[S3] Error uploading document to S3: {e}")
+            logger.debug(f"[S3] Error uploading document to S3: {e}")
             return None
         except NoCredentialsError:
-            print("[S3] AWS credentials not found")
+            logger.debug("[S3] AWS credentials not found")
             return None
         except Exception as e:
-            print(f"[S3] Unexpected error during document upload: {e}")
+            logger.debug(f"[S3] Unexpected error during document upload: {e}")
             return None
     
     @classmethod
@@ -490,7 +493,7 @@ class S3Service:
         """
         client = cls.get_client()
         if not client:
-            print("[S3] S3 client not available, skipping file deletion")
+            logger.debug("[S3] S3 client not available, skipping file deletion")
             return False
         
         # Determine file extension
@@ -506,14 +509,14 @@ class S3Service:
                 Bucket=Config.AWS_S3_BUCKET_NAME,
                 Key=s3_key
             )
-            print(f"[S3] Successfully deleted document file: {s3_key}")
+            logger.debug(f"[S3] Successfully deleted document file: {s3_key}")
             return True
             
         except ClientError as e:
-            print(f"[S3] Error deleting document from S3: {e}")
+            logger.debug(f"[S3] Error deleting document from S3: {e}")
             return False
         except Exception as e:
-            print(f"[S3] Unexpected error during document deletion: {e}")
+            logger.debug(f"[S3] Unexpected error during document deletion: {e}")
             return False
     
     @classmethod
@@ -534,13 +537,13 @@ class S3Service:
         bucket_name, region, s3_key = cls.parse_s3_url(url)
         
         if not bucket_name or not region or not s3_key:
-            print(f"[S3] Failed to parse S3 URL: {url}")
+            logger.debug(f"[S3] Failed to parse S3 URL: {url}")
             return False
         
         # Get client for the correct region
         client = cls.get_client(region=region)
         if not client:
-            print(f"[S3] Failed to create S3 client for region: {region}")
+            logger.debug(f"[S3] Failed to create S3 client for region: {region}")
             return False
         
         try:
@@ -548,7 +551,7 @@ class S3Service:
                 Bucket=bucket_name,
                 Key=s3_key
             )
-            print(f"[S3] Successfully deleted document file: {s3_key} from region {region}")
+            logger.debug(f"[S3] Successfully deleted document file: {s3_key} from region {region}")
             return True
         except ClientError as e:
             error_code = e.response.get('Error', {}).get('Code', '')
@@ -559,7 +562,7 @@ class S3Service:
                 region_match = re.search(r'\.s3[.-]([^.]+)\.amazonaws\.com', error_message)
                 if region_match:
                     correct_region = region_match.group(1)
-                    print(f"[S3] PermanentRedirect detected, retrying with region: {correct_region}")
+                    logger.debug(f"[S3] PermanentRedirect detected, retrying with region: {correct_region}")
                     client = cls.get_client(region=correct_region)
                     if client:
                         try:
@@ -567,15 +570,15 @@ class S3Service:
                                 Bucket=bucket_name,
                                 Key=s3_key
                             )
-                            print(f"[S3] Successfully deleted document file after redirect: {s3_key}")
+                            logger.debug(f"[S3] Successfully deleted document file after redirect: {s3_key}")
                             return True
                         except Exception as retry_e:
-                            print(f"[S3] Error retrying delete with correct region: {retry_e}")
+                            logger.debug(f"[S3] Error retrying delete with correct region: {retry_e}")
             
-            print(f"[S3] Error deleting document file: {error_code} - {error_message}")
+            logger.debug(f"[S3] Error deleting document file: {error_code} - {error_message}")
             return False
         except Exception as e:
-            print(f"[S3] Error deleting document by URL: {e}")
+            logger.debug(f"[S3] Error deleting document by URL: {e}")
             return False
     
     @classmethod
@@ -596,13 +599,13 @@ class S3Service:
         bucket_name, region, s3_key = cls.parse_s3_url(url)
         
         if not bucket_name or not region or not s3_key:
-            print(f"[S3] Failed to parse S3 URL: {url}")
+            logger.debug(f"[S3] Failed to parse S3 URL: {url}")
             return None
         
         # Get client for the correct region
         client = cls.get_client(region=region)
         if not client:
-            print(f"[S3] Failed to create S3 client for region: {region}")
+            logger.debug(f"[S3] Failed to create S3 client for region: {region}")
             return None
         
         try:
@@ -612,7 +615,7 @@ class S3Service:
             )
             
             file_bytes = response['Body'].read()
-            print(f"[S3] Successfully downloaded file from S3: {s3_key} ({len(file_bytes)} bytes) from region {region}")
+            logger.debug(f"[S3] Successfully downloaded file from S3: {s3_key} ({len(file_bytes)} bytes) from region {region}")
             return file_bytes
             
         except ClientError as e:
@@ -626,7 +629,7 @@ class S3Service:
                 region_match = re.search(r'\.s3[.-]([^.]+)\.amazonaws\.com', error_message)
                 if region_match:
                     correct_region = region_match.group(1)
-                    print(f"[S3] PermanentRedirect detected, retrying with region: {correct_region}")
+                    logger.debug(f"[S3] PermanentRedirect detected, retrying with region: {correct_region}")
                     # Retry with correct region
                     client = cls.get_client(region=correct_region)
                     if client:
@@ -636,14 +639,14 @@ class S3Service:
                                 Key=s3_key
                             )
                             file_bytes = response['Body'].read()
-                            print(f"[S3] Successfully downloaded file from S3 after redirect: {s3_key} ({len(file_bytes)} bytes)")
+                            logger.debug(f"[S3] Successfully downloaded file from S3 after redirect: {s3_key} ({len(file_bytes)} bytes)")
                             return file_bytes
                         except Exception as retry_e:
-                            print(f"[S3] Error retrying download with correct region: {retry_e}")
+                            logger.debug(f"[S3] Error retrying download with correct region: {retry_e}")
             
-            print(f"[S3] Error downloading file from S3: {error_code} - {error_message}")
+            logger.debug(f"[S3] Error downloading file from S3: {error_code} - {error_message}")
             return None
         except Exception as e:
-            print(f"[S3] Unexpected error downloading file from S3: {e}")
+            logger.debug(f"[S3] Unexpected error downloading file from S3: {e}")
             return None
 

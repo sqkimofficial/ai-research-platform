@@ -18,6 +18,9 @@ if parent_dir not in sys.path:
 
 from openai import OpenAI
 from config import Config
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Try to import PDF to image conversion libraries
 try:
@@ -25,7 +28,7 @@ try:
     PYMUPDF_AVAILABLE = True
 except ImportError:
     PYMUPDF_AVAILABLE = False
-    print("Warning: PyMuPDF not installed. Install with: pip install pymupdf")
+    logger.warning("PyMuPDF not installed. Install with: pip install pymupdf")
 
 # Try to import PIL for image processing
 try:
@@ -33,7 +36,7 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
-    print("Warning: Pillow not installed. Install with: pip install pillow")
+    logger.warning("Pillow not installed. Install with: pip install pillow")
 
 # Try to import OCR position service for image text location
 try:
@@ -41,7 +44,7 @@ try:
     OCR_SERVICE_AVAILABLE = True
 except ImportError:
     OCR_SERVICE_AVAILABLE = False
-    print("Warning: OCR position service not available.")
+    logger.warning("OCR position service not available.")
 
 # Try to import S3 service
 try:
@@ -49,7 +52,7 @@ try:
     S3_SERVICE_AVAILABLE = True
 except ImportError:
     S3_SERVICE_AVAILABLE = False
-    print("Warning: S3 service not available.")
+    logger.warning("S3 service not available.")
 
 
 class HighlightExtractionService:
@@ -103,7 +106,7 @@ class HighlightExtractionService:
             images = self._pdf_to_images(pdf_bytes)
             
             if not images:
-                print("No images extracted from PDF")
+                logger.debug("No images extracted from PDF")
                 doc.close()
                 return []
             
@@ -111,7 +114,7 @@ class HighlightExtractionService:
             all_highlights = []
             
             for page_num, image_base64 in enumerate(images, start=1):
-                print(f"Processing page {page_num}...")
+                logger.debug(f"Processing page {page_num}...")
                 page_highlights = self._extract_highlights_from_image(image_base64, page_num)
                 
                 # Add position and preview for each highlight
@@ -127,9 +130,9 @@ class HighlightExtractionService:
                         preview_image_url = self._upload_preview_to_s3(preview_image_bytes, user_id, highlight_id)
                         if preview_image_url:
                             highlight['preview_image_url'] = preview_image_url
-                            print(f"  Highlight {idx}: Position found, preview uploaded to S3: {preview_image_url}")
+                            logger.debug(f"  Highlight {idx}: Position found, preview uploaded to S3: {preview_image_url}")
                         else:
-                            print(f"  Highlight {idx}: Position found, but S3 upload failed")
+                            logger.debug(f"  Highlight {idx}: Position found, but S3 upload failed")
                     else:
                         # Fallback: use page center if text not found
                         # This is normal - GPT-4o extracts from images, but text search may fail due to formatting differences
@@ -137,9 +140,9 @@ class HighlightExtractionService:
                         preview_image_url = self._upload_preview_to_s3(preview_image_bytes, user_id, highlight_id)
                         if preview_image_url:
                             highlight['preview_image_url'] = preview_image_url
-                            print(f"  Highlight {idx}: Text position not found (using centered preview), uploaded to S3: {preview_image_url}")
+                            logger.debug(f"  Highlight {idx}: Text position not found (using centered preview), uploaded to S3: {preview_image_url}")
                         else:
-                            print(f"  Highlight {idx}: Text position not found, S3 upload failed")
+                            logger.debug(f"  Highlight {idx}: Text position not found, S3 upload failed")
                 
                 all_highlights.extend(page_highlights)
             
@@ -147,14 +150,14 @@ class HighlightExtractionService:
             return all_highlights
             
         except Exception as e:
-            print(f"Error extracting highlights from PDF: {e}")
+            logger.debug(f"Error extracting highlights from PDF: {e}")
             raise
     
     def _extract_from_image(self, image_base64_data, content_type, user_id=None, pdf_id=None):
         """Extract highlights from an image file (JPG/PNG)."""
         try:
             # For images, we process directly - no conversion needed
-            print("Processing image...")
+            logger.debug("Processing image...")
             highlights = self._extract_highlights_from_image(image_base64_data, page_number=1, content_type=content_type)
             
             # Initialize OCR service for finding text positions
@@ -164,9 +167,9 @@ class HighlightExtractionService:
                     ocr_service = get_ocr_position_service()
                     if not ocr_service.available:
                         ocr_service = None
-                        print("OCR service not available - using centered previews")
+                        logger.debug("OCR service not available - using centered previews")
                 except Exception as e:
-                    print(f"Failed to initialize OCR service: {e}")
+                    logger.debug(f"Failed to initialize OCR service: {e}")
                     ocr_service = None
             
             # Generate preview images for each highlight
@@ -182,9 +185,9 @@ class HighlightExtractionService:
                     bbox = ocr_service.find_text_position(image_base64_data, highlight['text'])
                     if bbox:
                         highlight['bounding_box'] = bbox
-                        print(f"  Highlight {idx}: Found position via OCR")
+                        logger.debug(f"  Highlight {idx}: Found position via OCR")
                     else:
-                        print(f"  Highlight {idx}: Text position not found via OCR (using centered preview)")
+                        logger.debug(f"  Highlight {idx}: Text position not found via OCR (using centered preview)")
                 
                 # Generate preview image (centered on bbox if found, otherwise centered on image)
                 preview_image_bytes = self._generate_image_preview_bytes(image_base64_data, bbox=bbox)
@@ -192,14 +195,14 @@ class HighlightExtractionService:
                 
                 if preview_image_url:
                     highlight['preview_image_url'] = preview_image_url
-                    print(f"  Highlight {idx}: Preview uploaded to S3: {preview_image_url}")
+                    logger.debug(f"  Highlight {idx}: Preview uploaded to S3: {preview_image_url}")
                 else:
-                    print(f"  Highlight {idx}: Preview generated but S3 upload failed")
+                    logger.debug(f"  Highlight {idx}: Preview generated but S3 upload failed")
             
             return highlights
             
         except Exception as e:
-            print(f"Error extracting highlights from image: {e}")
+            logger.debug(f"Error extracting highlights from image: {e}")
             raise
     
     def _pdf_to_images(self, pdf_bytes, max_pages=20):
@@ -239,7 +242,7 @@ class HighlightExtractionService:
             doc.close()
             
         except Exception as e:
-            print(f"Error converting PDF to images: {e}")
+            logger.debug(f"Error converting PDF to images: {e}")
             raise
         
         return images
@@ -332,7 +335,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             return highlights
             
         except Exception as e:
-            print(f"Error extracting highlights from page {page_number}: {e}")
+            logger.debug(f"Error extracting highlights from page {page_number}: {e}")
             return []
     
     def _parse_highlights_response(self, response_text, page_number):
@@ -341,7 +344,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             # Try to find JSON in the response
             json_match = re.search(r'\{[\s\S]*\}', response_text)
             if not json_match:
-                print(f"No JSON found in response for page {page_number}")
+                logger.debug(f"No JSON found in response for page {page_number}")
                 return []
             
             json_str = json_match.group(0)
@@ -370,7 +373,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             return valid_highlights
             
         except Exception as e:
-            print(f"Error parsing highlights response for page {page_number}: {e}")
+            logger.debug(f"Error parsing highlights response for page {page_number}: {e}")
             return []
     
     def _fix_json_string(self, json_str):
@@ -450,7 +453,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             return None
             
         except Exception as e:
-            print(f"Error finding highlight position: {e}")
+            logger.debug(f"Error finding highlight position: {e}")
             return None
     
     def _upload_preview_to_s3(self, image_bytes, user_id, highlight_id):
@@ -469,14 +472,14 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             return None
         
         if not user_id or not highlight_id:
-            print(f"[PDF EXTRACTION] Cannot upload to S3: user_id={user_id}, highlight_id={highlight_id}")
+            logger.debug(f"[PDF EXTRACTION] Cannot upload to S3: user_id={user_id}, highlight_id={highlight_id}")
             return None
         
         if S3Service.is_available():
             url = S3Service.upload_highlight_image(image_bytes, user_id, highlight_id)
             return url
         else:
-            print("[PDF EXTRACTION] S3 not configured, skipping upload")
+            logger.debug("[PDF EXTRACTION] S3 not configured, skipping upload")
             return None
     
     def _generate_preview_image_bytes(self, doc, page_number, bbox, width=600, height=320):
@@ -536,7 +539,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             return buffer.getvalue()
             
         except Exception as e:
-            print(f"Error generating preview image: {e}")
+            logger.debug(f"Error generating preview image: {e}")
             return None
     
     def _generate_preview_image(self, doc, page_number, bbox, width=600, height=320):
@@ -596,7 +599,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             return base64.b64encode(buffer.getvalue()).decode('utf-8')
             
         except Exception as e:
-            print(f"Error generating preview image: {e}")
+            logger.debug(f"Error generating preview image: {e}")
             return None
     
     def _generate_page_preview_bytes(self, doc, page_number, width=600, height=320):
@@ -645,7 +648,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             return buffer.getvalue()
             
         except Exception as e:
-            print(f"Error generating page preview: {e}")
+            logger.debug(f"Error generating page preview: {e}")
             return None
     
     def _generate_page_preview(self, doc, page_number, width=600, height=320):
@@ -694,7 +697,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             return base64.b64encode(buffer.getvalue()).decode('utf-8')
             
         except Exception as e:
-            print(f"Error generating page preview: {e}")
+            logger.debug(f"Error generating page preview: {e}")
             return None
     
     def _generate_image_preview_bytes(self, image_base64, bbox=None, width=600, height=320):
@@ -755,7 +758,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             return buffer.getvalue()
             
         except Exception as e:
-            print(f"Error generating image preview: {e}")
+            logger.debug(f"Error generating image preview: {e}")
             return None
     
     def _generate_image_preview(self, image_base64, bbox=None, width=600, height=320):
@@ -816,7 +819,7 @@ Now analyze the image carefully and extract ALL highlights with their correct co
             return base64.b64encode(buffer.getvalue()).decode('utf-8')
             
         except Exception as e:
-            print(f"Error generating image preview: {e}")
+            logger.debug(f"Error generating image preview: {e}")
             return None
 
 

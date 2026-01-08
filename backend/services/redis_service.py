@@ -7,6 +7,9 @@ import json
 import os
 from typing import Optional, Any, List
 from config import Config
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class RedisService:
@@ -33,7 +36,7 @@ class RedisService:
             password = Config.REDIS_PASSWORD
             db = Config.REDIS_DB
             
-            print(f"[REDIS] Connecting to Redis: {host}:{port}")
+            logger.debug(f"[REDIS] Connecting to Redis: {host}:{port}")
             
             # Create connection pool for production
             self._client = redis.Redis(
@@ -51,11 +54,11 @@ class RedisService:
             # Test connection
             self._client.ping()
             self._enabled = True
-            print("[REDIS] Connected successfully")
+            logger.info("[REDIS] Connected successfully")
             
         except Exception as e:
-            print(f"[REDIS] Connection failed: {e}")
-            print("[REDIS] Caching disabled, falling back to MongoDB")
+            logger.warning(f"[REDIS] Connection failed: {e}")
+            logger.warning("[REDIS] Caching disabled, falling back to MongoDB")
             self._enabled = False
             self._client = None
     
@@ -85,24 +88,24 @@ class RedisService:
             return None
         
         try:
-            print(f"[REDIS] Cache get: {key}")
+            logger.debug(f"[REDIS] Cache get: {key}")
             data = self._client.get(key)
             if data is None:
-                print(f"[REDIS] Cache miss: {key}")
+                logger.debug(f"[REDIS] Cache miss: {key}")
                 return None
             
             # Deserialize JSON
             decoded_data = json.loads(data.decode('utf-8'))
-            print(f"[REDIS] Cache hit: {key}")
+            logger.debug(f"[REDIS] Cache hit: {key}")
             return decoded_data
             
         except json.JSONDecodeError as e:
-            print(f"[REDIS] Error deserializing cache for {key}: {e}")
+            logger.debug(f"[REDIS] Error deserializing cache for {key}: {e}")
             # Delete corrupted cache entry
             self.delete(key)
             return None
         except Exception as e:
-            print(f"[REDIS] Error getting cache for {key}: {e}")
+            logger.debug(f"[REDIS] Error getting cache for {key}: {e}")
             return None
     
     def set(self, key: str, value: Any, ttl: int = 300) -> bool:
@@ -124,14 +127,14 @@ class RedisService:
             # Serialize to JSON
             json_data = json.dumps(value, default=str)  # default=str handles datetime objects
             self._client.setex(key, ttl, json_data)
-            print(f"[REDIS] Cache set: {key}, TTL: {ttl}s")
+            logger.debug(f"[REDIS] Cache set: {key}, TTL: {ttl}s")
             return True
             
         except (TypeError, ValueError) as e:
-            print(f"[REDIS] Error serializing cache for {key}: {e}")
+            logger.debug(f"[REDIS] Error serializing cache for {key}: {e}")
             return False
         except Exception as e:
-            print(f"[REDIS] Error setting cache for {key}: {e}")
+            logger.debug(f"[REDIS] Error setting cache for {key}: {e}")
             return False
     
     def delete(self, key: str) -> bool:
@@ -150,10 +153,10 @@ class RedisService:
         try:
             result = self._client.delete(key)
             if result > 0:
-                print(f"[REDIS] Cache delete: {key}")
+                logger.debug(f"[REDIS] Cache delete: {key}")
             return result > 0
         except Exception as e:
-            print(f"[REDIS] Error deleting cache for {key}: {e}")
+            logger.debug(f"[REDIS] Error deleting cache for {key}: {e}")
             return False
     
     def delete_pattern(self, pattern: str) -> int:
@@ -174,11 +177,11 @@ class RedisService:
             keys = self._client.keys(pattern)
             if keys:
                 deleted = self._client.delete(*keys)
-                print(f"[REDIS] Cache delete_pattern: {pattern}, deleted {deleted} keys")
+                logger.debug(f"[REDIS] Cache delete_pattern: {pattern}, deleted {deleted} keys")
                 return deleted
             return 0
         except Exception as e:
-            print(f"[REDIS] Error deleting cache pattern {pattern}: {e}")
+            logger.debug(f"[REDIS] Error deleting cache pattern {pattern}: {e}")
             return 0
     
     def exists(self, key: str) -> bool:
@@ -197,7 +200,7 @@ class RedisService:
         try:
             return bool(self._client.exists(key))
         except Exception as e:
-            print(f"[REDIS] Error checking existence for {key}: {e}")
+            logger.debug(f"[REDIS] Error checking existence for {key}: {e}")
             return False
 
 

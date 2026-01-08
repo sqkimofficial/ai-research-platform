@@ -10,18 +10,15 @@ env_path = backend_dir / '.env'
 env_loaded = False
 if env_path.exists():
     load_dotenv(env_path)
-    print(f"[CONFIG] Loaded .env from: {env_path}")
     env_loaded = True
 else:
     # Try project root
     root_env = backend_dir.parent / '.env'
     if root_env.exists():
         load_dotenv(root_env)
-        print(f"[CONFIG] Loaded .env from: {root_env}")
         env_loaded = True
     else:
         load_dotenv()  # Default behavior
-        print(f"[CONFIG] Using default .env loading (cwd)")
 
 class Config:
     FLASK_ENV = os.getenv('FLASK_ENV', 'development')
@@ -106,8 +103,11 @@ class Config:
         """Validate all required environment variables with clear error messages"""
         # Warn if no .env file found in development
         if Config.IS_DEVELOPMENT and not env_loaded:
-            print("[WARNING] No .env file found. Running in development mode without .env file.")
-            print("[WARNING] Some features may not work correctly. Consider creating a .env file.")
+            # Import logger here to avoid circular import
+            from utils.logger import get_logger
+            logger = get_logger(__name__)
+            logger.warning("No .env file found. Running in development mode without .env file.")
+            logger.warning("Some features may not work correctly. Consider creating a .env file.")
         
         # Core required variables
         required_vars = ['OPENAI_API_KEY', 'MONGODB_URI']

@@ -10,12 +10,14 @@ from services.redis_service import get_redis_service
 from services.s3_service import S3Service
 from services.sse_service import SSEService
 from config import Config
+from utils.logger import get_logger, log_error
 import base64
 import io
 import threading
 import queue
 import json
 
+logger = get_logger(__name__)
 pdf_bp = Blueprint('pdf', __name__)
 
 # Supported file extensions and their MIME types
@@ -42,13 +44,13 @@ def extract_highlights_async(doc_id, file_base64_data=None, content_type='applic
         # Get PDF document to retrieve user_id
         pdf_doc = PDFDocumentModel.get_pdf_document(doc_id)
         if not pdf_doc:
-            print(f"Error: PDF document {doc_id} not found")
+            logger.error(f"PDF document {doc_id} not found")
             PDFDocumentModel.update_extraction_status(doc_id, 'failed', 'Document not found')
             return
         
         user_id = pdf_doc.get('user_id')
         if not user_id:
-            print(f"Error: No user_id found for PDF document {doc_id}")
+            logger.error(f"No user_id found for PDF document {doc_id}")
             PDFDocumentModel.update_extraction_status(doc_id, 'failed', 'User ID not found')
             return
         
@@ -65,21 +67,21 @@ def extract_highlights_async(doc_id, file_base64_data=None, content_type='applic
                     'status': 'processing'
                 }
             )
-            print(f"[SSE] Sent extraction_started event for PDF {doc_id}")
+            logger.debug(f"[SSE] Sent extraction_started event for PDF {doc_id}")
         except Exception as sse_error:
-            print(f"[SSE] Failed to send extraction_started event: {sse_error}")
+            logger.debug(f"[SSE] Failed to send extraction_started event: {sse_error}")
         
         # Get file data - prefer S3 URL, fallback to legacy file_data
         if file_url:
             # Fetch from S3
-            print(f"[EXTRACTION] Fetching file from S3: {file_url}")
+            logger.debug(f"[EXTRACTION] Fetching file from S3: {file_url}")
             file_bytes = S3Service.get_file_from_s3(file_url)
             if file_bytes:
                 # Convert to base64 for extraction service (it expects base64)
                 file_base64_data = base64.b64encode(file_bytes).decode('utf-8')
-                print(f"[EXTRACTION] Successfully fetched file from S3 ({len(file_bytes)} bytes)")
+                logger.debug(f"[EXTRACTION] Successfully fetched file from S3 ({len(file_bytes)} bytes)")
             else:
-                print(f"[EXTRACTION] Failed to fetch file from S3")
+                logger.debug(f"[EXTRACTION] Failed to fetch file from S3")
                 PDFDocumentModel.update_extraction_status(doc_id, 'failed', 'Failed to fetch file from S3')
                 return
         elif not file_base64_data:
@@ -87,9 +89,9 @@ def extract_highlights_async(doc_id, file_base64_data=None, content_type='applic
             file_doc = PDFDocumentModel.get_pdf_file_data(doc_id)
             if file_doc and file_doc.get('file_data'):
                 file_base64_data = file_doc['file_data']
-                print(f"[EXTRACTION] Using legacy file_data from MongoDB")
+                logger.debug(f"[EXTRACTION] Using legacy file_data from MongoDB")
             else:
-                print(f"[EXTRACTION] No file data available")
+                logger.debug(f"[EXTRACTION] No file data available")
                 PDFDocumentModel.update_extraction_status(doc_id, 'failed', 'No file data available')
                 return
         
@@ -101,12 +103,12 @@ def extract_highlights_async(doc_id, file_base64_data=None, content_type='applic
         update_success = PDFDocumentModel.update_highlights(doc_id, highlights)
         
         if not update_success:
-            print(f"[ERROR] Failed to update highlights in database for PDF {doc_id}")
+            logger.debug(f"[ERROR] Failed to update highlights in database for PDF {doc_id}")
             PDFDocumentModel.update_extraction_status(doc_id, 'failed', 'Failed to save highlights to database')
             raise Exception("Failed to update highlights in database")
         
-        print(f"Extracted {len(highlights)} highlights from document {doc_id}")
-        print(f"[EXTRACTION] Continuing to verification and cache invalidation for PDF {doc_id}, user_id: {user_id}")
+        logger.debug(f"Extracted {len(highlights)} highlights from document {doc_id}")
+        logger.debug(f"[EXTRACTION] Continuing to verification and cache invalidation for PDF {doc_id}, user_id: {user_id}")
         
         # Verify the update was successful by reading back from DB
         try:
@@ -121,13 +123,13 @@ def extract_highlights_async(doc_id, file_base64_data=None, content_type='applic
                     highlight_doc = HighlightModel.get_highlights_by_url(user_id, project_id, file_url)
                     if highlight_doc:
                         actual_highlight_count = len(highlight_doc.get('highlights', []))
-                print(f"[VERIFY] PDF {doc_id} status in DB: {actual_status}, highlights: {actual_highlight_count}")
+                logger.debug(f"[VERIFY] PDF {doc_id} status in DB: {actual_status}, highlights: {actual_highlight_count}")
                 if actual_status != 'completed':
-                    print(f"[ERROR] Extraction status is {actual_status}, expected 'completed'")
+                    logger.debug(f"[ERROR] Extraction status is {actual_status}, expected 'completed'")
             else:
-                print(f"[ERROR] Could not verify update - PDF {doc_id} not found in database")
+                logger.debug(f"[ERROR] Could not verify update - PDF {doc_id} not found in database")
         except Exception as verify_error:
-            print(f"[ERROR] Exception during verification: {verify_error}")
+            logger.debug(f"[ERROR] Exception during verification: {verify_error}")
             import traceback
             traceback.print_exc()
         
@@ -138,9 +140,9 @@ def extract_highlights_async(doc_id, file_base64_data=None, content_type='applic
             if project_id:
                 redis_service.delete(f"cache:pdfs:{user_id}:{project_id}")
             redis_service.delete(f"cache:pdfs:{user_id}:all")
-            print(f"[REDIS] Cache invalidated after extraction completion for PDF {doc_id}")
+            logger.debug(f"[REDIS] Cache invalidated after extraction completion for PDF {doc_id}")
         except Exception as cache_error:
-            print(f"[ERROR] Exception during cache invalidation: {cache_error}")
+            logger.debug(f"[ERROR] Exception during cache invalidation: {cache_error}")
             import traceback
             traceback.print_exc()
         
@@ -161,16 +163,16 @@ def extract_highlights_async(doc_id, file_base64_data=None, content_type='applic
                     'status': 'completed'
                 }
             )
-            print(f"[SSE] Sent extraction_complete event for PDF {doc_id}")
+            logger.debug(f"[SSE] Sent extraction_complete event for PDF {doc_id}")
         except Exception as sse_error:
-            print(f"[ERROR] Exception during SSE broadcast: {sse_error}")
+            logger.debug(f"[ERROR] Exception during SSE broadcast: {sse_error}")
             import traceback
             traceback.print_exc()
         
     except Exception as e:
         error_msg = str(e)
         import traceback
-        print(f"[ERROR] Error extracting highlights from document {doc_id}: {error_msg}")
+        logger.debug(f"[ERROR] Error extracting highlights from document {doc_id}: {error_msg}")
         traceback.print_exc()
         PDFDocumentModel.update_extraction_status(doc_id, 'failed', error_msg)
         
@@ -192,11 +194,11 @@ def extract_highlights_async(doc_id, file_base64_data=None, content_type='applic
                         'status': 'failed'
                     }
                 )
-                print(f"[SSE] Sent extraction_failed event for PDF {doc_id}")
+                logger.debug(f"[SSE] Sent extraction_failed event for PDF {doc_id}")
             else:
-                print(f"[SSE] Cannot send extraction_failed event - user_id not available")
+                logger.debug(f"[SSE] Cannot send extraction_failed event - user_id not available")
         except Exception as sse_error:
-            print(f"[SSE] Failed to send extraction_failed event: {sse_error}")
+            logger.debug(f"[SSE] Failed to send extraction_failed event: {sse_error}")
             import traceback
             traceback.print_exc()
 
@@ -289,13 +291,13 @@ def upload_document():
             content_type=content_type
         )
         if file_url:
-            print(f"[PDF UPLOAD] Successfully uploaded to S3: {file_url}")
+            logger.debug(f"[PDF UPLOAD] Successfully uploaded to S3: {file_url}")
         else:
-            print(f"[PDF UPLOAD] S3 upload failed, will store in MongoDB (legacy mode)")
+            logger.debug(f"[PDF UPLOAD] S3 upload failed, will store in MongoDB (legacy mode)")
             # Fallback to base64 for legacy support
             file_data = base64.b64encode(file_bytes).decode('utf-8')
     else:
-        print(f"[PDF UPLOAD] S3 not configured, storing in MongoDB (legacy mode)")
+        logger.debug(f"[PDF UPLOAD] S3 not configured, storing in MongoDB (legacy mode)")
         # Fallback to base64 for legacy support
         file_data = base64.b64encode(file_bytes).decode('utf-8')
     
@@ -315,8 +317,8 @@ def upload_document():
     if project_id:
         redis_service.delete(f"cache:pdfs:{user_id}:{project_id}")
     redis_service.delete(f"cache:pdfs:{user_id}:all")
-    print(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
-    print(f"[REDIS] Cache invalidated successfully")
+    logger.debug(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
+    logger.debug(f"[REDIS] Cache invalidated successfully")
     
     # Prepare file data for extraction (needed for extraction service)
     file_base64_for_extraction = base64.b64encode(file_bytes).decode('utf-8')
@@ -411,24 +413,24 @@ def get_pdfs():
                     if actual_doc:
                         actual_status = actual_doc.get('extraction_status')
                         if actual_status != 'processing':
-                            print(f"[CACHE VERIFY] PDF {pdf_id} in cache has status=processing, but DB has status={actual_status}. Invalidating cache.")
+                            logger.debug(f"[CACHE VERIFY] PDF {pdf_id} in cache has status=processing, but DB has status={actual_status}. Invalidating cache.")
                             needs_refresh = True
                             break
         
         if not needs_refresh:
-            print(f"[REDIS] get_pdfs: Cache hit (verified)")
+            logger.debug(f"[REDIS] get_pdfs: Cache hit (verified)")
             return jsonify(cached_data), 200
         else:
             # Invalidate cache and fetch fresh data
-            print(f"[REDIS] get_pdfs: Cache hit but stale, invalidating and fetching fresh")
+            logger.debug(f"[REDIS] get_pdfs: Cache hit but stale, invalidating and fetching fresh")
             redis_service.delete(cache_key)
             if project_id:
                 redis_service.delete(f"cache:pdfs:{user_id}:all")
             # Fall through to fetch from MongoDB
     
     # Cache miss - fetch from MongoDB
-    print(f"[REDIS] get_pdfs: Cache key: {cache_key}")
-    print(f"[REDIS] get_pdfs: Cache miss, fetching from MongoDB")
+            logger.debug(f"[REDIS] get_pdfs: Cache key: {cache_key}")
+            logger.debug(f"[REDIS] get_pdfs: Cache miss, fetching from MongoDB")
     
     if project_id:
         # Validate project belongs to user
@@ -463,7 +465,7 @@ def get_pdfs():
         # Ensure extraction_status is included and log it for debugging
         extraction_status = pdf.get('extraction_status', 'unknown')
         highlight_count = len(highlights)
-        print(f"[GET_PDFS] PDF {pdf.get('pdf_id', 'unknown')}: status={extraction_status}, highlights={highlight_count}")
+        logger.debug(f"[GET_PDFS] PDF {pdf.get('pdf_id', 'unknown')}: status={extraction_status}, highlights={highlight_count}")
         
         for h in highlights:
             if 'timestamp' in h:
@@ -476,7 +478,7 @@ def get_pdfs():
     
     # Cache the result
     redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)
-    print(f"[REDIS] get_pdfs: Cached {len(pdfs)} PDFs")
+    logger.debug(f"[REDIS] get_pdfs: Cached {len(pdfs)} PDFs")
     
     return jsonify(response_data), 200
 
@@ -712,7 +714,7 @@ def delete_pdf(pdf_id):
     # Delete file from S3 if it exists
     if file_url:
         S3Service.delete_document_file_by_url(file_url)
-        print(f"[PDF DELETE] Deleted file from S3: {file_url}")
+        logger.debug(f"[PDF DELETE] Deleted file from S3: {file_url}")
     
     success = PDFDocumentModel.delete_pdf_document(pdf_id, user_id)
     
@@ -722,8 +724,8 @@ def delete_pdf(pdf_id):
         if project_id:
             redis_service.delete(f"cache:pdfs:{user_id}:{project_id}")
         redis_service.delete(f"cache:pdfs:{user_id}:all")
-        print(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({
             'success': True,
@@ -816,8 +818,8 @@ def archive_pdf():
         if project_id:
             redis_service.delete(f"cache:pdfs:{user_id}:{project_id}")
         redis_service.delete(f"cache:pdfs:{user_id}:all")
-        print(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({
             'success': True,
@@ -868,8 +870,8 @@ def unarchive_pdf():
         if project_id:
             redis_service.delete(f"cache:pdfs:{user_id}:{project_id}")
         redis_service.delete(f"cache:pdfs:{user_id}:all")
-        print(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:pdfs:{user_id}:{project_id or 'all'}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({
             'success': True,
@@ -893,28 +895,28 @@ def sse_events():
     """
     user_id = get_user_id_from_token()
     if not user_id:
-        print("[SSE] Unauthorized - no user_id from token")
+        logger.debug("[SSE] Unauthorized - no user_id from token")
         return Response(
             'data: {"type":"error","message":"Unauthorized"}\n\n',
             mimetype='text/event-stream',
             status=401
         )
     
-    print(f"[SSE] New connection request from user {user_id}")
+    logger.debug(f"[SSE] New connection request from user {user_id}")
     
     # Create a queue for this connection
     event_queue = queue.Queue()
     
     # Add connection to SSE service
     SSEService.add_connection(user_id, event_queue)
-    print(f"[SSE] Connection added for user {user_id}, total connections: {SSEService.get_connection_count(user_id)}")
+    logger.debug(f"[SSE] Connection added for user {user_id}, total connections: {SSEService.get_connection_count(user_id)}")
     
     def event_stream():
         """Generator function that yields SSE events."""
         try:
             # Send initial connection message
             yield f"data: {json.dumps({'type': 'connected', 'message': 'SSE connection established'})}\n\n"
-            print(f"[SSE] Sent connection confirmation to user {user_id}")
+            logger.debug(f"[SSE] Sent connection confirmation to user {user_id}")
             
             while True:
                 try:
@@ -924,26 +926,26 @@ def sse_events():
                     # Format as SSE
                     event_json = json.dumps(event)
                     yield f"data: {event_json}\n\n"
-                    print(f"[SSE] Sent event to user {user_id}: {event.get('type', 'unknown')}")
+                    logger.debug(f"[SSE] Sent event to user {user_id}: {event.get('type', 'unknown')}")
                     
                 except queue.Empty:
                     # Send keepalive ping
                     yield f": keepalive\n\n"
                 except Exception as e:
-                    print(f"[SSE] Error in event stream for user {user_id}: {e}")
+                    logger.debug(f"[SSE] Error in event stream for user {user_id}: {e}")
                     import traceback
                     traceback.print_exc()
                     break
         except GeneratorExit:
-            print(f"[SSE] Client disconnected (GeneratorExit) for user {user_id}")
+            logger.debug(f"[SSE] Client disconnected (GeneratorExit) for user {user_id}")
         except Exception as e:
-            print(f"[SSE] Unexpected error in event stream for user {user_id}: {e}")
+            logger.debug(f"[SSE] Unexpected error in event stream for user {user_id}: {e}")
             import traceback
             traceback.print_exc()
         finally:
             # Remove connection when client disconnects
             SSEService.remove_connection(user_id, event_queue)
-            print(f"[SSE] Connection closed for user {user_id}")
+            logger.debug(f"[SSE] Connection closed for user {user_id}")
     
     return Response(
         stream_with_context(event_stream()),

@@ -5,6 +5,7 @@ from services.vector_service import VectorService
 from services.redis_service import get_redis_service
 from utils.auth import get_user_id_from_token, log_auth_info
 from config import Config
+from utils.logger import get_logger, log_error
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -14,6 +15,7 @@ import os
 import re
 from io import BytesIO
 
+logger = get_logger(__name__)
 vector_service = VectorService()
 
 document_bp = Blueprint('document', __name__)
@@ -120,15 +122,15 @@ def save_document():
                 if snapshot:
                     ResearchDocumentModel.update_document(document_id, snapshot=snapshot)
             except Exception as snapshot_error:
-                print(f"Warning: Failed to generate snapshot: {snapshot_error}")
+                logger.warning(f"Failed to generate snapshot: {snapshot_error}")
         else:
-            print(f"[DELTA SAVE] Snapshot generation skipped (edit not on first page)")
+            logger.debug(f"[DELTA SAVE] Snapshot generation skipped (edit not on first page)")
         
         # Index document for semantic search (don't fail save if this fails)
         try:
             vector_service.index_document(document_id, new_content)
         except Exception as index_error:
-            print(f"Warning: Failed to index document: {index_error}")
+            logger.warning(f"Failed to index document: {index_error}")
         
         # Invalidate cache (document list cache, not content cache - that's handled by version)
         redis_service = get_redis_service()
@@ -137,8 +139,8 @@ def save_document():
             redis_service.delete(cache_key)
         redis_service.delete(f"cache:documents:{user_id}:all")
         redis_service.delete_pattern(f"cache:doc:{document_id}:*")
-        print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({
             'status': 'ok',
@@ -147,7 +149,7 @@ def save_document():
         }), 200
     
     except Exception as e:
-        print(f"Error saving document: {e}")
+        log_error(logger, e, "Error saving document")
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document/pdf', methods=['GET'])
@@ -385,12 +387,12 @@ def get_all_research_documents():
         cached_data = redis_service.get(cache_key)
         
         if cached_data is not None:
-            print(f"[REDIS] get_all_research_documents: Cache hit")
+            logger.debug(f"[REDIS] get_all_research_documents: Cache hit")
             return jsonify(cached_data), 200
         
         # Cache miss - fetch from MongoDB
-        print(f"[REDIS] get_all_research_documents: Checking cache for user {user_id}, project {project_id}")
-        print(f"[REDIS] get_all_research_documents: Cache miss, fetching from MongoDB")
+        logger.debug(f"[REDIS] get_all_research_documents: Checking cache for user {user_id}, project {project_id}")
+        logger.debug(f"[REDIS] get_all_research_documents: Cache miss, fetching from MongoDB")
         
         documents = ResearchDocumentModel.get_all_documents(user_id, project_id)
         
@@ -411,7 +413,7 @@ def get_all_research_documents():
         
         # Cache the result
         redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)
-        print(f"[REDIS] get_all_research_documents: Cached {len(serialized_docs)} documents")
+        logger.debug(f"[REDIS] get_all_research_documents: Cached {len(serialized_docs)} documents")
         
         return jsonify(response_data), 200
     
@@ -449,8 +451,8 @@ def create_research_document():
         redis_service.delete(cache_key)
         # Also invalidate "all" cache
         redis_service.delete(f"cache:documents:{user_id}:all")
-        print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({
             'document_id': document_id,
@@ -488,8 +490,8 @@ def delete_research_document(document_id):
             # Also invalidate "all" cache and document-specific caches
             redis_service.delete(f"cache:documents:{user_id}:all")
             redis_service.delete_pattern(f"cache:doc:{document_id}:*")
-            print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
-            print(f"[REDIS] Cache invalidated successfully")
+            logger.debug(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
+            logger.debug(f"[REDIS] Cache invalidated successfully")
             
             return jsonify({'status': 'deleted'}), 200
         else:
@@ -526,8 +528,8 @@ def archive_document(document_id):
             cache_key = f"cache:documents:{user_id}:{project_id}"
             redis_service.delete(cache_key)
         redis_service.delete(f"cache:documents:{user_id}:all")
-        print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({'status': 'ok'}), 200
     
@@ -562,8 +564,8 @@ def unarchive_document(document_id):
             cache_key = f"cache:documents:{user_id}:{project_id}"
             redis_service.delete(cache_key)
         redis_service.delete(f"cache:documents:{user_id}:all")
-        print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({'status': 'ok'}), 200
     
@@ -605,8 +607,8 @@ def rename_document(document_id):
             redis_service.delete(cache_key)
         redis_service.delete(f"cache:documents:{user_id}:all")
         redis_service.delete_pattern(f"cache:doc:{document_id}:*")
-        print(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:documents:{user_id}:{project_id or 'all'}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({'status': 'ok', 'title': new_title.strip()}), 200
     
@@ -641,7 +643,7 @@ def generate_snapshot_for_document(document_id):
             snapshot_service = get_snapshot_service()
             snapshot = snapshot_service.generate_snapshot(html_content)
         except Exception as snapshot_error:
-            print(f"Error generating snapshot: {snapshot_error}")
+            log_error(logger, snapshot_error, "Error generating snapshot")
             return jsonify({'error': f'Failed to generate snapshot: {str(snapshot_error)}'}), 500
         
         if not snapshot:

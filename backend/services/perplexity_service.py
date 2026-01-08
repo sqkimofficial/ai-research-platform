@@ -17,6 +17,9 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 from config import Config
+from utils.logger import get_logger, log_error
+
+logger = get_logger(__name__)
 
 
 class PerplexityService:
@@ -135,7 +138,7 @@ class PerplexityService:
             }
             
         except Exception as e:
-            print(f"Perplexity API error: {e}")
+            log_error(logger, e, "Perplexity API error")
             raise
     
     def parse_json_response(self, response_text):
@@ -171,7 +174,7 @@ class PerplexityService:
                 }
             except json.JSONDecodeError as e:
                 # Step 3: Fuzzy parsing - fix common JSON issues
-                print(f"Warning: JSON parsing failed, attempting fuzzy parsing: {e}")
+                logger.warning(f"JSON parsing failed, attempting fuzzy parsing: {e}")
                 
                 # Fix unescaped newlines and control characters in string values
                 fixed_json = self._fix_json_strings(json_str)
@@ -191,8 +194,8 @@ class PerplexityService:
                     
         except Exception as e:
             # Final fallback - treat entire response as message
-            print(f"Warning: Failed to parse JSON response: {e}")
-            print(f"Response was: {response_text[:500]}...")
+            logger.warning(f"Failed to parse JSON response: {e}")
+            logger.debug(f"Response was: {response_text[:500]}...")
             return {
                 'message': response_text,
                 'document_content': '',

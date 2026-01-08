@@ -14,6 +14,9 @@ from flask import Blueprint, request, jsonify
 from models.database import UserModel
 from utils.auth0_validator import validate_token, fetch_user_profile, Auth0Error
 from config import Config
+from utils.logger import get_logger, log_error
+
+logger = get_logger(__name__)
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -99,10 +102,10 @@ def register():
             return jsonify({'error': error_msg}), 400
             
     except requests.RequestException as e:
-        print(f"Auth0 request error: {str(e)}")
+        log_error(logger, e, "Auth0 request error during registration")
         return jsonify({'error': 'Failed to connect to authentication service'}), 500
     except Exception as e:
-        print(f"Registration error: {str(e)}")
+        log_error(logger, e, "Registration error")
         return jsonify({'error': 'Registration failed'}), 500
 
 
@@ -151,8 +154,9 @@ def login():
             timeout=10
         )
         
-        print(f"Auth0 login response status: {token_response.status_code}")
-        print(f"Auth0 login response: {token_response.text}")
+        logger.debug(f"Auth0 login response status: {token_response.status_code}")
+        if Config.IS_DEVELOPMENT:
+            logger.debug(f"Auth0 login response: {token_response.text}")
         
         if token_response.status_code == 200:
             token_data = token_response.json()
@@ -187,13 +191,13 @@ def login():
                 }), 200
                 
             except Auth0Error as e:
-                print(f"Token validation error: {str(e)}")
+                log_error(logger, e, "Token validation error during login")
                 return jsonify({'error': 'Authentication failed'}), 401
                 
         else:
             error_data = token_response.json()
             error_msg = error_data.get('error_description') or error_data.get('error') or 'Invalid credentials'
-            print(f"Auth0 login error: {error_msg}")
+            logger.warning(f"Auth0 login error: {error_msg}")
             
             # Make error messages user-friendly
             if 'wrong email or password' in error_msg.lower() or 'invalid' in error_msg.lower():
@@ -206,10 +210,10 @@ def login():
             return jsonify({'error': f'Auth0: {error_msg}'}), 401
             
     except requests.RequestException as e:
-        print(f"Auth0 request error: {str(e)}")
+        log_error(logger, e, "Auth0 request error during login")
         return jsonify({'error': 'Failed to connect to authentication service'}), 500
     except Exception as e:
-        print(f"Login error: {str(e)}")
+        log_error(logger, e, "Login error")
         return jsonify({'error': 'Login failed'}), 500
 
 
@@ -289,7 +293,7 @@ def sync_auth0_user():
     except Auth0Error as e:
         return jsonify({'error': f'Auth0 error: {str(e)}'}), 401
     except Exception as e:
-        print(f"Error syncing user: {str(e)}")
+        log_error(logger, e, "Error syncing user")
         return jsonify({'error': 'Failed to sync user'}), 500
 
 

@@ -8,11 +8,13 @@ from utils.file_helpers import get_session_dir
 from utils.html_helpers import strip_html_tags
 from utils.markdown_converter import markdown_to_html
 from config import Config
+from utils.logger import get_logger, log_error
 from datetime import datetime
 import os
 import json
 import re
 
+logger = get_logger(__name__)
 chat_bp = Blueprint('chat', __name__)
 perplexity_service = PerplexityService()  # Used for content generation
 vector_service = VectorService()
@@ -209,8 +211,8 @@ def create_session():
         redis_service = get_redis_service()
         redis_service.delete(f"cache:sessions:{user_id}:{project_id}")
         redis_service.delete(f"cache:sessions:{user_id}:all")
-        print(f"[REDIS] Invalidating cache: cache:sessions:{user_id}:{project_id or 'all'}")
-        print(f"[REDIS] Cache invalidated successfully")
+        logger.debug(f"[REDIS] Invalidating cache: cache:sessions:{user_id}:{project_id or 'all'}")
+        logger.debug(f"[REDIS] Cache invalidated successfully")
         
         return jsonify({
             'session_id': session_id,
@@ -242,13 +244,13 @@ def get_session():
             if cached_data is not None:
                 # Verify user still owns this session (security check)
                 if cached_data.get('user_id') == user_id:
-                    print(f"[REDIS] get_session: Cache hit for session {session_id}")
+                    logger.debug(f"[REDIS] get_session: Cache hit for session {session_id}")
                     # Remove user_id from response (it's only for verification)
                     response_data = {k: v for k, v in cached_data.items() if k != 'user_id'}
                     return jsonify(response_data), 200
             
             # Cache miss - fetch from MongoDB
-            print(f"[REDIS] get_session: Cache miss for session {session_id}, fetching from MongoDB")
+            logger.debug(f"[REDIS] get_session: Cache miss for session {session_id}, fetching from MongoDB")
             
             session = ChatSessionModel.get_session(session_id)
             if not session:
@@ -302,7 +304,7 @@ def get_session():
             
             # Cache the result (shorter TTL for individual sessions since they change more frequently)
             redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_VERSION)  # 1 minute TTL
-            print(f"[REDIS] get_session: Cached session {session_id}")
+            logger.debug(f"[REDIS] get_session: Cached session {session_id}")
             
             # Remove user_id from response
             response_data = {k: v for k, v in response_data.items() if k != 'user_id'}
@@ -331,11 +333,11 @@ def get_session():
             cached_data = redis_service.get(cache_key)
             
             if cached_data is not None:
-                print(f"[REDIS] get_session: Cache hit for session list (project: {project_id_filter or 'all'})")
+                logger.debug(f"[REDIS] get_session: Cache hit for session list (project: {project_id_filter or 'all'})")
                 return jsonify(cached_data), 200
         
         # Cache miss or paginated request - fetch from MongoDB
-        print(f"[REDIS] get_session: Fetching sessions (project: {project_id_filter or 'all'}, limit: {limit}, skip: {skip})")
+        logger.debug(f"[REDIS] get_session: Fetching sessions (project: {project_id_filter or 'all'}, limit: {limit}, skip: {skip})")
         
         sessions = ChatSessionModel.get_all_sessions(user_id, project_id_filter, limit=limit, skip=skip)
         sessions_list = []
@@ -392,7 +394,7 @@ def get_session():
         if use_cache:
             redis_service = get_redis_service()
             redis_service.set(cache_key, response_data, ttl=Config.REDIS_TTL_DOCUMENTS)  # 5 minutes TTL
-            print(f"[REDIS] get_session: Cached {len(sessions_list)} sessions")
+            logger.debug(f"[REDIS] get_session: Cached {len(sessions_list)} sessions")
         
         return jsonify(response_data), 200
     
@@ -465,8 +467,8 @@ def send_message():
             if project_id:
                 redis_service.delete(f"cache:sessions:{user_id}:{project_id}")
             redis_service.delete(f"cache:sessions:{user_id}:all")
-            print(f"[REDIS] Invalidating cache: cache:session:{session_id}")
-            print(f"[REDIS] Cache invalidated successfully")
+            logger.debug(f"[REDIS] Invalidating cache: cache:session:{session_id}")
+            logger.debug(f"[REDIS] Cache invalidated successfully")
         
         # Get document content for context
         session_dir = get_session_dir(session_id)
@@ -488,11 +490,11 @@ def send_message():
                 if relevant_chunks:
                     context_parts = [chunk['chunk_text'] for chunk in relevant_chunks]
                     document_context = '\n\n'.join(context_parts)
-                    print(f"DEBUG: Using semantic search - found {len(relevant_chunks)} relevant chunks")
+                    logger.debug(f"Using semantic search - found {len(relevant_chunks)} relevant chunks")
                 else:
                     # Fallback to full document if no relevant chunks found (e.g., document not indexed yet)
                     document_context = document_content
-                    print(f"DEBUG: No relevant chunks found, falling back to full document")
+                    logger.debug("No relevant chunks found, falling back to full document")
             else:
                 # Send full document (fallback mode)
                 document_context = document_content
@@ -654,9 +656,9 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         
         # Stage 1 AI - Perplexity (content generation with web search)
         # Log highlights/attachments before sending to Perplexity API
-        print("=" * 80)
-        print("STAGE ONE PERPLEXITY API CALL - ATTACHMENTS LOG")
-        print("=" * 80)
+        logger.debug("=" * 80)
+        logger.debug("STAGE ONE PERPLEXITY API CALL - ATTACHMENTS LOG")
+        logger.debug("=" * 80)
         
         # Extract highlights from attached_sections
         highlights = []
@@ -668,26 +670,24 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                         highlights.append(attachment)
         
         if highlights:
-            print(f"Highlights attached: {len(highlights)}")
+            logger.debug(f"Highlights attached: {len(highlights)}")
             for i, highlight in enumerate(highlights, 1):
                 highlight_content = highlight.get('content', '')
                 # Extract the actual highlight text from the formatted content
                 # Format is: Highlight: "text"\nNote: ...\nSource: ...
                 text_match = re.search(r'Highlight:\s*"([^"]+)"', highlight_content)
                 highlight_text = text_match.group(1) if text_match else highlight_content
-                print(f"  Highlight {i}:")
-                print(f"    Content: {highlight_text}")
+                logger.debug(f"  Highlight {i}:")
+                logger.debug(f"    Content: {highlight_text}")
         else:
-            print("Highlights attached: zero")
+            logger.debug("Highlights attached: zero")
         
-        print("=" * 80)
+        logger.debug("=" * 80)
         
         try:
             ai_response = perplexity_service.chat_completion(alternated_messages)
         except Exception as e:
-            print(f"Error calling Perplexity API: {e}")
-            import traceback
-            traceback.print_exc()
+            log_error(logger, e, "Error calling Perplexity API")
             raise
         
         # Get response content
@@ -706,13 +706,13 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         parsed_response = perplexity_service.parse_json_response(ai_response_content)
         
         # Log parsed response (without raw content)
-        print("DEBUG: Parsed Response:")
-        print(f"  - message length: {len(parsed_response.get('message', ''))}")
-        print(f"  - document_content length: {len(parsed_response.get('document_content', ''))}")
-        print(f"  - sources count: {len(parsed_response.get('sources', []))}")
+        logger.debug("Parsed Response:")
+        logger.debug(f"  - message length: {len(parsed_response.get('message', ''))}")
+        logger.debug(f"  - document_content length: {len(parsed_response.get('document_content', ''))}")
+        logger.debug(f"  - sources count: {len(parsed_response.get('sources', []))}")
         if parsed_response.get('document_content'):
-            print(f"  - document_content preview: {parsed_response.get('document_content', '')[:200]}...")
-        print("=" * 80)
+            logger.debug(f"  - document_content preview: {parsed_response.get('document_content', '')[:200]}...")
+        logger.debug("=" * 80)
         
         chat_message = parsed_response.get('message', '')
         document_content_to_add = parsed_response.get('document_content', '')
@@ -725,10 +725,10 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
             chat_message = strip_markdown_to_plain_text(chat_message)
             new_length = len(chat_message)
             new_newlines = chat_message.count('\n')
-            print(f"DEBUG: Stripped markdown from research mode response")
-            print(f"  - Original length: {original_length}, New length: {new_length}")
-            print(f"  - Original newlines: {original_newlines}, New newlines: {new_newlines}")
-            print(f"  - Preview: {chat_message[:200]}...")
+            logger.debug("Stripped markdown from research mode response")
+            logger.debug(f"  - Original length: {original_length}, New length: {new_length}")
+            logger.debug(f"  - Original newlines: {original_newlines}, New newlines: {new_newlines}")
+            logger.debug(f"  - Preview: {chat_message[:200]}...")
         
         # Don't extract placement instructions in backend - let Stage 2 AI figure it out from user messages
         
@@ -742,15 +742,15 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
             
             # Trust the AI to return complete content (including unchanged parts for revisions)
             # The revision context in the system prompt explicitly instructs the AI to return complete content
-            print(f"DEBUG: Storing pending content from AI response")
-            print(f"  - Content length: {len(document_content_to_add)}")
-            print(f"  - Sources count: {len(sources)}")
+            logger.debug("Storing pending content from AI response")
+            logger.debug(f"  - Content length: {len(document_content_to_add)}")
+            logger.debug(f"  - Sources count: {len(sources)}")
             if is_revision and pending_content_data:
                 previous_pending = pending_content_data['pending_content']
                 previous_content = previous_pending.get('document_content', '')
                 previous_sources = previous_pending.get('sources', [])
-                print(f"  - Previous content length: {len(previous_content)}")
-                print(f"  - Is revision: True - trusting AI to return complete content")
+                logger.debug(f"  - Previous content length: {len(previous_content)}")
+                logger.debug("  - Is revision: True - trusting AI to return complete content")
                 # Merge sources (combine previous sources with new sources)
                 merged_sources = list(set(previous_sources + sources))
             else:
@@ -783,7 +783,7 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 else:
                     # Fallback: use current time if we can't find the user message
                     session_start_timestamp = datetime.utcnow().isoformat()
-                    print(f"WARNING: Could not find user message timestamp, using current time")
+                    logger.warning("Could not find user message timestamp, using current time")
             
             pending_content_data_to_store = {
                 'document_content': document_content_to_add,
@@ -793,7 +793,7 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
             }
             
             pending_content_id = ChatSessionModel.update_pending_content(session_id, pending_content_data_to_store)
-            print(f"DEBUG: Stored pending content with ID: {pending_content_id}")
+            logger.debug(f"Stored pending content with ID: {pending_content_id}")
             
             # Store message with pending status
             ChatSessionModel.add_message(
@@ -817,8 +817,8 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 if project_id:
                     redis_service.delete(f"cache:sessions:{user_id}:{project_id}")
                 redis_service.delete(f"cache:sessions:{user_id}:all")
-                print(f"[REDIS] Invalidating cache: cache:session:{session_id}")
-                print(f"[REDIS] Cache invalidated successfully")
+                logger.debug(f"[REDIS] Invalidating cache: cache:session:{session_id}")
+                logger.debug(f"[REDIS] Cache invalidated successfully")
         else:
             # No content - regular chat message
             ChatSessionModel.add_message(
@@ -841,15 +841,15 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 if project_id:
                     redis_service.delete(f"cache:sessions:{user_id}:{project_id}")
                 redis_service.delete(f"cache:sessions:{user_id}:all")
-                print(f"[REDIS] Invalidating cache: cache:session:{session_id}")
-                print(f"[REDIS] Cache invalidated successfully")
+                logger.debug(f"[REDIS] Invalidating cache: cache:session:{session_id}")
+                logger.debug(f"[REDIS] Cache invalidated successfully")
         
         # DO NOT auto-insert content - it's now pending approval
         # Content will be inserted when user approves via /chat/approve endpoint
         
-        print(f"DEBUG: document_content_to_add exists: {bool(document_content_to_add.strip())}")
-        print(f"DEBUG: status: {status}")
-        print(f"DEBUG: pending_content_id: {pending_content_id}")
+        logger.debug(f"document_content_to_add exists: {bool(document_content_to_add.strip())}")
+        logger.debug(f"status: {status}")
+        logger.debug(f"pending_content_id: {pending_content_id}")
         
         # Note: Auto-insertion is disabled. Content requires user approval via /direct-insert endpoint.
         # The frontend handles cursor-based or end-of-document insertion.
@@ -869,11 +869,8 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         return jsonify(response_data), 200
     
     except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        print(f"Error in send_message: {str(e)}")
-        print(f"Traceback: {error_traceback}")
-        return jsonify({'error': str(e), 'traceback': error_traceback}), 500
+        log_error(logger, e, "Error in send_message")
+        return jsonify({'error': str(e)}), 500
 
 @chat_bp.route('/direct-insert', methods=['POST'])
 def direct_insert_content():
@@ -912,7 +909,7 @@ def direct_insert_content():
         
         if edited_content:
             content_to_insert_markdown = edited_content
-            print(f"DEBUG: Using edited content for direct insert (length: {len(edited_content)})")
+            logger.debug(f"Using edited content for direct insert (length: {len(edited_content)})")
         else:
             content_to_insert_markdown = original_content
         
@@ -968,7 +965,7 @@ def direct_insert_content():
                 try:
                     vector_service.index_document(document_id, updated_document_content)
                 except Exception as index_error:
-                    print(f"Warning: Failed to re-index document: {index_error}")
+                    logger.warning(f"Failed to re-index document: {index_error}")
             else:
                 # Legacy approach: update file-based document
                 session_dir = get_session_dir(session_id)
@@ -981,12 +978,10 @@ def direct_insert_content():
                 try:
                     vector_service.index_document(session_id, updated_document_content)
                 except Exception as index_error:
-                    print(f"Warning: Failed to re-index document: {index_error}")
+                    logger.warning(f"Failed to re-index document: {index_error}")
             
         except Exception as e:
-            print(f"Error updating document: {e}")
-            import traceback
-            traceback.print_exc()
+            log_error(logger, e, "Error updating document")
             return jsonify({'error': f'Failed to update document: {str(e)}'}), 500
         
         # Update the message status to 'approved' in the database
@@ -1005,11 +1000,8 @@ def direct_insert_content():
         }), 200
     
     except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        print(f"Error in direct_insert_content: {str(e)}")
-        print(f"Traceback: {error_traceback}")
-        return jsonify({'error': str(e), 'traceback': error_traceback}), 500
+        log_error(logger, e, "Error in direct_insert_content")
+        return jsonify({'error': str(e)}), 500
 
 @chat_bp.route('/clear-pending', methods=['POST'])
 def clear_pending_content_route():
@@ -1066,8 +1058,5 @@ def clear_pending_content_route():
         }), 200
     
     except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        print(f"Error in clear_pending_content: {str(e)}")
-        print(f"Traceback: {error_traceback}")
-        return jsonify({'error': str(e), 'traceback': error_traceback}), 500
+        log_error(logger, e, "Error in clear_pending_content")
+        return jsonify({'error': str(e)}), 500

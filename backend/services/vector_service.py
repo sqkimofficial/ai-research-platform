@@ -1,9 +1,12 @@
 from services.openai_service import OpenAIService
 from models.database import DocumentEmbeddingModel
 from utils.html_helpers import strip_html_tags
+from utils.logger import get_logger
 import numpy as np
 from typing import List, Dict
 import uuid
+
+logger = get_logger(__name__)
 
 class VectorService:
     def __init__(self):
@@ -92,7 +95,7 @@ class VectorService:
             
             return True
         except Exception as e:
-            print(f"Error indexing document: {e}")
+            logger.error(f"Error indexing document: {e}")
             return False
     
     def cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
@@ -136,6 +139,6 @@ class VectorService:
             return results[:top_k]
         
         except Exception as e:
-            print(f"Error in semantic search: {e}")
+            logger.error(f"Error in semantic search: {e}")
             return []
 

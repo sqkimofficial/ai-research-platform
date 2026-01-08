@@ -8,6 +8,9 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 from config import Config
+from utils.logger import get_logger, log_error
+
+logger = get_logger(__name__)
 
 class OpenAIService:
     def __init__(self):
@@ -53,7 +56,7 @@ class OpenAIService:
                 'function_call': function_call
             }
         except Exception as e:
-            print(f"OpenAI API error: {e}")
+            log_error(logger, e, "OpenAI API error")
             raise
     
     def parse_json_response(self, response_text):
@@ -94,7 +97,7 @@ class OpenAIService:
                 }
             except json.JSONDecodeError as e:
                 # Step 3: Fuzzy parsing - fix common JSON issues
-                print(f"Warning: JSON parsing failed, attempting fuzzy parsing: {e}")
+                logger.warning(f"JSON parsing failed, attempting fuzzy parsing: {e}")
                 
                 # Fix unescaped newlines and control characters in string values
                 fixed_json = self._fix_json_strings(json_str)
@@ -120,8 +123,8 @@ class OpenAIService:
                     
         except Exception as e:
             # Final fallback - treat entire response as message
-            print(f"Warning: Failed to parse JSON response: {e}")
-            print(f"Response was: {response_text[:500]}...")
+            logger.warning(f"Failed to parse JSON response: {e}")
+            logger.debug(f"Response was: {response_text[:500]}...")
             return {
                 'message': response_text,
                 'document_content': '',
@@ -319,6 +322,6 @@ class OpenAIService:
             )
             return response.data[0].embedding
         except Exception as e:
-            print(f"OpenAI Embedding API error: {e}")
+            log_error(logger, e, "OpenAI Embedding API error")
             raise
 

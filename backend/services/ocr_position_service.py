@@ -4,6 +4,9 @@ Used for generating highlight preview images centered on the highlighted text.
 """
 import base64
 import io
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Try to import required libraries
 try:
@@ -11,15 +14,15 @@ try:
     PYTESSERACT_AVAILABLE = True
 except ImportError:
     PYTESSERACT_AVAILABLE = False
-    print("Warning: pytesseract not installed. Install with: pip install pytesseract")
-    print("Note: Tesseract OCR must also be installed on your system.")
+    logger.warning("pytesseract not installed. Install with: pip install pytesseract")
+    logger.warning("Note: Tesseract OCR must also be installed on your system.")
 
 try:
     from PIL import Image
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
-    print("Warning: Pillow not installed. Install with: pip install pillow")
+    logger.warning("Pillow not installed. Install with: pip install pillow")
 
 
 class OCRPositionService:
@@ -28,7 +31,7 @@ class OCRPositionService:
     def __init__(self):
         self.available = PYTESSERACT_AVAILABLE and PIL_AVAILABLE
         if not self.available:
-            print("OCRPositionService: Not fully available - missing dependencies")
+            logger.warning("OCRPositionService: Not fully available - missing dependencies")
     
     def find_text_position(self, image_base64, search_text):
         """
@@ -43,7 +46,7 @@ class OCRPositionService:
             dict with x0, y0, x1, y1 normalized coordinates (0-1 range), or None
         """
         if not self.available:
-            print("OCRPositionService: Cannot find text position - dependencies not available")
+            logger.warning("OCRPositionService: Cannot find text position - dependencies not available")
             return None
         
         if not search_text or not search_text.strip():
@@ -71,30 +74,30 @@ class OCRPositionService:
                     })
             
             if not blocks:
-                print("OCRPositionService: No text found in image by Tesseract")
+                logger.debug("OCRPositionService: No text found in image by Tesseract")
                 return None
             
             # Try multiple search strategies
             bbox = self._try_exact_phrase_match(blocks, search_text, width, height)
             if bbox:
-                print(f"OCRPositionService: Found exact phrase match")
+                logger.debug(f"OCRPositionService: Found exact phrase match")
                 return bbox
             
             bbox = self._try_word_sequence_match(blocks, search_text, width, height)
             if bbox:
-                print(f"OCRPositionService: Found word sequence match")
+                logger.debug(f"OCRPositionService: Found word sequence match")
                 return bbox
             
             bbox = self._try_fuzzy_match(blocks, search_text, width, height)
             if bbox:
-                print(f"OCRPositionService: Found fuzzy match")
+                logger.debug(f"OCRPositionService: Found fuzzy match")
                 return bbox
             
-            print(f"OCRPositionService: Could not find text '{search_text[:50]}...' in image")
+            logger.debug(f"OCRPositionService: Could not find text '{search_text[:50]}...' in image")
             return None
             
         except Exception as e:
-            print(f"OCRPositionService: Error finding text position: {e}")
+            logger.debug(f"OCRPositionService: Error finding text position: {e}")
             return None
     
     def _try_exact_phrase_match(self, blocks, search_text, img_width, img_height):

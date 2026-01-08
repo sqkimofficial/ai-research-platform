@@ -16,6 +16,9 @@ if parent_dir not in sys.path:
 
 from utils.auth0_validator import validate_token, fetch_user_profile, Auth0Error
 from models.database import UserModel
+from utils.logger import get_logger, log_error, log_security_event
+
+logger = get_logger(__name__)
 
 
 def get_token_from_header():
@@ -70,7 +73,12 @@ def get_user_id_from_token():
         auth0_id = payload.get('sub')
         
         if not auth0_id:
-            print("Auth0 token missing 'sub' claim")
+            log_security_event(
+                logger,
+                'token_validation_failure',
+                "Auth0 token missing 'sub' claim",
+                severity='WARNING'
+            )
             return None
         
         # Look up user by auth0_id
@@ -80,14 +88,19 @@ def get_user_id_from_token():
             return user.get('user_id')
         
         # User not found - they need to sync first via /api/auth/sync
-        print(f"User with auth0_id {auth0_id} not found in database")
+        logger.warning(f"User with auth0_id {auth0_id} not found in database")
         return None
         
     except Auth0Error as e:
-        print(f"Auth0 token validation failed: {str(e)}")
+        log_security_event(
+            logger,
+            'token_validation_failure',
+            f"Auth0 token validation failed: {str(e)}",
+            severity='WARNING'
+        )
         return None
     except Exception as e:
-        print(f"Unexpected error in token validation: {str(e)}")
+        log_error(logger, e, "Unexpected error in token validation")
         return None
 
 
@@ -105,7 +118,7 @@ def get_auth0_user_info():
     try:
         return fetch_user_profile(token)
     except Auth0Error as e:
-        print(f"Failed to fetch Auth0 user info: {str(e)}")
+        log_error(logger, e, "Failed to fetch Auth0 user info")
         return None
 
 
