@@ -17,6 +17,7 @@ from routes.project import project_bp
 from routes.highlight import highlight_bp
 from routes.pdf import pdf_bp
 from utils.rate_limiter import init_rate_limiter, get_limiter
+from utils.security_headers import get_security_headers
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -100,6 +101,28 @@ def add_cors_headers(response):
             severity='WARNING',
             origin=origin
         )
+    return response
+
+@app.after_request
+def add_security_headers(response):
+    """Add security headers to all responses based on environment"""
+    # Get environment-aware security headers
+    security_headers = get_security_headers()
+    
+    # Add each security header to the response
+    for header_name, header_value in security_headers.items():
+        # Only set HSTS if using HTTPS (check if request was secure)
+        # HSTS must only be set over HTTPS, otherwise browsers will ignore it
+        if header_name == 'Strict-Transport-Security':
+            # Only set HSTS header if the request was made over HTTPS
+            # request.is_secure will be True if:
+            # 1. Direct HTTPS connection, or
+            # 2. Behind a reverse proxy with X-Forwarded-Proto: https header
+            if request.is_secure:
+                response.headers[header_name] = header_value
+        else:
+            response.headers[header_name] = header_value
+    
     return response
 
 # Initialize rate limiter (must be done before registering blueprints)
