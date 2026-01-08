@@ -16,6 +16,7 @@ from routes.document import document_bp
 from routes.project import project_bp
 from routes.highlight import highlight_bp
 from routes.pdf import pdf_bp
+from utils.rate_limiter import init_rate_limiter, get_limiter
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -101,6 +102,9 @@ def add_cors_headers(response):
         )
     return response
 
+# Initialize rate limiter (must be done before registering blueprints)
+limiter = init_rate_limiter(app)
+
 # Register blueprints
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(chat_bp, url_prefix='/api/chat')
@@ -111,8 +115,12 @@ app.register_blueprint(pdf_bp, url_prefix='/api/pdfs')
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - excluded from rate limiting"""
     return {'status': 'ok', 'message': 'API is running'}, 200
+
+# Exclude health check from rate limiting
+if limiter:
+    limiter.exempt(health_check)
 
 if __name__ == '__main__':
     port = int(os.getenv('FLASK_RUN_PORT', 5001))

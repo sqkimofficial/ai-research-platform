@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from models.database import HighlightModel, ProjectModel, PDFDocumentModel
 from utils.auth import get_user_id_from_token, log_auth_info
+from utils.rate_limiter import get_limiter
 from services.s3_service import S3Service
 from services.redis_service import get_redis_service
 from services.sse_service import SSEService
@@ -12,6 +13,9 @@ import io
 import re
 
 logger = get_logger(__name__)
+
+# Get rate limiter instance
+limiter = get_limiter()
 
 # Try to import PIL for image processing
 try:
@@ -140,6 +144,7 @@ def generate_cropped_preview(preview_data, scale_factor=0.3):
 
 
 @highlight_bp.route('', methods=['POST'])
+@limiter.limit("30 per minute") if limiter else lambda f: f
 def save_highlight():
     """
     Save a highlight from Chrome extension.
@@ -291,6 +296,7 @@ def save_highlight():
 
 
 @highlight_bp.route('', methods=['GET'])
+@limiter.limit("60 per minute") if limiter else lambda f: f
 def get_highlights():
     """
     Get highlights with optional filters.
@@ -411,6 +417,7 @@ def get_highlights():
 
 
 @highlight_bp.route('/search', methods=['GET'])
+@limiter.limit("30 per minute") if limiter else lambda f: f
 def search_highlights():
     """
     Search highlights across all sources (web and PDF) for a project.
@@ -514,6 +521,7 @@ def search_highlights():
 
 
 @highlight_bp.route('', methods=['DELETE'])
+@limiter.limit("20 per minute") if limiter else lambda f: f
 def delete_highlight():
     """
     Delete a specific highlight.
@@ -577,6 +585,7 @@ def delete_highlight():
 
 
 @highlight_bp.route('/archive', methods=['PUT'])
+@limiter.limit("20 per minute") if limiter else lambda f: f
 def archive_highlight():
     """
     Archive a web highlight document.
@@ -637,6 +646,7 @@ def archive_highlight():
 
 
 @highlight_bp.route('/unarchive', methods=['PUT'])
+@limiter.limit("20 per minute") if limiter else lambda f: f
 def unarchive_highlight():
     """
     Unarchive a web highlight document.
@@ -697,6 +707,7 @@ def unarchive_highlight():
 
 
 @highlight_bp.route('/source', methods=['DELETE'])
+@limiter.limit("20 per minute") if limiter else lambda f: f
 def delete_source():
     """
     Delete an entire source document and all its highlights from the database.
@@ -757,6 +768,7 @@ def delete_source():
 
 
 @highlight_bp.route('/preview/<highlight_id>', methods=['GET'])
+@limiter.limit("60 per minute") if limiter else lambda f: f
 def get_highlight_preview(highlight_id):
     """
     Return preview image URL for a specific web highlight.

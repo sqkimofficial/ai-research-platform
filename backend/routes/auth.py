@@ -13,6 +13,7 @@ import requests
 from flask import Blueprint, request, jsonify
 from models.database import UserModel
 from utils.auth0_validator import validate_token, fetch_user_profile, Auth0Error
+from utils.rate_limiter import get_limiter
 from config import Config
 from utils.logger import get_logger, log_error
 
@@ -20,8 +21,12 @@ logger = get_logger(__name__)
 
 auth_bp = Blueprint('auth', __name__)
 
+# Get rate limiter instance
+limiter = get_limiter()
+
 
 @auth_bp.route('/register', methods=['POST'])
+@limiter.limit("3 per hour", key_func=lambda: request.remote_addr) if limiter else lambda f: f
 def register():
     """
     Register a new user with email/password via Auth0.
@@ -110,6 +115,7 @@ def register():
 
 
 @auth_bp.route('/login', methods=['POST'])
+@limiter.limit("5 per minute", key_func=lambda: request.remote_addr) if limiter else lambda f: f
 def login():
     """
     Login with email/password via Auth0.
@@ -218,6 +224,7 @@ def login():
 
 
 @auth_bp.route('/sync', methods=['POST'])
+@limiter.limit("30 per minute") if limiter else lambda f: f
 def sync_auth0_user():
     """
     Sync OAuth user (Google/Apple) to local database.
@@ -298,6 +305,7 @@ def sync_auth0_user():
 
 
 @auth_bp.route('/me', methods=['GET'])
+@limiter.limit("30 per minute") if limiter else lambda f: f
 def get_current_user():
     """Get current authenticated user's information."""
     auth_header = request.headers.get('Authorization')
@@ -333,6 +341,7 @@ def get_current_user():
 
 
 @auth_bp.route('/verify', methods=['GET'])
+@limiter.limit("30 per minute") if limiter else lambda f: f
 def verify_token_endpoint():
     """Verify that the current token is valid."""
     auth_header = request.headers.get('Authorization')

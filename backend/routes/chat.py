@@ -7,6 +7,7 @@ from utils.auth import get_user_id_from_token, log_auth_info
 from utils.file_helpers import get_session_dir
 from utils.html_helpers import strip_html_tags
 from utils.markdown_converter import markdown_to_html
+from utils.rate_limiter import get_limiter, create_limit_string
 from config import Config
 from utils.logger import get_logger, log_error
 from datetime import datetime
@@ -18,6 +19,9 @@ logger = get_logger(__name__)
 chat_bp = Blueprint('chat', __name__)
 perplexity_service = PerplexityService()  # Used for content generation
 vector_service = VectorService()
+
+# Get rate limiter instance
+limiter = get_limiter()
 
 # get_user_id_from_token is now imported from utils.auth
 
@@ -181,6 +185,7 @@ def strip_markdown_to_plain_text(text):
     return text.strip()
 
 @chat_bp.route('/session', methods=['POST'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def create_session():
     """Create a new chat session"""
     try:
@@ -223,6 +228,7 @@ def create_session():
         return jsonify({'error': str(e)}), 500
 
 @chat_bp.route('/session', methods=['GET'])
+@limiter.limit("60 per minute") if limiter else lambda f: f
 def get_session():
     """Get session history or list all sessions"""
     try:
@@ -402,6 +408,7 @@ def get_session():
         return jsonify({'error': str(e)}), 500
 
 @chat_bp.route('/message', methods=['POST'])
+@limiter.limit("10 per minute, 100 per hour") if limiter else lambda f: f
 def send_message():
     """Send a message and get AI response"""
     try:
@@ -873,6 +880,7 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         return jsonify({'error': str(e)}), 500
 
 @chat_bp.route('/direct-insert', methods=['POST'])
+@limiter.limit("20 per minute") if limiter else lambda f: f
 def direct_insert_content():
     """Directly insert pending content at the end of the document (no AI placement)"""
     try:
@@ -1004,6 +1012,7 @@ def direct_insert_content():
         return jsonify({'error': str(e)}), 500
 
 @chat_bp.route('/clear-pending', methods=['POST'])
+@limiter.limit("20 per minute") if limiter else lambda f: f
 def clear_pending_content_route():
     """Clear pending content without modifying the document.
     Used for client-side insertion where the frontend handles document updates.

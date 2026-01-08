@@ -53,6 +53,11 @@ class Config:
     REDIS_TTL_METADATA = int(os.getenv('REDIS_TTL_METADATA', 600))  # 10 min
     REDIS_TTL_VERSION = int(os.getenv('REDIS_TTL_VERSION', 60))  # 1 min
     
+    # Rate Limiting Configuration
+    RATE_LIMIT_ENABLED = os.getenv('RATE_LIMIT_ENABLED', 'true').lower() == 'true'
+    RATE_LIMIT_DEFAULT_PER_MINUTE = int(os.getenv('RATE_LIMIT_DEFAULT_PER_MINUTE', 100))
+    RATE_LIMIT_STRATEGY = os.getenv('RATE_LIMIT_STRATEGY', 'fixed-window')  # 'fixed-window' or 'moving-window'
+    
     # CORS Configuration - Environment-aware
     # In development: Allow localhost origins
     # In production: Require ALLOWED_ORIGINS env var (comma-separated list)

@@ -4,8 +4,12 @@ from models.database import ChatSessionModel, ResearchDocumentModel, ProjectMode
 from services.vector_service import VectorService
 from services.redis_service import get_redis_service
 from utils.auth import get_user_id_from_token, log_auth_info
+from utils.rate_limiter import get_limiter
 from config import Config
 from utils.logger import get_logger, log_error
+
+# Get rate limiter instance
+limiter = get_limiter()
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -23,6 +27,7 @@ document_bp = Blueprint('document', __name__)
 # get_user_id_from_token is now imported from utils.auth
 
 @document_bp.route('/document', methods=['GET'])
+@limiter.limit("60 per minute") if limiter else lambda f: f
 def get_document():
     """Get document content with version for delta sync"""
     try:
@@ -61,6 +66,7 @@ def get_document():
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document', methods=['POST'])
+@limiter.limit("30 per minute") if limiter else lambda f: f
 def save_document():
     """Save document using delta patches for efficiency"""
     try:
@@ -153,6 +159,7 @@ def save_document():
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document/pdf', methods=['GET'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def download_pdf():
     """Download document as PDF"""
     try:
@@ -282,6 +289,7 @@ def markdown_to_plain_text(markdown_content):
     return text
 
 @document_bp.route('/document/research-documents/<document_id>/pdf', methods=['GET'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def download_research_document_pdf(document_id):
     """Download research document as PDF (converts markdown to plain text)"""
     try:
@@ -370,6 +378,7 @@ def download_research_document_pdf(document_id):
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document/research-documents', methods=['GET'])
+@limiter.limit("60 per minute") if limiter else lambda f: f
 def get_all_research_documents():
     """Get all research documents for the user, optionally filtered by project_id"""
     try:
@@ -421,6 +430,7 @@ def get_all_research_documents():
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document/research-documents', methods=['POST'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def create_research_document():
     """Create a new research document"""
     try:
@@ -463,6 +473,7 @@ def create_research_document():
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document/research-documents/<document_id>', methods=['DELETE'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def delete_research_document(document_id):
     """Delete a research document"""
     try:
@@ -501,6 +512,7 @@ def delete_research_document(document_id):
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document/research-documents/<document_id>/archive', methods=['POST'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def archive_document(document_id):
     """Archive a research document"""
     try:
@@ -537,6 +549,7 @@ def archive_document(document_id):
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document/research-documents/<document_id>/unarchive', methods=['POST'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def unarchive_document(document_id):
     """Unarchive a research document"""
     try:
@@ -573,6 +586,7 @@ def unarchive_document(document_id):
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document/research-documents/<document_id>/rename', methods=['PATCH'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def rename_document(document_id):
     """Rename a research document"""
     try:
@@ -616,6 +630,7 @@ def rename_document(document_id):
         return jsonify({'error': str(e)}), 500
 
 @document_bp.route('/document/research-documents/<document_id>/generate-snapshot', methods=['POST'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def generate_snapshot_for_document(document_id):
     """Generate snapshot for an existing document that doesn't have one"""
     try:

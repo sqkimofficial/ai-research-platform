@@ -1,12 +1,17 @@
 from flask import Blueprint, request, jsonify
 from models.database import ProjectModel
 from utils.auth import get_user_id_from_token, log_auth_info
+from utils.rate_limiter import get_limiter
 
 project_bp = Blueprint('project', __name__)
+
+# Get rate limiter instance
+limiter = get_limiter()
 
 # get_user_id_from_token is now imported from utils.auth
 
 @project_bp.route('', methods=['POST'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def create_project():
     """Create a new project"""
     try:
@@ -32,6 +37,7 @@ def create_project():
         return jsonify({'error': str(e)}), 500
 
 @project_bp.route('', methods=['GET'])
+@limiter.limit("60 per minute") if limiter else lambda f: f
 def get_projects():
     """Get all projects for user or a specific project"""
     try:
@@ -83,6 +89,7 @@ def get_projects():
         return jsonify({'error': str(e)}), 500
 
 @project_bp.route('', methods=['PUT'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def update_project():
     """Update a project"""
     try:
@@ -124,6 +131,7 @@ def update_project():
         return jsonify({'error': str(e)}), 500
 
 @project_bp.route('', methods=['DELETE'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def delete_project():
     """Delete a project"""
     try:

@@ -5,6 +5,7 @@ Supports PDF, JPG, and PNG files.
 from flask import Blueprint, request, jsonify, send_file, Response, stream_with_context
 from models.database import PDFDocumentModel, ProjectModel, HighlightModel
 from utils.auth import get_user_id_from_token
+from utils.rate_limiter import get_limiter
 from services.pdf_extraction_service import get_highlight_extraction_service
 from services.redis_service import get_redis_service
 from services.s3_service import S3Service
@@ -19,6 +20,9 @@ import json
 
 logger = get_logger(__name__)
 pdf_bp = Blueprint('pdf', __name__)
+
+# Get rate limiter instance
+limiter = get_limiter()
 
 # Supported file extensions and their MIME types
 SUPPORTED_EXTENSIONS = {
@@ -204,6 +208,7 @@ def extract_highlights_async(doc_id, file_base64_data=None, content_type='applic
 
 
 @pdf_bp.route('', methods=['POST'])
+@limiter.limit("5 per minute") if limiter else lambda f: f
 def upload_document():
     """
     Upload a new highlight document (PDF, JPG, or PNG).
@@ -339,6 +344,7 @@ def upload_document():
 
 
 @pdf_bp.route('', methods=['GET'])
+@limiter.limit("60 per minute") if limiter else lambda f: f
 def get_pdfs():
     """
     Get PDF documents with optional filters.
@@ -484,6 +490,7 @@ def get_pdfs():
 
 
 @pdf_bp.route('/file/<pdf_id>', methods=['GET'])
+@limiter.limit("60 per minute") if limiter else lambda f: f
 def get_pdf_file(pdf_id):
     """
     Get the actual PDF file data for viewing.
@@ -551,6 +558,7 @@ def get_pdf_file(pdf_id):
 
 
 @pdf_bp.route('/highlights/<pdf_id>', methods=['GET'])
+@limiter.limit("60 per minute") if limiter else lambda f: f
 def get_pdf_highlights(pdf_id):
     """
     Get highlights for a specific PDF (reads from highlights collection).
@@ -591,6 +599,7 @@ def get_pdf_highlights(pdf_id):
 
 
 @pdf_bp.route('/highlights/<pdf_id>', methods=['POST'])
+@limiter.limit("30 per minute") if limiter else lambda f: f
 def add_pdf_highlight(pdf_id):
     """
     Manually add a highlight to a PDF.
@@ -631,6 +640,7 @@ def add_pdf_highlight(pdf_id):
 
 
 @pdf_bp.route('/highlights/<pdf_id>/<highlight_id>', methods=['DELETE'])
+@limiter.limit("20 per minute") if limiter else lambda f: f
 def delete_pdf_highlight(pdf_id, highlight_id):
     """
     Delete a highlight from a PDF.
@@ -657,6 +667,7 @@ def delete_pdf_highlight(pdf_id, highlight_id):
 
 
 @pdf_bp.route('/highlights/<pdf_id>/<highlight_id>', methods=['PUT'])
+@limiter.limit("20 per minute") if limiter else lambda f: f
 def update_pdf_highlight(pdf_id, highlight_id):
     """
     Update a highlight's note.
@@ -692,6 +703,7 @@ def update_pdf_highlight(pdf_id, highlight_id):
 
 
 @pdf_bp.route('/<pdf_id>', methods=['DELETE'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def delete_pdf(pdf_id):
     """
     Delete a PDF document.
@@ -736,6 +748,7 @@ def delete_pdf(pdf_id):
 
 
 @pdf_bp.route('/reextract/<pdf_id>', methods=['POST'])
+@limiter.limit("3 per minute") if limiter else lambda f: f
 def reextract_highlights(pdf_id):
     """
     Re-extract highlights from a PDF.
@@ -778,6 +791,7 @@ def reextract_highlights(pdf_id):
 
 
 @pdf_bp.route('/archive', methods=['PUT'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def archive_pdf():
     """
     Archive a PDF document.
@@ -830,6 +844,7 @@ def archive_pdf():
 
 
 @pdf_bp.route('/unarchive', methods=['PUT'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def unarchive_pdf():
     """
     Unarchive a PDF document.
@@ -882,6 +897,7 @@ def unarchive_pdf():
 
 
 @pdf_bp.route('/events', methods=['GET'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
 def sse_events():
     """
     Server-Sent Events endpoint for real-time extraction status updates.
@@ -961,6 +977,7 @@ def sse_events():
 
 
 @pdf_bp.route('/highlight-preview/<pdf_id>/<highlight_id>', methods=['GET'])
+@limiter.limit("60 per minute") if limiter else lambda f: f
 def get_highlight_preview(pdf_id, highlight_id):
     """
     Get preview image URL for a specific highlight.
