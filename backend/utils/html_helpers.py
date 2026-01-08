@@ -166,3 +166,4 @@ def strip_html_tags(html_content):
     return text.strip()
 
 
+

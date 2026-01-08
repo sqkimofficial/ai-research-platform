@@ -212,3 +212,4 @@ def get_redis_service() -> RedisService:
         _redis_service = RedisService()
     return _redis_service
 
+

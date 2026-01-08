@@ -97,3 +97,4 @@ PKCE (Proof Key for Code Exchange) is automatically used by the extension for se
 - If you repackage/republish the extension, the Extension ID may change, requiring Auth0 update
 
 
+

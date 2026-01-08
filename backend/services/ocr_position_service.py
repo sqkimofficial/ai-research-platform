@@ -223,3 +223,4 @@ def get_ocr_position_service():
         _ocr_position_service = OCRPositionService()
     return _ocr_position_service
 
+
