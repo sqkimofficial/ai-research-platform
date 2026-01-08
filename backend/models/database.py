@@ -626,7 +626,7 @@ class HighlightModel:
     """Model for managing web highlights from Chrome extension"""
     
     @staticmethod
-    def save_highlight(user_id, project_id, source_url, page_title, highlight_text, note=None, tags=None, preview_image_url=None, highlight_id=None, page_number=None, color_tag=None):
+    def save_highlight(user_id, project_id, source_url, page_title, highlight_text, note=None, tags=None, preview_image_url=None, highlight_id=None, page_number=None, color_tag=None, timestamp=None):
         """
         Save a highlight. If document for this URL already exists, append to highlights array.
         Otherwise create new document.
@@ -643,6 +643,7 @@ class HighlightModel:
             highlight_id: Optional pre-generated highlight ID (used when uploading to S3 first)
             page_number: Optional page number (for PDF highlights)
             color_tag: Optional color tag (for PDF highlights)
+            timestamp: Optional datetime object (from browser's local time), will use UTC server time if not provided
         
         Returns: highlight_id
         """
@@ -652,10 +653,14 @@ class HighlightModel:
         if not highlight_id:
             highlight_id = str(uuid.uuid4())
         
+        # Use provided timestamp (from browser) or fall back to server UTC time
+        if timestamp is None:
+            timestamp = datetime.utcnow()
+        
         highlight_obj = {
             'highlight_id': highlight_id,
             'text': highlight_text,
-            'timestamp': datetime.utcnow(),
+            'timestamp': timestamp,
             'note': note,
             'tags': tags or [],
             'preview_image_url': preview_image_url  # S3 URL for the preview image
@@ -674,6 +679,9 @@ class HighlightModel:
             'source_url': source_url
         })
         
+        # Use provided timestamp for updated_at if available, otherwise use server time
+        update_timestamp = timestamp if timestamp is not None else datetime.utcnow()
+        
         if existing:
             # Append to existing highlights array
             db.highlights.update_one(
@@ -684,7 +692,7 @@ class HighlightModel:
                 },
                 {
                     '$push': {'highlights': highlight_obj},
-                    '$set': {'updated_at': datetime.utcnow()}
+                    '$set': {'updated_at': update_timestamp}
                 }
             )
         else:
@@ -696,8 +704,8 @@ class HighlightModel:
                 'page_title': page_title,
                 'highlights': [highlight_obj],
                 'archived': False,  # Archive flag (only true when user manually archives)
-                'created_at': datetime.utcnow(),
-                'updated_at': datetime.utcnow()
+                'created_at': update_timestamp,  # Use browser timestamp if available
+                'updated_at': update_timestamp  # Use browser timestamp if available
             }
             db.highlights.insert_one(highlight_doc)
         

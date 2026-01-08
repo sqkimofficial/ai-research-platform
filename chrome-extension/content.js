@@ -7,6 +7,7 @@
 let highlightPopup = null;
 let selectedText = '';
 let selectionTimeout = null;
+let extensionEnabled = true; // Default to enabled
 
 // Initialize the highlight popup
 function createHighlightPopup() {
@@ -16,35 +17,28 @@ function createHighlightPopup() {
   highlightPopup.id = 'ai-research-highlight-popup';
   highlightPopup.innerHTML = `
     <div class="popup-header">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-        <path d="M2 17l10 5 10-5"/>
-        <path d="M2 12l10 5 10-5"/>
-      </svg>
-      <span class="popup-title">Save Highlight</span>
+      <div class="popup-title-wrapper">
+        <img src="${chrome.runtime.getURL('assets/highlight-popup-icon.svg')}" alt="" class="popup-icon" />
+        <span class="popup-title">Save Highlight</span>
+      </div>
       <button class="popup-close" title="Cancel">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M18 6L6 18M6 6l12 12"/>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M12 4L4 12M4 4l8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
     </div>
-    <div class="popup-preview">
-      <span class="preview-label">Selected text:</span>
-      <p class="preview-text"></p>
-    </div>
-    <div class="popup-note">
-      <label for="highlight-note">Add a note (optional):</label>
-      <textarea id="highlight-note" placeholder="Why is this important? What does it relate to?"></textarea>
-    </div>
-    <div class="popup-actions">
-      <button class="btn-cancel">Cancel</button>
+    <div class="popup-content">
+      <p class="popup-project-label">Saving highlight to <span class="project-name-text"></span></p>
+      <div class="popup-preview">
+        <p class="preview-label">Selected text</p>
+        <p class="preview-text"></p>
+      </div>
+      <div class="popup-note">
+        <label for="highlight-note">Add a note (optional)</label>
+        <textarea id="highlight-note" placeholder=""></textarea>
+      </div>
       <button class="btn-save">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-          <polyline points="17 21 17 13 7 13 7 21"/>
-          <polyline points="7 3 7 8 15 8"/>
-        </svg>
-        Save Highlight
+        Save
       </button>
     </div>
   `;
@@ -53,7 +47,6 @@ function createHighlightPopup() {
   
   // Event handlers
   highlightPopup.querySelector('.popup-close').addEventListener('click', hidePopup);
-  highlightPopup.querySelector('.btn-cancel').addEventListener('click', hidePopup);
   highlightPopup.querySelector('.btn-save').addEventListener('click', handleSaveHighlight);
   
   // Prevent clicks inside popup from closing it
@@ -96,27 +89,42 @@ function positionPopup(x, y) {
 }
 
 // Show the popup with selected text preview
-function showPopup() {
+async function showPopup() {
   if (!highlightPopup) createHighlightPopup();
   
-  // Update preview text (truncate if too long)
+  // Update preview text (don't truncate - show full text as per Figma)
   const previewText = highlightPopup.querySelector('.preview-text');
-  const maxPreviewLength = 150;
-  if (selectedText.length > maxPreviewLength) {
-    previewText.textContent = selectedText.substring(0, maxPreviewLength) + '...';
-  } else {
+  if (previewText) {
     previewText.textContent = selectedText;
   }
   
+  // Get project name from config
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getConfig' });
+    if (response && response.projectName) {
+      const projectNameSpan = highlightPopup.querySelector('.project-name-text');
+      if (projectNameSpan) {
+        projectNameSpan.textContent = response.projectName;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to get project name:', error);
+  }
+  
   // Clear previous note
-  highlightPopup.querySelector('#highlight-note').value = '';
+  const noteTextarea = highlightPopup.querySelector('#highlight-note');
+  if (noteTextarea) {
+    noteTextarea.value = '';
+  }
   
   // Show popup
   highlightPopup.style.display = 'block';
   setTimeout(() => highlightPopup.classList.add('visible'), 10);
   
   // Focus the textarea
-  setTimeout(() => highlightPopup.querySelector('#highlight-note').focus(), 100);
+  setTimeout(() => {
+    if (noteTextarea) noteTextarea.focus();
+  }, 100);
 }
 
 // Hide the popup
@@ -130,10 +138,14 @@ function hidePopup() {
   selectedText = '';
 }
 
-// Handle text selection
-function handleSelection() {
-  // Don't show if popup is already visible
-  if (highlightPopup && highlightPopup.style.display === 'block') {
+// Store selection info when text is selected (but don't show popup yet)
+function storeSelection() {
+  // IMPORTANT: This function ONLY stores the selection text.
+  // It NEVER shows the popup. The popup is ONLY shown when user presses cmd+e/ctrl+e.
+  
+  // Don't store if extension is disabled
+  if (!extensionEnabled) {
+    selectedText = '';
     return;
   }
   
@@ -142,12 +154,45 @@ function handleSelection() {
   
   if (text.length > 0 && text.length < 10000) {
     selectedText = text;
-    
-    // Get selection coordinates
+  } else {
+    selectedText = '';
+  }
+  
+  // EXPLICIT: Do not show popup here. Popup will only show on cmd+e/ctrl+e via handleKeyboardShortcut
+}
+
+// Show popup for currently selected text (ONLY called by keyboard shortcut cmd+e/ctrl+e)
+function showPopupForSelection() {
+  // Don't show if extension is disabled
+  if (!extensionEnabled) {
+    return;
+  }
+  
+  // Don't show if popup is already visible
+  if (highlightPopup && highlightPopup.style.display === 'block') {
+    return;
+  }
+  
+  // Check if there's a valid selection
+  const selection = window.getSelection();
+  const text = selection.toString().trim();
+  
+  if (!text || text.length === 0 || text.length >= 10000) {
+    // No valid selection, clear stored text
+    selectedText = '';
+    return;
+  }
+  
+  // Update selectedText to current selection
+  selectedText = text;
+  
+  // Get selection coordinates
+  if (selection.rangeCount > 0) {
     const range = selection.getRangeAt(0);
     const rect = range.getBoundingClientRect();
     
     // Position and show popup
+    // This function should ONLY be called from handleKeyboardShortcut (cmd+e/ctrl+e)
     const x = rect.left + rect.width / 2;
     const y = rect.top;
     
@@ -156,7 +201,7 @@ function handleSelection() {
   }
 }
 
-// Debounced selection handler
+// Handle mouse up (just store selection, don't show popup)
 function onMouseUp(e) {
   // Don't trigger if clicking inside the popup
   if (highlightPopup && highlightPopup.contains(e.target)) {
@@ -168,8 +213,13 @@ function onMouseUp(e) {
     clearTimeout(selectionTimeout);
   }
   
-  // Debounce selection detection
-  selectionTimeout = setTimeout(handleSelection, 150);
+  // Store selection after a short delay (but don't show popup)
+  // IMPORTANT: Only store selection, NEVER show popup here
+  // Popup will only show when user presses cmd+e or ctrl+e
+  selectionTimeout = setTimeout(storeSelection, 50);
+  
+  // Explicitly ensure popup is NOT shown on text selection
+  // Only cmd+e/ctrl+e should trigger the popup
 }
 
 // Handle clicking elsewhere to hide popup
@@ -183,12 +233,31 @@ function onMouseDown(e) {
   if (highlightPopup && highlightPopup.style.display === 'block') {
     hidePopup();
   }
+  
+  // Clear stored selection if clicking outside (user is starting a new interaction)
+  // But only if not currently selecting text
+  if (selectionTimeout) {
+    clearTimeout(selectionTimeout);
+  }
+  // Small delay to allow for new selection
+  setTimeout(() => {
+    const selection = window.getSelection();
+    if (!selection || selection.toString().trim().length === 0) {
+      selectedText = '';
+    }
+  }, 100);
 }
 
 // Save highlight handler
 async function handleSaveHighlight(e) {
   e.preventDefault();
   e.stopPropagation();
+  
+  // Don't save if extension is disabled
+  if (!extensionEnabled) {
+    hidePopup();
+    return;
+  }
   
   console.log('Save button clicked');
   
@@ -353,17 +422,78 @@ function highlightSelectedText() {
   selection.removeAllRanges();
 }
 
+// Load extension enabled state
+async function loadExtensionState() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getConfig' });
+    extensionEnabled = response?.extensionEnabled !== false; // Default to true if not set
+  } catch (error) {
+    console.error('Failed to load extension state:', error);
+    extensionEnabled = true; // Default to enabled on error
+  }
+}
+
+// Handle keyboard shortcut (Cmd+E on Mac, Ctrl+E on Windows/Linux)
+function handleKeyboardShortcut(e) {
+  // Don't trigger if user is typing in an input field, textarea, or contenteditable
+  const activeElement = document.activeElement;
+  if (activeElement && (
+    activeElement.tagName === 'INPUT' ||
+    activeElement.tagName === 'TEXTAREA' ||
+    activeElement.isContentEditable ||
+    activeElement.closest('[contenteditable="true"]')
+  )) {
+    return;
+  }
+  
+  // Check for Cmd+E (Mac) or Ctrl+E (Windows/Linux)
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  const isShortcut = isMac 
+    ? (e.metaKey && e.key === 'e' && !e.ctrlKey && !e.altKey && !e.shiftKey)
+    : (e.ctrlKey && e.key === 'e' && !e.metaKey && !e.altKey && !e.shiftKey);
+  
+  if (isShortcut) {
+    // Don't show popup if extension is disabled
+    if (!extensionEnabled) {
+      return;
+    }
+    
+    // Check if there's a valid selection before preventing default
+    const selection = window.getSelection();
+    const text = selection.toString().trim();
+    
+    if (text && text.length > 0 && text.length < 10000) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Update stored selection to current selection (in case it changed)
+      selectedText = text;
+      
+      // Show popup ONLY when keyboard shortcut is pressed
+      // This is the ONLY place where showPopupForSelection should be called
+      showPopupForSelection();
+    }
+    // If no valid selection, let the browser handle the shortcut normally
+  }
+}
+
 // Initialize
-function init() {
+async function init() {
+  // Load extension state first
+  await loadExtensionState();
+  
   createHighlightPopup();
   document.addEventListener('mouseup', onMouseUp);
   document.addEventListener('mousedown', onMouseDown);
   
-  // Handle keyboard selection (Shift+Arrow keys)
+  // Handle keyboard shortcut (Cmd+E / Ctrl+E)
+  document.addEventListener('keydown', handleKeyboardShortcut);
+  
+  // Handle keyboard selection (Shift+Arrow keys) - store selection but don't show popup
   document.addEventListener('keyup', (e) => {
     if (e.shiftKey && !highlightPopup?.contains(document.activeElement)) {
       if (selectionTimeout) clearTimeout(selectionTimeout);
-      selectionTimeout = setTimeout(handleSelection, 150);
+      selectionTimeout = setTimeout(storeSelection, 150);
     }
   });
   
@@ -371,6 +501,17 @@ function init() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && highlightPopup && highlightPopup.style.display === 'block') {
       hidePopup();
+    }
+  });
+  
+  // Listen for toggle state changes from popup
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'EXTENSION_TOGGLE_CHANGED') {
+      extensionEnabled = message.enabled;
+      // Hide popup if it's visible and extension is disabled
+      if (!extensionEnabled && highlightPopup && highlightPopup.style.display === 'block') {
+        hidePopup();
+      }
     }
   });
 }

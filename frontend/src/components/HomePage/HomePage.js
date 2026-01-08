@@ -99,8 +99,26 @@ const HomePage = ({ onSelectSession, onCreateNewSession }) => {
     }));
   };
 
+  // Helper to parse UTC date string - browser automatically converts to local timezone
+  // Returns null if dateString is invalid or missing (never returns current time)
+  const parseUTCDate = (dateString) => {
+    if (!dateString) return null;
+    let dateStr = String(dateString).trim();
+    if (!dateStr || dateStr === 'undefined' || dateStr === 'null') return null;
+    
+    // If date string doesn't have timezone info and is ISO format, treat as UTC
+    if (dateStr.includes('T') && !dateStr.endsWith('Z') && 
+        !/[+-]\d{2}:\d{2}$/.test(dateStr) && !/[+-]\d{4}$/.test(dateStr)) {
+      dateStr = dateStr + 'Z';
+    }
+    
+    const date = new Date(dateStr);
+    return isNaN(date.getTime()) ? null : date;
+  };
+
   const formatDate = (dateString) => {
-    const date = new Date(dateString);
+    // Use browser's native date/time formatting
+    const date = parseUTCDate(dateString);
     return date.toLocaleString('en-US', {
       year: 'numeric',
       month: 'short',
@@ -111,13 +129,35 @@ const HomePage = ({ onSelectSession, onCreateNewSession }) => {
   };
 
   const formatShortDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    // Use browser's native date/time formatting
+    const date = parseUTCDate(dateString);
+    if (!date) return '—'; // Return placeholder if no valid date
+    
+    const now = new Date();
+    
+    // Get today's date in local timezone (browser handles this automatically)
+    const todayYear = now.getFullYear();
+    const todayMonth = now.getMonth();
+    const todayDay = now.getDate();
+    
+    // Get item's date in local timezone (browser handles this automatically)
+    const itemYear = date.getFullYear();
+    const itemMonth = date.getMonth();
+    const itemDay = date.getDate();
+    
+    // If it's not today, show date in format "7 Jan, 2026"
+    if (itemYear !== todayYear || itemMonth !== todayMonth || itemDay !== todayDay) {
+      // Format as "7 Jan, 2026" using browser's local timezone values
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const day = date.getDate(); // Browser automatically converts to local timezone
+      const month = months[date.getMonth()]; // Browser automatically converts to local timezone
+      const year = date.getFullYear(); // Browser automatically converts to local timezone
+      return `${day} ${month}, ${year}`;
+    }
+    
+    // Otherwise show time using browser's native time formatting
+    const options = { hour: 'numeric', minute: '2-digit', hour12: true };
+    return date.toLocaleTimeString('en-US', options);
   };
 
   const truncateUrl = (url, maxLength = 60) => {

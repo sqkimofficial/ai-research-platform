@@ -1341,42 +1341,88 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
     return `${month} ${getOrdinal(day)} ${year} ${hour12}:${minutes.toString().padStart(2, '0')}${ampm}`;
   };
 
-  // Format time for cards (e.g., "Last Updated 9:15pm")
-  const formatLastUpdatedTime = (dateString) => {
-    const date = new Date(dateString);
-    // Use browser's timezone
-    const hours = date.getHours();
-    const minutes = date.getMinutes();
-    const ampm = hours >= 12 ? 'pm' : 'am';
-    const hour12 = hours % 12 || 12;
+  // Helper to parse UTC date string - browser automatically converts to local timezone
+  // Returns null if dateString is invalid or missing (never returns current time)
+  const parseUTCDate = (dateString) => {
+    if (!dateString) return null;
+    let dateStr = String(dateString).trim();
+    if (!dateStr || dateStr === 'undefined' || dateStr === 'null') return null;
     
-    return `Last Updated ${hour12}:${minutes.toString().padStart(2, '0')}${ampm}`;
-  };
-
-  // Format date for table (e.g., "30 Jan, 2025" or "9:15pm")
-  const formatTableDate = (dateString) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const itemDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    // Backend sends dates as ISO format without timezone (e.g., "2026-01-07T20:00:00.123456")
+    // We MUST treat these as UTC, otherwise JavaScript will parse them as local time
+    // Check if date string already has timezone info
+    const hasTimezone = dateStr.endsWith('Z') || 
+                       /[+-]\d{2}:\d{2}$/.test(dateStr) || 
+                       /[+-]\d{4}$/.test(dateStr);
     
-    // If same day, show time
-    if (itemDate.getTime() === today.getTime()) {
-      const hours = date.getHours();
-      const minutes = date.getMinutes();
-      const ampm = hours >= 12 ? 'pm' : 'am';
-      const hour12 = hours % 12 || 12;
-      return `${hour12}:${minutes.toString().padStart(2, '0')}${ampm}`;
+    // If it's an ISO format string (contains 'T') and doesn't have timezone, treat as UTC
+    if (dateStr.includes('T') && !hasTimezone) {
+      // Remove any trailing microseconds if present and add 'Z' to indicate UTC
+      // Handle both formats: "2026-01-07T20:00:00" and "2026-01-07T20:00:00.123456"
+      const withoutMs = dateStr.split('.')[0]; // Remove microseconds if present
+      dateStr = withoutMs + 'Z';
     }
     
-    // Otherwise show date
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const day = date.getDate();
-    const month = months[date.getMonth()];
-    const year = date.getFullYear();
-    return `${day} ${month}, ${year}`;
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) {
+      console.warn('Failed to parse date:', dateString);
+      return null;
+    }
+    return date;
   };
 
+  // Format time for cards using browser's native date formatting
+  const formatLastUpdatedTime = (dateString) => {
+    const date = parseUTCDate(dateString);
+    if (!date) return '—'; // Return placeholder if no valid date
+    
+    const now = new Date();
+    
+    // Get today's date in local timezone (browser handles this automatically)
+    const todayYear = now.getFullYear();
+    const todayMonth = now.getMonth();
+    const todayDay = now.getDate();
+    
+    // Get item's date in local timezone (browser handles this automatically)
+    const itemYear = date.getFullYear();
+    const itemMonth = date.getMonth();
+    const itemDay = date.getDate();
+    
+    // If it's not today, show date in format "7 Jan, 2026"
+    if (itemYear !== todayYear || itemMonth !== todayMonth || itemDay !== todayDay) {
+      // Format as "7 Jan, 2026" using browser's local timezone values
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const day = date.getDate(); // Browser automatically converts to local timezone
+      const month = months[date.getMonth()]; // Browser automatically converts to local timezone
+      const year = date.getFullYear(); // Browser automatically converts to local timezone
+      return `${day} ${month}, ${year}`;
+    }
+    
+    // Otherwise show time using browser's native time formatting
+    const options = { hour: 'numeric', minute: '2-digit', hour12: true };
+    const timeStr = date.toLocaleTimeString('en-US', options);
+    return `Last Updated ${timeStr}`;
+  };
+
+  // Format date for table - always show both date and time: "8:88 am, 7 Jan, 2026"
+  const formatTableDate = (dateString) => {
+    if (!dateString) return '—'; // Return placeholder if no valid date
+    
+    const date = parseUTCDate(dateString);
+    if (!date) return '—'; // Return placeholder if parsing failed
+    
+    // Format time using browser's native time formatting
+    const timeOptions = { hour: 'numeric', minute: '2-digit', hour12: true };
+    const timeStr = date.toLocaleTimeString('en-US', timeOptions).toLowerCase();
+    
+    // Format date: "7 Jan, 2026"
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const day = date.getDate(); // Browser automatically converts to local timezone
+    const month = months[date.getMonth()]; // Browser automatically converts to local timezone
+    const year = date.getFullYear(); // Browser automatically converts to local timezone
+    
+    return `${timeStr}, ${day} ${month}, ${year}`;
+  };
   // Handle table scroll for lazy loading
   const handleTableScroll = useCallback((e) => {
     const container = e.target;
@@ -3196,7 +3242,7 @@ const DocumentPanel = ({ refreshTrigger, selectedProjectId: propSelectedProjectI
                                     </td>
                                     <td className="highlights-table-cell highlights-table-date-cell">
                                       <div>
-                                        <span>{formatTableDate(data.updated_at || data.created_at)}</span>
+                                        <span>{formatTableDate(data.updated_at)}</span>
                                         <div style={{ position: 'relative' }}>
                                           <button
                                             className="source-menu-button"

@@ -174,6 +174,7 @@ def save_highlight():
     note = data.get('note')
     tags = data.get('tags', [])
     preview_data = data.get('preview_data')
+    timestamp_str = data.get('timestamp')  # Get timestamp from browser's local time
     
     # Log auth info for Chrome extension
     log_auth_info(project_id)
@@ -220,6 +221,26 @@ def save_highlight():
     else:
         print("[HIGHLIGHT] No preview_data received")
     
+    # Parse timestamp if provided (from browser's local time as ISO string)
+    timestamp = None
+    if timestamp_str:
+        try:
+            from datetime import datetime
+            # Parse ISO string from browser (toISOString() returns UTC format like "2026-01-07T20:00:00.000Z")
+            if timestamp_str.endswith('Z'):
+                # Replace Z with +00:00 for fromisoformat, then convert to naive UTC datetime
+                timestamp_aware = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                timestamp = timestamp_aware.replace(tzinfo=None)
+            else:
+                # Already in ISO format without Z, parse directly
+                timestamp = datetime.fromisoformat(timestamp_str)
+                if timestamp.tzinfo is not None:
+                    # Convert timezone-aware to naive UTC
+                    timestamp = timestamp.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+        except (ValueError, AttributeError, TypeError) as e:
+            print(f"[HIGHLIGHT] Failed to parse timestamp '{timestamp_str}': {e}")
+            # Will fall back to server time in save_highlight
+    
     # Save highlight with S3 URL
     saved_highlight_id = HighlightModel.save_highlight(
         user_id=user_id,
@@ -230,7 +251,8 @@ def save_highlight():
         note=note,
         tags=tags,
         preview_image_url=preview_image_url,
-        highlight_id=highlight_id  # Pass the pre-generated ID
+        highlight_id=highlight_id,  # Pass the pre-generated ID
+        timestamp=timestamp  # Pass timestamp from browser if available
     )
     
     # Invalidate cache
@@ -349,6 +371,12 @@ def get_highlights():
         if '_id' in h_doc:
             h_doc['_id'] = str(h_doc['_id'])
         
+        # Explicitly serialize datetime fields to ISO format with 'Z' suffix for UTC
+        if 'created_at' in h_doc and h_doc['created_at']:
+            h_doc['created_at'] = h_doc['created_at'].isoformat() + 'Z'
+        if 'updated_at' in h_doc and h_doc['updated_at']:
+            h_doc['updated_at'] = h_doc['updated_at'].isoformat() + 'Z'
+        
         # Limit highlights per document if limit is specified (for initial load)
         if limit and 'highlights' in h_doc and h_doc['highlights']:
             # Sort highlights by timestamp descending (most recent first)
@@ -361,11 +389,13 @@ def get_highlights():
             # Take only top N highlights per source
             h_doc['highlights'] = sorted_highlights[:highlights_per_source]
         
-        # Fix preview_image_url in nested highlights array
+        # Fix preview_image_url and serialize timestamps in nested highlights array
         if 'highlights' in h_doc:
             for h in h_doc['highlights']:
                 if 'preview_image_url' in h and h['preview_image_url']:
                     h['preview_image_url'] = S3Service.fix_s3_url_region(h['preview_image_url'])
+                if 'timestamp' in h and h['timestamp']:
+                    h['timestamp'] = h['timestamp'].isoformat() + 'Z'
     
     response_data = {'highlights': highlights}
     

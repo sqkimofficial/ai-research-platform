@@ -71,16 +71,54 @@ const AddNewTabView = ({
   });
   const [failedFavicons, setFailedFavicons] = useState(new Set());
   
-  // Format time for cards (e.g., "Last Updated 9:15pm")
-  const formatLastUpdatedTime = (dateString) => {
-    const date = new Date(dateString);
-    // Use browser's timezone
-    const hours = date.getHours();
-    const minutes = date.getMinutes();
-    const ampm = hours >= 12 ? 'pm' : 'am';
-    const hour12 = hours % 12 || 12;
+  // Helper to parse UTC date string - browser automatically converts to local timezone
+  // Returns null if dateString is invalid or missing (never returns current time)
+  const parseUTCDate = (dateString) => {
+    if (!dateString) return null;
+    let dateStr = String(dateString).trim();
+    if (!dateStr || dateStr === 'undefined' || dateStr === 'null') return null;
     
-    return `Last Updated ${hour12}:${minutes.toString().padStart(2, '0')}${ampm}`;
+    // If date string doesn't have timezone info and is ISO format, treat as UTC
+    if (dateStr.includes('T') && !dateStr.endsWith('Z') && 
+        !/[+-]\d{2}:\d{2}$/.test(dateStr) && !/[+-]\d{4}$/.test(dateStr)) {
+      dateStr = dateStr + 'Z';
+    }
+    
+    const date = new Date(dateStr);
+    return isNaN(date.getTime()) ? null : date;
+  };
+
+  // Format time for cards using browser's native date formatting
+  const formatLastUpdatedTime = (dateString) => {
+    const date = parseUTCDate(dateString);
+    if (!date) return '—'; // Return placeholder if no valid date
+    
+    const now = new Date();
+    
+    // Get today's date in local timezone (browser handles this automatically)
+    const todayYear = now.getFullYear();
+    const todayMonth = now.getMonth();
+    const todayDay = now.getDate();
+    
+    // Get item's date in local timezone (browser handles this automatically)
+    const itemYear = date.getFullYear();
+    const itemMonth = date.getMonth();
+    const itemDay = date.getDate();
+    
+    // If it's not today, show date in format "7 Jan, 2026"
+    if (itemYear !== todayYear || itemMonth !== todayMonth || itemDay !== todayDay) {
+      // Format as "7 Jan, 2026" using browser's local timezone values
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const day = date.getDate(); // Browser automatically converts to local timezone
+      const month = months[date.getMonth()]; // Browser automatically converts to local timezone
+      const year = date.getFullYear(); // Browser automatically converts to local timezone
+      return `${day} ${month}, ${year}`;
+    }
+    
+    // Otherwise show time using browser's native time formatting
+    const options = { hour: 'numeric', minute: '2-digit', hour12: true };
+    const timeStr = date.toLocaleTimeString('en-US', options);
+    return `Last Updated ${timeStr}`;
   };
 
   // Extract domain name from URL

@@ -3,153 +3,239 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Research Highlights</title>
+  <title>Stitch - AI Research Highlights</title>
   <link rel="stylesheet" href="popup.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
 </head>
 <body>
   <div class="container">
     <!-- Auth View (Login/Signup) -->
     <div id="auth-view" class="view">
-      <header>
-        <div class="logo">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-            <path d="M2 17l10 5 10-5"/>
-            <path d="M2 12l10 5 10-5"/>
-          </svg>
-          <h1>AI Research Highlights</h1>
+      <!-- Email Login View -->
+      <div id="email-view" class="auth-form-view active">
+        <div class="auth-top-section">
+          <div class="auth-logo-wrapper">
+            <img src="assets/stitch-logo.svg" alt="Stitch" class="auth-logo" />
+          </div>
         </div>
-      </header>
 
-      <main>
-        <!-- Login Form -->
-        <div id="login-form" class="auth-form active">
-          <div class="form-group">
-            <label for="login-email">Email</label>
-            <input type="email" id="login-email" placeholder="your@email.com" autocomplete="email">
+        <div class="auth-main-section">
+          <div class="auth-welcome-section">
+            <h1 class="auth-welcome-title">
+              <span>Welcome </span>
+              <span class="lowercase">to</span>
+              <span> Stitch</span>
+            </h1>
+            <p class="auth-subtitle">Sign In to access your dashboard</p>
           </div>
-          <div class="form-group">
-            <label for="login-password">Password</label>
-            <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password">
-          </div>
-          <button id="login-btn" class="btn btn-primary">Sign In</button>
-          <div class="social-login">
-            <div class="divider">
-              <span>or continue with</span>
-            </div>
-            <div class="social-buttons">
-              <button id="google-login" class="btn-social">
-                <svg width="18" height="18" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                </svg>
-                Google
+
+          <div class="auth-form-group-wrapper">
+            <div class="auth-social-buttons-container">
+              <button id="google-login" class="auth-social-button">
+                <img src="assets/google-icon.svg" alt="" class="auth-social-icon" />
+                <span>Continue with Google</span>
               </button>
             </div>
+
+            <div class="auth-separator">
+              <div class="auth-separator-line"></div>
+              <span class="auth-separator-text">or</span>
+              <div class="auth-separator-line"></div>
+            </div>
+
+            <div class="auth-form-container">
+              <form id="email-form" class="auth-form-wrapper">
+                <div id="email-error" class="auth-error-text hidden"></div>
+                <div class="auth-form-group">
+                  <label for="login-email" class="auth-form-label">Email ID</label>
+                  <input
+                    type="email"
+                    id="login-email"
+                    placeholder=""
+                    autocomplete="email"
+                    class="auth-input"
+                  />
+                </div>
+                <button type="submit" id="email-submit-btn" class="auth-sign-in-button">
+                  Sign In
+                </button>
+              </form>
+            </div>
           </div>
-          <p class="signup-hint">
-            Don't have an account? <a href="#" id="signup-link">Sign up on the web app</a>
-          </p>
+
+          <div class="auth-footer">
+            <span class="auth-footer-text">Don't have an account? </span>
+            <a href="#" id="signup-link" class="auth-create-account-link">
+              Create Account
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Password Login View -->
+      <div id="password-view" class="auth-form-view hidden">
+        <div class="auth-top-section">
+          <div class="auth-logo-wrapper">
+            <img src="assets/stitch-logo.svg" alt="Stitch" class="auth-logo" />
+          </div>
         </div>
 
-        <!-- Messages -->
-        <div id="auth-message" class="message hidden"></div>
-      </main>
+        <div class="auth-main-section">
+          <div class="auth-welcome-section password-welcome">
+            <h1 class="auth-welcome-title" style="text-transform: capitalize;">
+              Enter your password
+            </h1>
+            <div class="auth-email-display">
+              <p class="auth-subtitle">
+                Signing in as <span id="email-display">johndoe@mail.com</span>
+              </p>
+              <a href="#" id="change-email-link" class="auth-change-email-link">
+                Use different email
+              </a>
+            </div>
+          </div>
 
-      <footer>
-        <p>Save highlights from any webpage</p>
-        <p style="margin-top: 8px; font-size: 11px; color: #64748b;">
-          New user? Sign up at <a href="http://localhost:3000/register" target="_blank" style="color: #8b5cf6;">localhost:3000/register</a>
-        </p>
-      </footer>
+          <div class="password-form-actions-wrapper">
+            <div class="auth-form-container password-form-container">
+              <form id="password-form" class="auth-form-wrapper">
+                <div id="password-error" class="auth-error-text hidden"></div>
+                <div class="auth-form-group">
+                  <div class="auth-label-row">
+                    <label for="login-password" class="auth-form-label">Password</label>
+                    <a href="#" id="forgot-password-link" class="auth-forgot-link">
+                      Forgot Password?
+                    </a>
+                  </div>
+                  <input
+                    type="password"
+                    id="login-password"
+                    placeholder=""
+                    autocomplete="current-password"
+                    class="auth-input"
+                  />
+                </div>
+              </form>
+            </div>
+
+            <div class="auth-button-footer-wrapper">
+              <button type="submit" id="password-submit-btn" class="auth-sign-in-button">
+                Sign In
+              </button>
+              <div class="auth-footer">
+                <span class="auth-footer-text">Don't have an account? </span>
+                <a href="#" id="signup-link-password" class="auth-create-account-link">
+                  Create Account
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div id="auth-message" class="message hidden"></div>
     </div>
 
     <!-- Main View (After Auth) -->
     <div id="main-view" class="view hidden">
-      <header>
-        <div class="logo">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-            <path d="M2 17l10 5 10-5"/>
-            <path d="M2 12l10 5 10-5"/>
-          </svg>
-          <h1>AI Research Highlights</h1>
+      <div class="main-header">
+        <div class="main-logo-wrapper">
+          <img src="assets/stitch-logo.svg" alt="Stitch" class="main-logo" />
         </div>
-        <div id="status-indicator" class="status connected">
-          <span class="dot"></span>
-          <span class="text">Connected</span>
-        </div>
-      </header>
-
-      <main>
-        <!-- User Info -->
-        <div class="section user-info">
-          <div class="user-details">
-            <span id="user-email" class="user-email"></span>
-            <button id="logout-btn" class="btn-logout" title="Sign Out">Sign Out</button>
-          </div>
-        </div>
-
-        <!-- Project Selector -->
-        <div class="section">
-          <h2>Active Project</h2>
-          <div class="form-group">
-            <label for="project-select">Select Project</label>
-            <select id="project-select" class="select">
-              <option value="">Loading projects...</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- API URL Config (Advanced) -->
-        <div class="section collapsible">
-          <button class="section-toggle" id="config-toggle">
-            <span>Advanced Settings</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M6 9l6 6 6-6"/>
-            </svg>
+        <div class="account-dropdown-container">
+          <button id="account-button" class="account-button">
+            <div class="account-avatar">
+              <span id="account-initial" class="account-initial">A</span>
+            </div>
           </button>
-          <div class="collapsible-content hidden" id="config-content">
-            <div class="form-group">
-              <label for="api-url">API URL</label>
-              <input type="text" id="api-url" placeholder="http://localhost:5001">
+          <div id="account-dropdown" class="account-dropdown hidden">
+            <button class="dropdown-item" id="open-app-btn">Open app</button>
+            <button class="dropdown-item" id="disable-highlights-btn">Disable Highlights</button>
+            <button class="dropdown-item logout-item" id="logout-btn">Logout</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="main-content">
+        <div id="home-content" class="home-content">
+          <div class="welcome-card">
+            <div class="welcome-card-header">
+              <h1 class="welcome-title">
+                <span>Welcome </span>
+                <span class="lowercase">to</span>
+                <span> Stitch</span>
+              </h1>
+              <p class="welcome-subtitle">
+                <span class="bold-text">Select any text  and press "cmd + e"</span>
+                <span> on any website to highlight it</span>
+              </p>
             </div>
-            <div class="form-group">
-              <label>Extension Redirect URI (for Auth0)</label>
-              <div style="display: flex; gap: 8px; align-items: center;">
-                <input type="text" id="redirect-uri" readonly style="flex: 1; background: rgba(255,255,255,0.03); cursor: not-allowed;">
-                <button id="copy-redirect-uri" class="btn-small" style="flex: none;" title="Copy to clipboard">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            <div class="project-selector-section">
+              <label class="project-label">Select project to save highlights</label>
+              <div class="project-selector-wrapper">
+                <div id="project-selector" class="project-selector">
+                  <div class="project-selector-content">
+                    <div class="project-color" id="project-color"></div>
+                    <span id="project-name" class="project-name">Project_Name</span>
+                    <input type="text" id="project-search" class="project-search-input hidden" placeholder="Search projects..." autocomplete="off">
+                  </div>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" class="project-arrow">
+                    <path d="M5 7.5L10 12.5L15 7.5" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
-                </button>
+                </div>
+                <div id="project-dropdown" class="project-dropdown hidden">
+                  <div id="project-dropdown-list" class="project-dropdown-list">
+                    <!-- Project items will be inserted here -->
+                  </div>
+                </div>
               </div>
-              <small style="display: block; margin-top: 4px; color: #64748b; font-size: 11px;">
-                Add this URL to Auth0 Allowed Callback URLs
-              </small>
+              <select id="project-select" class="project-select-hidden">
+                <option value="">Loading projects...</option>
+              </select>
             </div>
           </div>
         </div>
 
-        <!-- Queue Status -->
-        <div class="section queue-section">
-          <div class="queue-header">
-            <h2>Pending Highlights</h2>
-            <span id="queue-count" class="badge">0</span>
+        <div id="highlights-disabled-content" class="highlights-disabled-content hidden">
+          <div class="welcome-card disabled-card">
+            <div class="welcome-card-header">
+              <h1 class="welcome-title">
+                <span>Welcome </span>
+                <span class="lowercase">to</span>
+                <span> Stitch</span>
+              </h1>
+              <p class="welcome-subtitle">
+                <span class="bold-text">Select any text  and press "cmd + e"</span>
+                <span> on any website to highlight it</span>
+              </p>
+            </div>
+            <div class="project-selector-section">
+              <label class="project-label">Select project to save highlights</label>
+              <div id="project-selector-disabled" class="project-selector">
+                <div class="project-selector-content">
+                  <div class="project-color" id="project-color-disabled"></div>
+                  <span id="project-name-disabled" class="project-name">Project_Name</span>
+                </div>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" class="project-arrow">
+                  <path d="M5 7.5L10 12.5L15 7.5" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </div>
           </div>
-          <button id="sync-queue" class="btn btn-small">Sync Now</button>
+          <div class="enable-highlights-overlay">
+            <span class="enable-text">Enable Highlights</span>
+            <label class="toggle-switch-large">
+              <input type="checkbox" id="extension-toggle-overlay">
+              <span class="toggle-slider-large"></span>
+            </label>
+          </div>
         </div>
 
         <!-- Messages -->
         <div id="message" class="message hidden"></div>
-      </main>
-
-      <footer>
-        <p>Select text on any page to save highlights</p>
-      </footer>
+      </div>
     </div>
   </div>
 

@@ -10,7 +10,8 @@ importScripts('auth.js');
 const DEFAULT_CONFIG = {
   apiUrl: 'http://localhost:5001',
   token: null,
-  projectId: null
+  projectId: null,
+  extensionEnabled: true
 };
 
 // Queue for offline highlights
@@ -18,11 +19,12 @@ let highlightQueue = [];
 
 // Get current configuration
 async function getConfig() {
-  const result = await chrome.storage.local.get(['apiUrl', 'token', 'projectId']);
+  const result = await chrome.storage.local.get(['apiUrl', 'token', 'projectId', 'extensionEnabled']);
   return {
     apiUrl: result.apiUrl || DEFAULT_CONFIG.apiUrl,
     token: result.token || DEFAULT_CONFIG.token,
-    projectId: result.projectId || DEFAULT_CONFIG.projectId
+    projectId: result.projectId || DEFAULT_CONFIG.projectId,
+    extensionEnabled: result.extensionEnabled !== undefined ? result.extensionEnabled : DEFAULT_CONFIG.extensionEnabled
   };
 }
 
@@ -105,7 +107,9 @@ async function saveHighlightToAPI(highlightData, config) {
       note: highlightData.note || null,
       tags: highlightData.tags || [],
       // NEW: Include preview data for screenshot cropping on backend
-      preview_data: highlightData.preview_data || null
+      preview_data: highlightData.preview_data || null,
+      // Include timestamp from browser's local time
+      timestamp: highlightData.timestamp || null
     })
   });
   
@@ -175,7 +179,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   
   if (message.action === 'getConfig') {
-    getConfig().then(sendResponse);
+    getConfig().then(async (config) => {
+      // Get project name from storage
+      const result = await chrome.storage.local.get(['projectName']);
+      if (result.projectName) {
+        config.projectName = result.projectName;
+      }
+      sendResponse(config);
+    });
     return true;
   }
   
