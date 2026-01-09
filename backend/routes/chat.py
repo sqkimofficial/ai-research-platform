@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from models.database import ChatSessionModel, Database, ProjectModel, ResearchDocumentModel
 from services.perplexity_service import PerplexityService
+from services.agentic_openai_service import AgenticOpenAIService
 from services.vector_service import VectorService
 from services.redis_service import get_redis_service
 from utils.auth import get_user_id_from_token, log_auth_info
@@ -17,7 +18,8 @@ import re
 
 logger = get_logger(__name__)
 chat_bp = Blueprint('chat', __name__)
-perplexity_service = PerplexityService()  # Used for content generation
+perplexity_service = PerplexityService()  # Used for content generation (legacy, will be replaced)
+agentic_openai_service = AgenticOpenAIService()  # Phase 0: Basic OpenAI agent
 vector_service = VectorService()
 
 # Get rate limiter instance
@@ -691,10 +693,15 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         
         logger.debug("=" * 80)
         
+        # Phase 0: Use OpenAI Agent SDK instead of Perplexity
         try:
-            ai_response = perplexity_service.chat_completion(alternated_messages)
+            logger.debug("Calling OpenAI Agent SDK (Phase 0 - basic agent)")
+            ai_response = agentic_openai_service.chat_completion_agentic_sync(
+                alternated_messages,
+                system_message=system_message
+            )
         except Exception as e:
-            log_error(logger, e, "Error calling Perplexity API")
+            log_error(logger, e, "Error calling OpenAI Agent SDK")
             raise
         
         # Get response content
@@ -709,7 +716,7 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 "new_types": []
             })
         
-        # Parse JSON response
+        # Parse JSON response (using perplexity_service parser for now - compatible format)
         parsed_response = perplexity_service.parse_json_response(ai_response_content)
         
         # Log parsed response (without raw content)
