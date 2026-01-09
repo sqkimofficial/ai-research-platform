@@ -411,7 +411,7 @@ def get_session():
 
 @chat_bp.route('/message', methods=['POST'])
 @limiter.limit("10 per minute, 100 per hour") if limiter else lambda f: f
-def send_message():
+async def send_message():
     """Send a message and get AI response"""
     try:
         user_id = get_user_id_from_token()
@@ -518,28 +518,34 @@ NOTE: Only relevant document sections are shown above based on semantic similari
             # No existing document content
             document_context_section = "The document is currently empty - the user is starting a new research paper."
         
-        # Write mode system prompt - for generating document content
-        system_message_write = f"""You are a research assistant helping users write research papers.
+        # Load simplified prompts from Phase 0
+        prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'prompts')
+        prompts_file = os.path.join(prompts_dir, 'SIMPLIFIED_PROMPTS_PHASE_0.md')
+        
+        if os.path.exists(prompts_file):
+            with open(prompts_file, 'r', encoding='utf-8') as f:
+                prompts_content = f.read()
+            
+            # Extract write and research mode prompts
+            if '## Write Mode Prompt' in prompts_content and '## Research Mode Prompt' in prompts_content:
+                write_section = prompts_content.split('## Write Mode Prompt')[1].split('## Research Mode Prompt')[0]
+                research_section = prompts_content.split('## Research Mode Prompt')[1]
+                
+                # Replace document_context_section placeholder
+                system_message_write = write_section.replace('{document_context_section}', document_context_section).strip()
+                system_message_research = research_section.replace('{document_context_section}', document_context_section).strip()
+            else:
+                # Fallback to inline prompts if file format is unexpected
+                logger.warning("Could not parse prompts file, using fallback prompts")
+                system_message_write = f"""You are a research assistant helping users write research papers.
 
 MODE: WRITE (Content Generation)
 - Generate well-structured research content in Markdown format when asked
-- The user will insert content where they want - you just generate quality content
-- If the user asks a question without requesting content, respond conversationally with document_content empty
+- Use search_vector_database when user asks about their documents
+- Use perplexity_research when user asks questions requiring current web information
+- For simple tasks, respond directly without calling tools
 
 {document_context_section}
-
-MARKDOWN FORMATTING:
-- Headers: # title, ## section, ### subsection
-- Lists: - bullet or 1. numbered
-- Tables: | Col1 | Col2 |\\n|------|------|\\n| val | val |
-- Code: ```language\\ncode\\n```
-- Bold: **text**, Italic: *text*
-
-RULES:
-- When adding to existing sections, only include NEW content (no headers, no existing text)
-- Keep chat message brief and conversational
-- Put sources in "sources" array, NOT in document_content
-- Escape newlines as \\n in JSON strings
 
 Always respond in JSON format:
 {{
@@ -548,22 +554,14 @@ Always respond in JSON format:
   "sources": ["array of URLs/citations"],
   "new_types": []
 }}"""
-
-        system_message_research = f"""You are a research assistant helping the user explore ideas and refine what they want to write.
+                system_message_research = f"""You are a research assistant helping the user explore ideas.
 
 MODE: RESEARCH (Conversation Only)
-- Your role is to have a conversation with the user - answer questions, discuss ideas, help them think through their research
-- NEVER generate document content - document_content must ALWAYS be an empty string ""
-- Focus on understanding what the user wants, providing research insights, and helping them plan their writing
-- When the user is ready to write actual content, they will switch to Write mode
+- NEVER generate document content - document_content must ALWAYS be empty string ""
+- Use search_vector_database when user asks about their documents
+- Use perplexity_research when user asks questions requiring current web information
+- For simple tasks, respond directly without calling tools
 
-RESPONSE FORMAT:
-- Keep responses concise and conversational
-- Use plain text with simple formatting (bullets with "- ", bold with **text**)
-- Separate paragraphs with blank lines
-- ALWAYS include sources (URLs/DOIs) in the "sources" array for any facts or claims
-
-Context from the user's document (if any):
 {document_context_section}
 
 Always respond in JSON format:
@@ -572,9 +570,12 @@ Always respond in JSON format:
   "document_content": "",
   "sources": ["array of source URLs or citations"],
   "new_types": []
-}}
-
-CRITICAL: document_content must ALWAYS be empty string "" in research mode. This mode is for conversation only."""
+}}"""
+        else:
+            # Fallback if prompts file doesn't exist
+            logger.warning(f"Prompts file not found at {prompts_file}, using fallback prompts")
+            system_message_write = f"""You are a research assistant. Use tools when needed. {document_context_section}"""
+            system_message_research = f"""You are a research assistant. Conversation only. document_content must be empty. {document_context_section}"""
 
         system_message = system_message_write if mode == 'write' else system_message_research
         
@@ -646,22 +647,9 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 'content': content
             })
         
-        # Perplexity requires strict alternation between user/assistant messages
-        # Merge consecutive messages of the same role to ensure alternation
-        alternated_messages = []
-        for msg in openai_messages:
-            if msg['role'] == 'system':
-                # System messages go first, as-is
-                alternated_messages.append(msg)
-            elif not alternated_messages or alternated_messages[-1]['role'] == 'system':
-                # First non-system message
-                alternated_messages.append(msg)
-            elif alternated_messages[-1]['role'] == msg['role']:
-                # Same role as previous - merge content
-                alternated_messages[-1]['content'] += '\n\n' + msg['content']
-            else:
-                # Different role - add normally
-                alternated_messages.append(msg)
+        # OpenAI Agent SDK doesn't require message alternation like Perplexity
+        # Use messages as-is (OpenAI handles conversation history properly)
+        alternated_messages = openai_messages
         
         # Stage 1 AI - Perplexity (content generation with web search)
         # Log highlights/attachments before sending to Perplexity API
@@ -693,12 +681,13 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         
         logger.debug("=" * 80)
         
-        # Phase 0: Use OpenAI Agent SDK instead of Perplexity
+        # Phase 0: Use OpenAI Agent SDK with function tools
         try:
-            logger.debug("Calling OpenAI Agent SDK (Phase 0 - basic agent)")
-            ai_response = agentic_openai_service.chat_completion_agentic_sync(
+            logger.debug("Calling OpenAI Agent SDK (Phase 0 - with function tools)")
+            ai_response = await agentic_openai_service.chat_completion_agentic(
                 alternated_messages,
-                system_message=system_message
+                system_message=system_message,
+                session_id=session_id
             )
         except Exception as e:
             log_error(logger, e, "Error calling OpenAI Agent SDK")
