@@ -151,8 +151,6 @@
             </div>
           </button>
           <div id="account-dropdown" class="account-dropdown hidden">
-            <button class="dropdown-item" id="open-app-btn">Open app</button>
-            <button class="dropdown-item" id="disable-highlights-btn">Disable Highlights</button>
             <button class="dropdown-item logout-item" id="logout-btn">Logout</button>
           </div>
         </div>
@@ -172,65 +170,10 @@
                 <span> on any website to highlight it</span>
               </p>
             </div>
-            <div class="project-selector-section">
-              <label class="project-label">Select project to save highlights</label>
-              <div class="project-selector-wrapper">
-                <div id="project-selector" class="project-selector">
-                  <div class="project-selector-content">
-                    <div class="project-color" id="project-color"></div>
-                    <span id="project-name" class="project-name">Project_Name</span>
-                    <input type="text" id="project-search" class="project-search-input hidden" placeholder="Search projects..." autocomplete="off">
-                  </div>
-                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" class="project-arrow">
-                    <path d="M5 7.5L10 12.5L15 7.5" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </div>
-                <div id="project-dropdown" class="project-dropdown hidden">
-                  <div id="project-dropdown-list" class="project-dropdown-list">
-                    <!-- Project items will be inserted here -->
-                  </div>
-                </div>
-              </div>
-              <select id="project-select" class="project-select-hidden">
-                <option value="">Loading projects...</option>
-              </select>
-            </div>
           </div>
-        </div>
-
-        <div id="highlights-disabled-content" class="highlights-disabled-content hidden">
-          <div class="welcome-card disabled-card">
-            <div class="welcome-card-header">
-              <h1 class="welcome-title">
-                <span>Welcome </span>
-                <span class="lowercase">to</span>
-                <span> Stitch</span>
-              </h1>
-              <p class="welcome-subtitle">
-                <span class="bold-text">Select any text  and press "cmd + e"</span>
-                <span> on any website to highlight it</span>
-              </p>
-            </div>
-            <div class="project-selector-section">
-              <label class="project-label">Select project to save highlights</label>
-              <div id="project-selector-disabled" class="project-selector">
-                <div class="project-selector-content">
-                  <div class="project-color" id="project-color-disabled"></div>
-                  <span id="project-name-disabled" class="project-name">Project_Name</span>
-                </div>
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" class="project-arrow">
-                  <path d="M5 7.5L10 12.5L15 7.5" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </div>
-            </div>
-          </div>
-          <div class="enable-highlights-overlay">
-            <span class="enable-text">Enable Highlights</span>
-            <label class="toggle-switch-large">
-              <input type="checkbox" id="extension-toggle-overlay">
-              <span class="toggle-slider-large"></span>
-            </label>
-          </div>
+          <button id="open-app-button" class="open-app-button">
+            Open app
+          </button>
         </div>
 
         <!-- Messages -->

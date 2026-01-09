@@ -90,6 +90,16 @@
   padding: 16px;
 }
 
+/* Project selector section */
+#ai-research-highlight-popup .popup-project-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  width: 100%;
+}
+
 #ai-research-highlight-popup .popup-project-label {
   font-family: 'DM Sans', sans-serif;
   font-weight: 400;
@@ -98,11 +108,169 @@
   color: rgba(0, 0, 0, 0.5);
   margin: 0;
   font-variation-settings: 'opsz' 14;
+  white-space: nowrap;
 }
 
-#ai-research-highlight-popup .project-name-text {
-  font-weight: 400;
+#ai-research-highlight-popup .project-selector-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+#ai-research-highlight-popup .project-selector {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+  position: relative;
+  box-sizing: border-box;
+}
+
+#ai-research-highlight-popup .project-selector:hover {
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+#ai-research-highlight-popup .project-selector-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+#ai-research-highlight-popup .project-search-input {
+  position: absolute;
+  top: -12px;
+  left: -12px;
+  right: -12px;
+  bottom: -12px;
+  width: calc(100% + 24px);
+  height: calc(100% + 24px);
+  border: none;
+  background: transparent;
+  padding: 12px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  color: #323232;
+  outline: none;
+  font-variation-settings: 'opsz' 14;
+  box-sizing: border-box;
+  cursor: text;
+}
+
+#ai-research-highlight-popup .project-search-input.hidden {
+  display: none;
+}
+
+#ai-research-highlight-popup .project-search-input::placeholder {
+  color: rgba(0, 0, 0, 0.3);
+}
+
+#ai-research-highlight-popup .project-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  box-shadow: 0px 4px 12px 0px rgba(0, 0, 0, 0.15);
+  z-index: 2147483647;
+  overflow: hidden;
+}
+
+#ai-research-highlight-popup .project-dropdown.hidden {
+  display: none;
+}
+
+#ai-research-highlight-popup .project-dropdown-list {
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+#ai-research-highlight-popup .project-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+#ai-research-highlight-popup .project-dropdown-item:last-child {
+  border-bottom: none;
+}
+
+#ai-research-highlight-popup .project-dropdown-item:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+#ai-research-highlight-popup .project-dropdown-item-color {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: #b52121;
+}
+
+#ai-research-highlight-popup .project-dropdown-item-name {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  color: #323232;
+  flex: 1;
+  font-variation-settings: 'opsz' 14;
+}
+
+#ai-research-highlight-popup .project-dropdown-empty {
+  padding: 12px;
+  text-align: center;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
   color: rgba(0, 0, 0, 0.5);
+  font-variation-settings: 'opsz' 14;
+}
+
+#ai-research-highlight-popup .project-color {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: #b52121;
+  flex-shrink: 0;
+}
+
+#ai-research-highlight-popup .project-color.hidden {
+  display: none;
+}
+
+#ai-research-highlight-popup .project-name {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: normal;
+  color: #323232;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variation-settings: 'opsz' 14;
+}
+
+#ai-research-highlight-popup .project-name.hidden {
+  display: none;
+}
+
+#ai-research-highlight-popup .project-arrow {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
 }
 
 /* Preview section */

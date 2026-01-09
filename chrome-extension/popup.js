@@ -29,24 +29,13 @@ let currentEmail = '';
 const accountButton = document.getElementById('account-button');
 const accountDropdown = document.getElementById('account-dropdown');
 const logoutBtn = document.getElementById('logout-btn');
-const openAppBtn = document.getElementById('open-app-btn');
-const disableHighlightsBtn = document.getElementById('disable-highlights-btn');
-const projectSelect = document.getElementById('project-select');
-const projectSelector = document.getElementById('project-selector');
-const projectDropdown = document.getElementById('project-dropdown');
-const projectSearch = document.getElementById('project-search');
-const projectDropdownList = document.getElementById('project-dropdown-list');
-const projectName = document.getElementById('project-name');
-const projectColor = document.getElementById('project-color');
+const openAppBtn = document.getElementById('open-app-button');
 const homeContent = document.getElementById('home-content');
-const highlightsDisabledContent = document.getElementById('highlights-disabled-content');
-const extensionToggleOverlay = document.getElementById('extension-toggle-overlay');
 const messageEl = document.getElementById('message');
 const accountInitial = document.getElementById('account-initial');
 
 // State
 let currentUser = null;
-let projects = [];
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
@@ -63,9 +52,8 @@ async function checkAuthStatus() {
     try {
       const isValid = await verifyToken(config.apiUrl, config.token);
       if (isValid) {
-        await loadUserInfo(config.token, config.apiUrl);
-        showMainView();
-        await loadProjects();
+      await loadUserInfo(config.token, config.apiUrl);
+      showMainView();
       } else {
         // Token expired
         await clearAuth();
@@ -134,32 +122,11 @@ function setupEventListeners() {
   if (openAppBtn) {
     openAppBtn.addEventListener('click', handleOpenApp);
   }
-  if (disableHighlightsBtn) {
-    disableHighlightsBtn.addEventListener('click', handleDisableHighlights);
-  }
-  if (projectSelect) {
-    projectSelect.addEventListener('change', handleProjectChange);
-  }
-  if (projectSelector) {
-    projectSelector.addEventListener('click', toggleProjectDropdown);
-  }
-  if (projectSearch) {
-    projectSearch.addEventListener('input', handleProjectSearch);
-    projectSearch.addEventListener('keydown', handleProjectSearchKeydown);
-  }
-  if (extensionToggleOverlay) {
-    extensionToggleOverlay.addEventListener('change', handleExtensionToggle);
-  }
   
   // Close dropdowns when clicking outside
   document.addEventListener('click', (e) => {
     if (accountDropdown && accountButton && !accountButton.contains(e.target) && !accountDropdown.contains(e.target)) {
       accountDropdown.classList.add('hidden');
-    }
-    if (projectDropdown && projectSelector && 
-        !projectSelector.contains(e.target) && 
-        !projectDropdown.contains(e.target)) {
-      closeProjectDropdown();
     }
   });
   
@@ -186,7 +153,6 @@ async function handleGoogleAuthComplete(token) {
     if (isValid) {
       await loadUserInfo(token, config.apiUrl);
       showMainView();
-      await loadProjects();
       showAuthMessage('Successfully signed in with Google!', 'success');
     } else {
       showAuthMessage('Token validation failed', 'error');
@@ -270,7 +236,6 @@ async function handlePasswordSubmit(e) {
       };
       
       showMainView();
-      await loadProjects();
       // Clear password field
       document.getElementById('login-password').value = '';
     } else {
@@ -391,7 +356,6 @@ async function handleGoogleAuthToken(token) {
     if (isValid) {
       await loadUserInfo(token, apiUrl);
       showMainView();
-      await loadProjects();
       showAuthMessage('Successfully signed in with Google!', 'success');
     } else {
       showAuthMessage('Token validation failed', 'error');
@@ -441,222 +405,6 @@ async function loadUserInfo(token, apiUrl) {
   }
 }
 
-// Load projects
-async function loadProjects() {
-  const config = await getConfig();
-  
-  if (!config.token) {
-    return;
-  }
-  
-  projectSelect.innerHTML = '<option value="">Loading projects...</option>';
-  projectSelect.disabled = true;
-  
-  try {
-    const response = await fetch(`${config.apiUrl}/api/project`, {
-      headers: {
-        'Authorization': `Bearer ${config.token}`
-      }
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      projects = data.projects || [];
-      
-      // Populate dropdown
-      projectSelect.innerHTML = '<option value="">Select a project...</option>';
-      projects.forEach(project => {
-        const option = document.createElement('option');
-        option.value = project.project_id;
-        option.textContent = project.project_name;
-        if (config.projectId === project.project_id) {
-          option.selected = true;
-        }
-        projectSelect.appendChild(option);
-      });
-      
-      // Auto-select if only one project
-      if (projects.length === 1) {
-        projectSelect.value = projects[0].project_id;
-        await handleProjectChange();
-      } else if (config.projectId) {
-        const selectedProject = projects.find(p => p.project_id === config.projectId);
-        if (selectedProject) {
-          projectSelect.value = config.projectId;
-          await handleProjectChange();
-        } else {
-          updateProjectDisplay(null);
-        }
-      } else {
-        updateProjectDisplay(null);
-      }
-    } else {
-      projectSelect.innerHTML = '<option value="">Failed to load projects</option>';
-      showMessage('Failed to load projects', 'error');
-    }
-  } catch (error) {
-    console.error('Failed to load projects:', error);
-    projectSelect.innerHTML = '<option value="">Network error</option>';
-    showMessage('Network error loading projects', 'error');
-  } finally {
-    projectSelect.disabled = false;
-  }
-}
-
-// Handle project selection change
-async function handleProjectChange() {
-  const projectId = projectSelect.value;
-  
-  if (!projectId) {
-    await saveConfig({ projectId: null, projectName: null });
-    updateProjectDisplay(null);
-    return;
-  }
-  
-  const project = projects.find(p => p.project_id === projectId);
-  if (project) {
-    await saveConfig({ projectId, projectName: project.project_name });
-    updateProjectDisplay(project);
-  }
-}
-
-// Update project display
-function updateProjectDisplay(project) {
-  if (!project) {
-    if (projectName) projectName.textContent = 'Select a project...';
-    return;
-  }
-  
-  if (projectName) projectName.textContent = project.project_name || 'Project_Name';
-  if (projectColor && project.color) {
-    projectColor.style.backgroundColor = project.color;
-  }
-  
-  // Also update disabled view
-  const projectNameDisabled = document.getElementById('project-name-disabled');
-  const projectColorDisabled = document.getElementById('project-color-disabled');
-  if (projectNameDisabled) projectNameDisabled.textContent = project.project_name || 'Project_Name';
-  if (projectColorDisabled && project.color) {
-    projectColorDisabled.style.backgroundColor = project.color;
-  }
-}
-
-// Toggle project dropdown
-function toggleProjectDropdown(e) {
-  if (e) e.stopPropagation();
-  
-  if (!projectDropdown || !projectSelector) return;
-  
-  const isHidden = projectDropdown.classList.contains('hidden');
-  
-  if (isHidden) {
-    openProjectDropdown();
-  } else {
-    closeProjectDropdown();
-  }
-}
-
-// Open project dropdown
-function openProjectDropdown() {
-  if (!projectDropdown || !projectSearch || !projectName || !projectColor) return;
-  
-  // Hide project name and color, show search input
-  projectName.classList.add('hidden');
-  projectColor.classList.add('hidden');
-  projectSearch.classList.remove('hidden');
-  
-  // Show dropdown and focus search
-  projectDropdown.classList.remove('hidden');
-  projectSearch.focus();
-  projectSearch.value = '';
-  renderProjectDropdownItems(projects);
-}
-
-// Close project dropdown
-function closeProjectDropdown() {
-  if (!projectDropdown || !projectSearch || !projectName || !projectColor) return;
-  
-  // Hide search input, show project name and color
-  projectSearch.classList.add('hidden');
-  projectName.classList.remove('hidden');
-  projectColor.classList.remove('hidden');
-  
-  // Hide dropdown and clear search
-  projectDropdown.classList.add('hidden');
-  projectSearch.value = '';
-}
-
-// Handle project search
-function handleProjectSearch(e) {
-  const searchTerm = e.target.value.toLowerCase().trim();
-  renderProjectDropdownItems(projects, searchTerm);
-}
-
-// Handle keyboard navigation in search
-function handleProjectSearchKeydown(e) {
-  if (e.key === 'Escape') {
-    closeProjectDropdown();
-  } else if (e.key === 'Enter') {
-    e.preventDefault();
-    const firstItem = projectDropdownList.querySelector('.project-dropdown-item');
-    if (firstItem) {
-      firstItem.click();
-    }
-  }
-}
-
-// Render project dropdown items (max 3 results)
-function renderProjectDropdownItems(projectsList, searchTerm = '') {
-  if (!projectDropdownList) return;
-  
-  let filteredProjects = projectsList || [];
-  
-  // Filter by search term
-  if (searchTerm) {
-    filteredProjects = projectsList.filter(project => 
-      project.project_name.toLowerCase().includes(searchTerm)
-    );
-  }
-  
-  // Limit to 3 results
-  filteredProjects = filteredProjects.slice(0, 3);
-  
-  // Clear existing items
-  projectDropdownList.innerHTML = '';
-  
-  if (filteredProjects.length === 0) {
-    const emptyItem = document.createElement('div');
-    emptyItem.className = 'project-dropdown-empty';
-    emptyItem.textContent = searchTerm ? 'No projects found' : 'No projects available';
-    projectDropdownList.appendChild(emptyItem);
-    return;
-  }
-  
-  // Render project items
-  filteredProjects.forEach(project => {
-    const item = document.createElement('div');
-    item.className = 'project-dropdown-item';
-    item.innerHTML = `
-      <div class="project-dropdown-item-color" style="background-color: ${project.color || '#b52121'}"></div>
-      <span class="project-dropdown-item-name">${project.project_name || 'Unnamed Project'}</span>
-    `;
-    
-    item.addEventListener('click', () => {
-      selectProject(project);
-      closeProjectDropdown();
-    });
-    
-    projectDropdownList.appendChild(item);
-  });
-}
-
-// Select project
-async function selectProject(project) {
-  if (!project || !project.project_id) return;
-  
-  projectSelect.value = project.project_id;
-  await handleProjectChange();
-}
 
 // Toggle account dropdown
 function toggleAccountDropdown(e) {
@@ -669,15 +417,6 @@ function toggleAccountDropdown(e) {
 // Handle open app
 function handleOpenApp() {
   chrome.tabs.create({ url: 'http://localhost:3000' });
-  if (accountDropdown) accountDropdown.classList.add('hidden');
-}
-
-// Handle disable highlights
-function handleDisableHighlights() {
-  if (extensionToggleOverlay) {
-    extensionToggleOverlay.checked = false;
-    handleExtensionToggle();
-  }
   if (accountDropdown) accountDropdown.classList.add('hidden');
 }
 
@@ -709,54 +448,6 @@ function showAuthView() {
 async function showMainView() {
   authView.classList.add('hidden');
   mainView.classList.remove('hidden');
-  
-  // Load extension toggle state
-  const config = await getConfig();
-  const extensionEnabled = config.extensionEnabled !== undefined ? config.extensionEnabled : true;
-  
-  if (extensionToggleOverlay) {
-    extensionToggleOverlay.checked = extensionEnabled;
-  }
-  
-  // Show/hide appropriate content based on extension state
-  updateHighlightsView(extensionEnabled);
-}
-
-// Update highlights view based on enabled state
-function updateHighlightsView(enabled) {
-  if (homeContent && highlightsDisabledContent) {
-    if (enabled) {
-      homeContent.classList.remove('hidden');
-      highlightsDisabledContent.classList.add('hidden');
-    } else {
-      homeContent.classList.add('hidden');
-      highlightsDisabledContent.classList.remove('hidden');
-    }
-  }
-}
-
-// Handle extension toggle
-async function handleExtensionToggle() {
-  const enabled = extensionToggleOverlay ? extensionToggleOverlay.checked : true;
-  await saveConfig({ extensionEnabled: enabled });
-  
-  // Update view
-  updateHighlightsView(enabled);
-  
-  // Notify content scripts of the change
-  try {
-    const tabs = await chrome.tabs.query({});
-    tabs.forEach(tab => {
-      chrome.tabs.sendMessage(tab.id, {
-        type: 'EXTENSION_TOGGLE_CHANGED',
-        enabled: enabled
-      }).catch(() => {
-        // Ignore errors for tabs that don't have content script loaded
-      });
-    });
-  } catch (error) {
-    console.error('Failed to notify content scripts:', error);
-  }
 }
 
 // Show message

@@ -8,6 +8,8 @@ let highlightPopup = null;
 let selectedText = '';
 let selectionTimeout = null;
 let extensionEnabled = true; // Default to enabled
+let projects = [];
+let selectedProjectId = null;
 
 // Initialize the highlight popup
 function createHighlightPopup() {
@@ -28,7 +30,26 @@ function createHighlightPopup() {
       </button>
     </div>
     <div class="popup-content">
-      <p class="popup-project-label">Saving highlight to <span class="project-name-text"></span></p>
+      <div class="popup-project-section">
+        <label class="popup-project-label">Select project to save highlights</label>
+        <div class="project-selector-wrapper">
+          <div id="highlight-project-selector" class="project-selector">
+            <div class="project-selector-content">
+              <div class="project-color" id="highlight-project-color"></div>
+              <span id="highlight-project-name" class="project-name">Project_Name</span>
+              <input type="text" id="highlight-project-search" class="project-search-input hidden" placeholder="Search projects..." autocomplete="off">
+            </div>
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" class="project-arrow">
+              <path d="M5 7.5L10 12.5L15 7.5" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div id="highlight-project-dropdown" class="project-dropdown hidden">
+            <div id="highlight-project-dropdown-list" class="project-dropdown-list">
+              <!-- Project items will be inserted here -->
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="popup-preview">
         <p class="preview-label">Selected text</p>
         <p class="preview-text"></p>
@@ -49,9 +70,36 @@ function createHighlightPopup() {
   highlightPopup.querySelector('.popup-close').addEventListener('click', hidePopup);
   highlightPopup.querySelector('.btn-save').addEventListener('click', handleSaveHighlight);
   
+  // Project selector handlers
+  const projectSelector = highlightPopup.querySelector('#highlight-project-selector');
+  const projectDropdown = highlightPopup.querySelector('#highlight-project-dropdown');
+  const projectSearch = highlightPopup.querySelector('#highlight-project-search');
+  const projectDropdownList = highlightPopup.querySelector('#highlight-project-dropdown-list');
+  
+  if (projectSelector) {
+    projectSelector.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleHighlightProjectDropdown();
+    });
+  }
+  
+  if (projectSearch) {
+    projectSearch.addEventListener('input', handleProjectSearch);
+    projectSearch.addEventListener('keydown', handleProjectSearchKeydown);
+  }
+  
   // Prevent clicks inside popup from closing it
   highlightPopup.addEventListener('mousedown', (e) => e.stopPropagation());
   highlightPopup.addEventListener('click', (e) => e.stopPropagation());
+  
+  // Close project dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    if (projectDropdown && projectSelector && 
+        !projectSelector.contains(e.target) && 
+        !projectDropdown.contains(e.target)) {
+      closeHighlightProjectDropdown();
+    }
+  });
   
   // Allow Enter key in textarea, Ctrl+Enter to save
   highlightPopup.querySelector('#highlight-note').addEventListener('keydown', (e) => {
@@ -98,17 +146,27 @@ async function showPopup() {
     previewText.textContent = selectedText;
   }
   
-  // Get project name from config
+  // Load projects and set selected project
+  await loadProjectsForHighlight();
+  
+  // Get current project from config and set it
   try {
     const response = await chrome.runtime.sendMessage({ action: 'getConfig' });
-    if (response && response.projectName) {
-      const projectNameSpan = highlightPopup.querySelector('.project-name-text');
-      if (projectNameSpan) {
-        projectNameSpan.textContent = response.projectName;
+    if (response && response.projectId) {
+      selectedProjectId = response.projectId;
+      const project = projects.find(p => p.project_id === response.projectId);
+      if (project) {
+        updateHighlightProjectDisplay(project);
       }
+    } else if (projects.length === 1) {
+      // Auto-select if only one project
+      selectedProjectId = projects[0].project_id;
+      updateHighlightProjectDisplay(projects[0]);
+    } else {
+      updateHighlightProjectDisplay(null);
     }
   } catch (error) {
-    console.error('Failed to get project name:', error);
+    console.error('Failed to get project config:', error);
   }
   
   // Clear previous note
@@ -259,6 +317,12 @@ async function handleSaveHighlight(e) {
     return;
   }
   
+  // Validate project is selected
+  if (!selectedProjectId) {
+    showNotification('Please select a project', 'error');
+    return;
+  }
+  
   console.log('Save button clicked');
   
   // FIRST: Capture selection rect BEFORE anything else (clicking might clear selection)
@@ -316,8 +380,21 @@ async function handleSaveHighlight(e) {
     page_title: document.title,
     note: note || null,
     timestamp: new Date().toISOString(),
-    selection_rect: selectionRect
+    selection_rect: selectionRect,
+    project_id: selectedProjectId
   };
+  
+  // Save project selection to config
+  const selectedProject = projects.find(p => p.project_id === selectedProjectId);
+  if (selectedProject) {
+    await chrome.runtime.sendMessage({
+      action: 'saveConfig',
+      config: {
+        projectId: selectedProjectId,
+        projectName: selectedProject.project_name
+      }
+    });
+  }
   
   // Send to background script (which will capture screenshot - popup is now fully gone)
   try {
@@ -430,6 +507,179 @@ async function loadExtensionState() {
   } catch (error) {
     console.error('Failed to load extension state:', error);
     extensionEnabled = true; // Default to enabled on error
+  }
+}
+
+// Load projects for highlight popup
+async function loadProjectsForHighlight() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getProjects' });
+    if (response && response.success && response.projects) {
+      projects = response.projects;
+    } else {
+      projects = [];
+    }
+  } catch (error) {
+    console.error('Failed to load projects:', error);
+    projects = [];
+  }
+}
+
+// Toggle project dropdown in highlight popup
+function toggleHighlightProjectDropdown(e) {
+  if (e) e.stopPropagation();
+  
+  const projectDropdown = highlightPopup?.querySelector('#highlight-project-dropdown');
+  const projectSelector = highlightPopup?.querySelector('#highlight-project-selector');
+  
+  if (!projectDropdown || !projectSelector) return;
+  
+  const isHidden = projectDropdown.classList.contains('hidden');
+  
+  if (isHidden) {
+    openHighlightProjectDropdown();
+  } else {
+    closeHighlightProjectDropdown();
+  }
+}
+
+// Open project dropdown in highlight popup
+function openHighlightProjectDropdown() {
+  const projectDropdown = highlightPopup?.querySelector('#highlight-project-dropdown');
+  const projectSearch = highlightPopup?.querySelector('#highlight-project-search');
+  const projectName = highlightPopup?.querySelector('#highlight-project-name');
+  const projectColor = highlightPopup?.querySelector('#highlight-project-color');
+  
+  if (!projectDropdown || !projectSearch || !projectName || !projectColor) return;
+  
+  // Hide project name and color, show search input
+  projectName.classList.add('hidden');
+  projectColor.classList.add('hidden');
+  projectSearch.classList.remove('hidden');
+  
+  // Show dropdown and focus search
+  projectDropdown.classList.remove('hidden');
+  projectSearch.focus();
+  projectSearch.value = '';
+  renderHighlightProjectDropdownItems(projects);
+}
+
+// Close project dropdown in highlight popup
+function closeHighlightProjectDropdown() {
+  const projectDropdown = highlightPopup?.querySelector('#highlight-project-dropdown');
+  const projectSearch = highlightPopup?.querySelector('#highlight-project-search');
+  const projectName = highlightPopup?.querySelector('#highlight-project-name');
+  const projectColor = highlightPopup?.querySelector('#highlight-project-color');
+  
+  if (!projectDropdown || !projectSearch || !projectName || !projectColor) return;
+  
+  // Hide search input, show project name and color
+  projectSearch.classList.add('hidden');
+  projectName.classList.remove('hidden');
+  projectColor.classList.remove('hidden');
+  
+  // Hide dropdown and clear search
+  projectDropdown.classList.add('hidden');
+  projectSearch.value = '';
+}
+
+// Handle project search in highlight popup
+function handleProjectSearch(e) {
+  const searchTerm = e.target.value.toLowerCase().trim();
+  renderHighlightProjectDropdownItems(projects, searchTerm);
+}
+
+// Handle keyboard navigation in project search
+function handleProjectSearchKeydown(e) {
+  if (e.key === 'Escape') {
+    closeHighlightProjectDropdown();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const projectDropdownList = highlightPopup?.querySelector('#highlight-project-dropdown-list');
+    const firstItem = projectDropdownList?.querySelector('.project-dropdown-item');
+    if (firstItem) {
+      firstItem.click();
+    }
+  }
+}
+
+// Render project dropdown items in highlight popup (max 3 results)
+function renderHighlightProjectDropdownItems(projectsList, searchTerm = '') {
+  const projectDropdownList = highlightPopup?.querySelector('#highlight-project-dropdown-list');
+  if (!projectDropdownList) return;
+  
+  let filteredProjects = projectsList || [];
+  
+  // Filter by search term
+  if (searchTerm) {
+    filteredProjects = projectsList.filter(project => 
+      project.project_name.toLowerCase().includes(searchTerm)
+    );
+  }
+  
+  // Limit to 3 results
+  filteredProjects = filteredProjects.slice(0, 3);
+  
+  // Clear existing items
+  projectDropdownList.innerHTML = '';
+  
+  if (filteredProjects.length === 0) {
+    const emptyItem = document.createElement('div');
+    emptyItem.className = 'project-dropdown-empty';
+    emptyItem.textContent = searchTerm ? 'No projects found' : 'No projects available';
+    projectDropdownList.appendChild(emptyItem);
+    return;
+  }
+  
+  // Render project items
+  filteredProjects.forEach(project => {
+    const item = document.createElement('div');
+    item.className = 'project-dropdown-item';
+    item.innerHTML = `
+      <div class="project-dropdown-item-color" style="background-color: ${project.color || '#b52121'}"></div>
+      <span class="project-dropdown-item-name">${project.project_name || 'Unnamed Project'}</span>
+    `;
+    
+    item.addEventListener('click', () => {
+      selectHighlightProject(project);
+      closeHighlightProjectDropdown();
+    });
+    
+    projectDropdownList.appendChild(item);
+  });
+}
+
+// Select project in highlight popup
+async function selectHighlightProject(project) {
+  if (!project || !project.project_id) return;
+  
+  selectedProjectId = project.project_id;
+  updateHighlightProjectDisplay(project);
+  
+  // Save to config
+  await chrome.runtime.sendMessage({
+    action: 'saveConfig',
+    config: {
+      projectId: project.project_id,
+      projectName: project.project_name
+    }
+  });
+}
+
+// Update project display in highlight popup
+function updateHighlightProjectDisplay(project) {
+  const projectName = highlightPopup?.querySelector('#highlight-project-name');
+  const projectColor = highlightPopup?.querySelector('#highlight-project-color');
+  
+  if (!project) {
+    if (projectName) projectName.textContent = 'Select a project...';
+    if (projectColor) projectColor.style.backgroundColor = '#b52121';
+    return;
+  }
+  
+  if (projectName) projectName.textContent = project.project_name || 'Project_Name';
+  if (projectColor) {
+    projectColor.style.backgroundColor = project.color || '#b52121';
   }
 }
 

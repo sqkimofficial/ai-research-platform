@@ -33,6 +33,34 @@ async function saveConfig(config) {
   await chrome.storage.local.set(config);
 }
 
+// Get projects from API
+async function getProjects() {
+  const config = await getConfig();
+  
+  if (!config.token) {
+    return [];
+  }
+  
+  try {
+    const response = await fetch(`${config.apiUrl}/api/project`, {
+      headers: {
+        'Authorization': `Bearer ${config.token}`
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      return data.projects || [];
+    } else {
+      console.error('Failed to load projects:', response.status);
+      return [];
+    }
+  } catch (error) {
+    console.error('Failed to load projects:', error);
+    return [];
+  }
+}
+
 // Load queued highlights from storage
 async function loadQueue() {
   const result = await chrome.storage.local.get(['highlightQueue']);
@@ -61,8 +89,8 @@ async function processQueue() {
   if (highlightQueue.length === 0) return;
   
   const config = await getConfig();
-  if (!config.token || !config.projectId) {
-    console.log('Cannot process queue: missing configuration');
+  if (!config.token) {
+    console.log('Cannot process queue: missing token');
     return;
   }
   
@@ -91,7 +119,8 @@ async function processQueue() {
 
 // Save highlight to API
 async function saveHighlightToAPI(highlightData, config) {
-  const { apiUrl, token, projectId } = config;
+  const { apiUrl, token } = config;
+  const projectId = highlightData.project_id || config.projectId;
   
   const response = await fetch(`${apiUrl}/api/highlights`, {
     method: 'POST',
@@ -211,6 +240,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+  
+  if (message.action === 'getProjects') {
+    getProjects()
+      .then(projects => sendResponse({ success: true, projects }))
+      .catch(error => sendResponse({ success: false, error: error.message, projects: [] }));
+    return true;
+  }
 });
 
 // Capture and crop screenshot centered on selection
@@ -283,10 +319,13 @@ async function handleSaveHighlight(highlightData, senderTabId) {
     };
   }
   
-  if (!config.projectId) {
+  // Use project_id from highlightData if provided, otherwise fall back to config
+  const projectId = highlightData.project_id || config.projectId;
+  
+  if (!projectId) {
     return { 
       success: false, 
-      error: 'No project selected. Please configure the extension.' 
+      error: 'No project selected. Please select a project.' 
     };
   }
   
