@@ -40,4 +40,10 @@ frontend/build/
 .DS_Store
 Thumbs.db
 
+# Logs
+*.log
+*.log.*
+logs/
+backend/logs/
+
 
