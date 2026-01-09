@@ -120,7 +120,24 @@ class AgenticOpenAIService:
         )
         
         # Base instructions - will be enhanced with system message dynamically
-        self.base_instructions = "You are a helpful research assistant. Always respond in valid JSON format with the following structure: {\"message\": \"your response\", \"document_content\": \"\", \"sources\": [], \"new_types\": []}"
+        # CRITICAL: Emphasize strict JSON formatting
+        self.base_instructions = """You are a helpful research assistant. 
+
+CRITICAL JSON FORMATTING RULES:
+- You MUST respond with ONLY valid JSON - no markdown code blocks, no explanations, no extra text
+- The JSON must start with { and end with }
+- All string values MUST be properly quoted with double quotes
+- Escape special characters: \\n for newlines, \\" for quotes, \\\\ for backslashes
+- The "message" field is REQUIRED and must never be empty
+- Extract URLs from tool outputs (especially perplexity_research) and put them in the "sources" array
+
+Always respond in valid JSON format with this exact structure:
+{
+  "message": "your response",
+  "document_content": "",
+  "sources": [],
+  "new_types": []
+}"""
         
         # Create function tools
         self._create_function_tools()

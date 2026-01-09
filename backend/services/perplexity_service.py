@@ -166,8 +166,14 @@ class PerplexityService:
             # Step 2: Try standard JSON parsing first
             try:
                 parsed = json.loads(json_str)
+                # Ensure message is never empty if we have sources or document_content
+                message = parsed.get('message', '')
+                if not message and (parsed.get('sources') or parsed.get('document_content')):
+                    # Fallback: use document_content or sources as message if message is missing
+                    message = parsed.get('document_content', '') or 'Response generated successfully.'
+                
                 return {
-                    'message': parsed.get('message', ''),
+                    'message': message,
                     'document_content': parsed.get('document_content', '') or parsed.get('updated_document_content', ''),
                     'sources': parsed.get('sources', []),
                     'new_types': parsed.get('new_types', [])
@@ -182,8 +188,14 @@ class PerplexityService:
                 # Try parsing the fixed JSON
                 try:
                     parsed = json.loads(fixed_json)
+                    # Ensure message is never empty if we have sources or document_content
+                    message = parsed.get('message', '')
+                    if not message and (parsed.get('sources') or parsed.get('document_content')):
+                        # Fallback: use document_content or sources as message if message is missing
+                        message = parsed.get('document_content', '') or 'Response generated successfully.'
+                    
                     return {
-                        'message': parsed.get('message', ''),
+                        'message': message,
                         'document_content': parsed.get('document_content', '') or parsed.get('updated_document_content', ''),
                         'sources': parsed.get('sources', []),
                         'new_types': parsed.get('new_types', [])
@@ -193,13 +205,24 @@ class PerplexityService:
                     return self._extract_json_values_fuzzy(json_str)
                     
         except Exception as e:
-            # Final fallback - treat entire response as message
+            # Final fallback - try to extract at least sources and message from the raw text
             logger.warning(f"Failed to parse JSON response: {e}")
             logger.debug(f"Response was: {response_text[:500]}...")
+            
+            # Try to extract sources from the text even if JSON parsing failed
+            sources = []
+            url_pattern = r'https?://[^\s,\]]+'
+            found_urls = re.findall(url_pattern, response_text)
+            if found_urls:
+                sources = list(set(found_urls))
+            
+            # Use the response text as message, or a default if empty
+            message = response_text.strip() or 'Response received but could not be parsed.'
+            
             return {
-                'message': response_text,
+                'message': message,
                 'document_content': '',
-                'sources': [],
+                'sources': sources,
                 'new_types': []
             }
     
@@ -243,11 +266,12 @@ class PerplexityService:
     
     def _extract_json_values_fuzzy(self, json_str):
         """Extract JSON values using regex as last resort."""
-        # Try to extract message field (handles multiline)
+        # Try to extract message field (handles multiline and escaped characters)
         message_patterns = [
-            r'"message"\s*:\s*"((?:[^"\\]|\\.)*)"',  # Standard quoted string
-            r'"message"\s*:\s*"([^"]*)"',  # Simple quoted string
-            r'"message"\s*:\s*"([\s\S]*?)"(?=\s*[,}])',  # Multiline string
+            r'"message"\s*:\s*"((?:[^"\\]|\\.)*)"',  # Standard quoted string with escapes
+            r'"message"\s*:\s*"([\s\S]*?)"(?=\s*[,}])',  # Multiline string (non-greedy)
+            r'"message"\s*:\s*"([^"]*)"',  # Simple quoted string (fallback)
+            r'"message"\s*:\s*"([\s\S]*)"',  # Very greedy multiline (last resort)
         ]
         
         message = ''
@@ -258,7 +282,9 @@ class PerplexityService:
                 # Decode escaped characters
                 message = message.replace('\\n', '\n').replace('\\r', '\r').replace('\\t', '\t')
                 message = message.replace('\\"', '"').replace('\\\\', '\\')
-                break
+                # Remove any trailing content that might have been captured incorrectly
+                if message:
+                    break
         
         # Try to extract document_content field
         doc_patterns = [
@@ -324,6 +350,11 @@ class PerplexityService:
                     except:
                         new_types = []
                 break
+        
+        # Ensure message is never empty if we have sources or document_content
+        if not message and (sources or doc_content):
+            # Fallback: use document_content or a default message
+            message = doc_content or 'Response generated successfully.'
         
         return {
             'message': message,

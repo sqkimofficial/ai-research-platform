@@ -721,6 +721,19 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         document_content_to_add = parsed_response.get('document_content', '')
         sources = parsed_response.get('sources', [])
         
+        # Final safety check: ensure message is never empty if we have sources or content
+        if not chat_message.strip():
+            if document_content_to_add.strip():
+                # Use document_content as message if message is empty
+                chat_message = "Content generated successfully. Please review and approve to insert into your document."
+            elif sources:
+                # Use a default message if we have sources but no content
+                chat_message = "Research completed. Please see the sources below."
+            else:
+                # Last resort: use the raw response content
+                chat_message = ai_response_content[:500] if ai_response_content else "Response received."
+                logger.warning("Message field was empty in parsed response, using fallback")
+        
         # Strip markdown from research mode responses to ensure plain text output
         if mode == 'research' and chat_message:
             original_length = len(chat_message)
