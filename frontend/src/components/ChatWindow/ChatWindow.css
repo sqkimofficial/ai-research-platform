@@ -873,6 +873,63 @@
   justify-content: center;
 }
 
+/* Agent Steps Styles - Collapsible with "Thought for x seconds" */
+.agent-steps-collapsible {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.agent-steps-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.5);
+  transition: color 0.2s ease;
+}
+
+.agent-steps-header:hover {
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.agent-steps-arrow {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.agent-steps-header-text {
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.agent-steps-list {
+  margin-top: 6px;
+  margin-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-step-item {
+  display: flex;
+  align-items: flex-start;
+}
+
+.agent-step-text {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.5);
+  line-height: 1.4;
+  font-weight: 400;
+}
+
 .source-icon-img {
   width: 12px;
   height: 12px;

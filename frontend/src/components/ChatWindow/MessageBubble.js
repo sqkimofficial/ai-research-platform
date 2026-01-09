@@ -36,7 +36,27 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
   const documentContent = message.document_content || '';
   const pendingContentId = message.pending_content_id;
   const messageStatus = message.status || '';
+  const agentSteps = message.agent_steps || [];
+  // Auto-expand if message content is empty (still receiving steps) or if steps are being added
+  // Collapse if message content exists (final response received)
+  const [isStepsCollapsed, setIsStepsCollapsed] = useState(() => {
+    // If message has content, steps are complete - start collapsed
+    // If no content, steps are still coming - start expanded
+    return !!message.content;
+  });
   const [isEditing, setIsEditing] = useState(false);
+  
+  // Auto-expand when new steps arrive (if message doesn't have content yet)
+  // Auto-collapse when final response arrives (message.content exists)
+  useEffect(() => {
+    if (!message.content && agentSteps.length > 0) {
+      // Steps are still coming in - expand to show them
+      setIsStepsCollapsed(false);
+    } else if (message.content && agentSteps.length > 0) {
+      // Final response received - collapse the steps
+      setIsStepsCollapsed(true);
+    }
+  }, [agentSteps.length, message.content]);
   const [localEditedContent, setLocalEditedContent] = useState(documentContent);
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -44,6 +64,7 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
   const [isSourcesOpen, setIsSourcesOpen] = useState(false);
   const [isInserted, setIsInserted] = useState(messageStatus === 'approved');
   const [isContentExpanded, setIsContentExpanded] = useState(false);
+  const [isAgentStepsOpen, setIsAgentStepsOpen] = useState(false);
   const contentWrapperRef = useRef(null);
   const contentRef = useRef(null);
   const sourcesDropdownRef = useRef(null);
@@ -190,9 +211,61 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
           )}
         </>
       ) : (
-        <div className="message-content">
-          {formatMessageContent(message.content)}
-        </div>
+        <>
+          {/* Agent Steps (Tool Calls, Thinking, etc.) - Collapsible with "Thought for x seconds" */}
+          {agentSteps && agentSteps.length > 0 && (() => {
+            // Calculate time difference between first and last step
+            const firstStepTime = agentSteps[0]?.timestamp ? new Date(agentSteps[0].timestamp) : null;
+            const lastStepTime = agentSteps[agentSteps.length - 1]?.timestamp ? new Date(agentSteps[agentSteps.length - 1].timestamp) : null;
+            const thoughtDuration = firstStepTime && lastStepTime ? Math.round((lastStepTime - firstStepTime) / 1000) : 0;
+            
+            // Only show "Thought for x seconds" if message content exists (steps are complete)
+            const stepsComplete = !!message.content;
+            
+            return (
+              <div className="agent-steps-collapsible">
+                <button 
+                  className="agent-steps-header"
+                  onClick={() => setIsStepsCollapsed(!isStepsCollapsed)}
+                  aria-expanded={!isStepsCollapsed}
+                >
+                  <img 
+                    src={dropdownIcon} 
+                    alt="" 
+                    className="agent-steps-arrow"
+                    style={{ transform: isStepsCollapsed ? 'rotate(270deg)' : 'rotate(90deg)' }}
+                  />
+                  {stepsComplete ? (
+                    <span className="agent-steps-header-text">
+                      Thought for {thoughtDuration} seconds
+                    </span>
+                  ) : (
+                    <span className="agent-steps-header-text" style={{ opacity: 0.5 }}>
+                      Thinking...
+                    </span>
+                  )}
+                </button>
+                {!isStepsCollapsed && (
+                  <div className="agent-steps-list">
+                    {agentSteps.map((step, index) => (
+                      <div key={index} className="agent-step-item">
+                        <span className="agent-step-text">
+                          {step.type === 'thinking' ? '💭 ' : step.type === 'tool_call' ? '🔧 ' : ''}
+                          {step.description || `Step ${index + 1}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          
+          {/* Main agent response (white text) - Show even if empty for placeholder */}
+          <div className="message-content">
+            {message.content ? formatMessageContent(message.content) : agentSteps && agentSteps.length > 0 ? <span style={{opacity: 0.5}}>Processing...</span> : null}
+          </div>
+        </>
       )}
       
       {/* Generated Content Preview */}

@@ -285,7 +285,7 @@ class ChatSessionModel:
         return db.chat_sessions.find_one({'session_id': session_id})
     
     @staticmethod
-    def add_message(session_id, role, content, sources=None, document_content=None, document_structure=None, placement=None, status=None, pending_content_id=None):
+    def add_message(session_id, role, content, sources=None, document_content=None, document_structure=None, placement=None, status=None, pending_content_id=None, agent_steps=None):
         """Add a message to the session"""
         db = Database.get_db()
         message = {
@@ -308,6 +308,14 @@ class ChatSessionModel:
                 message['status'] = status  # "pending_approval", "approved", "rejected"
             if pending_content_id is not None:
                 message['pending_content_id'] = pending_content_id
+            # Always store agent_steps if provided (even if empty list)
+            # This ensures steps are part of chat history and persist
+            if agent_steps is not None:
+                message['agent_steps'] = agent_steps if isinstance(agent_steps, list) else []
+            # For assistant messages, always initialize agent_steps as empty list if not provided
+            # This ensures the field exists in the database for consistency
+            elif role == 'assistant' and 'agent_steps' not in message:
+                message['agent_steps'] = []
         db.chat_sessions.update_one(
             {'session_id': session_id},
             {

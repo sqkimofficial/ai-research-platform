@@ -923,9 +923,9 @@ def sse_events():
     # Create a queue for this connection
     event_queue = queue.Queue()
     
-    # Add connection to SSE service
-    SSEService.add_connection(user_id, event_queue)
-    logger.debug(f"[SSE] Connection added for user {user_id}, total connections: {SSEService.get_connection_count(user_id)}")
+    # Add connection to SSE service with type 'pdf'
+    SSEService.add_connection(user_id, event_queue, connection_type='pdf')
+    logger.debug(f"[SSE] PDF connection added for user {user_id}, total connections: {SSEService.get_connection_count(user_id)}")
     
     def event_stream():
         """Generator function that yields SSE events."""
@@ -960,8 +960,8 @@ def sse_events():
             traceback.print_exc()
         finally:
             # Remove connection when client disconnects
-            SSEService.remove_connection(user_id, event_queue)
-            logger.debug(f"[SSE] Connection closed for user {user_id}")
+            SSEService.remove_connection(user_id, event_queue, connection_type='pdf')
+            logger.debug(f"[SSE] PDF connection closed for user {user_id}")
     
     return Response(
         stream_with_context(event_stream()),

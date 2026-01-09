@@ -1,9 +1,11 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response, stream_with_context
+import queue
 from models.database import ChatSessionModel, Database, ProjectModel, ResearchDocumentModel
 from services.perplexity_service import PerplexityService
 from services.agentic_openai_service import AgenticOpenAIService
 from services.vector_service import VectorService
 from services.redis_service import get_redis_service
+from services.sse_service import SSEService
 from utils.auth import get_user_id_from_token, log_auth_info
 from utils.file_helpers import get_session_dir
 from utils.html_helpers import strip_html_tags
@@ -273,6 +275,7 @@ def get_session():
             log_auth_info(project_id)
             
             # Serialize messages to ensure datetime objects and sources are properly formatted
+            from utils.agent_step_registry import enrich_steps_with_descriptions
             serialized_messages = []
             for msg in session.get('messages', []):
                 serialized_msg = {
@@ -290,6 +293,10 @@ def get_session():
                     serialized_msg['document_content'] = msg['document_content']
                 if 'pending_content_id' in msg:
                     serialized_msg['pending_content_id'] = msg['pending_content_id']
+                # Include agent_steps if they exist (for displaying agent execution steps)
+                # Enrich with computed descriptions at runtime
+                if 'agent_steps' in msg and msg['agent_steps']:
+                    serialized_msg['agent_steps'] = enrich_steps_with_descriptions(msg['agent_steps'])
                 serialized_messages.append(serialized_msg)
             
             # Get project information
@@ -687,7 +694,8 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
             ai_response = await agentic_openai_service.chat_completion_agentic(
                 alternated_messages,
                 system_message=system_message,
-                session_id=session_id
+                session_id=session_id,
+                user_id=user_id  # Pass user_id for SSE broadcasting
             )
         except Exception as e:
             log_error(logger, e, "Error calling OpenAI Agent SDK")
@@ -695,6 +703,9 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         
         # Get response content
         ai_response_content = ai_response.get('content') or ''
+        
+        # Extract agent steps (tool calls, thinking, etc.)
+        agent_steps = ai_response.get('agent_steps', [])
         
         # If no content, create a fallback response
         if not ai_response_content:
@@ -820,7 +831,8 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 document_content=document_content_to_add,
                 placement=None,  # No placement in Stage 1
                 status=status,
-                pending_content_id=pending_content_id
+                pending_content_id=pending_content_id,
+                agent_steps=agent_steps  # Store agent steps for UI display
             )
             
             # Invalidate cache for this session (message was added)
@@ -844,7 +856,8 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
                 sources=sources,
                 document_content=None,
                 placement=None,
-                status=None
+                status=None,
+                agent_steps=agent_steps  # Store agent steps for UI display
             )
             
             # Invalidate cache for this session (message was added)
@@ -874,7 +887,8 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
             'response': chat_message,
             'document_content': document_content_to_add,
             'sources': sources,
-            'session_id': session_id
+            'session_id': session_id,
+            'agent_steps': agent_steps if agent_steps else []  # Agent execution steps for UI display - always include as array
         }
         
         # Add pending approval fields if content was generated
@@ -1078,3 +1092,94 @@ def clear_pending_content_route():
     except Exception as e:
         log_error(logger, e, "Error in clear_pending_content")
         return jsonify({'error': str(e)}), 500
+
+
+@chat_bp.route('/agent-steps/events', methods=['GET', 'OPTIONS'])
+@limiter.limit("10 per minute") if limiter else lambda f: f
+def agent_steps_sse_events():
+    """
+    Server-Sent Events endpoint for real-time agent execution steps.
+    
+    Clients subscribe to this endpoint to receive agent steps (tool calls, thinking, etc.) as they happen.
+    
+    Query params:
+        token: string (optional) - Auth token if not in Authorization header
+    
+    Returns: SSE stream with agent step events
+    """
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        response = Response()
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Authorization, Content-Type')
+        return response
+    
+    logger.debug(f"[SSE] Agent steps endpoint hit - method: {request.method}, headers: {dict(request.headers)}")
+    user_id = get_user_id_from_token()
+    if not user_id:
+        logger.warning("[SSE] Unauthorized - no user_id from token for agent steps endpoint")
+        return Response(
+            'data: {"type":"error","message":"Unauthorized"}\n\n',
+            mimetype='text/event-stream',
+            status=401
+        )
+    
+    logger.info(f"[SSE] New agent steps connection request from user {user_id}")
+    
+    # Create a queue for this connection
+    event_queue = queue.Queue()
+    
+    # Add connection to SSE service with type 'agent_steps'
+    SSEService.add_connection(user_id, event_queue, connection_type='agent_steps')
+    logger.debug(f"[SSE] Agent steps connection added for user {user_id}, total connections: {SSEService.get_connection_count(user_id)}")
+    
+    def event_stream():
+        """Generator function that yields SSE events."""
+        try:
+            # Send initial connection message
+            yield f"data: {json.dumps({'type': 'connected', 'message': 'Agent steps SSE connection established'})}\n\n"
+            logger.debug(f"[SSE] Sent connection confirmation to user {user_id}")
+            
+            while True:
+                try:
+                    # Wait for event with timeout to allow connection health checks
+                    event = event_queue.get(timeout=30)
+                    
+                    # Only send agent_step events (filter other event types)
+                    if event.get('type') == 'agent_step':
+                        # Format as SSE
+                        event_json = json.dumps(event)
+                        yield f"data: {event_json}\n\n"
+                        logger.debug(f"[SSE] Sent agent step event to user {user_id}: {event.get('data', {}).get('description', 'unknown')}")
+                    
+                except queue.Empty:
+                    # Send keepalive ping
+                    yield f": keepalive\n\n"
+                except Exception as e:
+                    logger.debug(f"[SSE] Error in agent steps event stream for user {user_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    break
+        except GeneratorExit:
+            logger.debug(f"[SSE] Client disconnected (GeneratorExit) for user {user_id}")
+        except Exception as e:
+            logger.debug(f"[SSE] Unexpected error in agent steps event stream for user {user_id}: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # Remove connection when client disconnects
+            SSEService.remove_connection(user_id, event_queue, connection_type='agent_steps')
+            logger.debug(f"[SSE] Agent steps connection closed for user {user_id}")
+    
+    return Response(
+        stream_with_context(event_stream()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',  # Disable buffering in nginx
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',  # Allow CORS for SSE
+            'Access-Control-Allow-Credentials': 'true'
+        }
+    )

@@ -209,6 +209,11 @@ export const chatAPI = {
       pending_content_id: pendingContentId
     });
   },
+  getAgentStepsSSEUrl: () => {
+    const token = getToken(); // Use getToken() utility like other endpoints
+    const baseUrl = api.defaults.baseURL || '';
+    return `${baseUrl}/api/chat/agent-steps/events?token=${encodeURIComponent(token || '')}`;
+  },
 };
 
 // Document API

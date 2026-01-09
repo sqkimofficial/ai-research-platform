@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { chatAPI, highlightsAPI, pdfAPI } from '../../services/api';
-import { getSessionId, setSessionId } from '../../utils/auth';
+import { getSessionId, setSessionId, getToken } from '../../utils/auth';
 import { markdownToHtml } from '../../utils/markdownConverter';
 import MessageBubble from './MessageBubble';
 import ProjectSelector from '../ProjectSelector/ProjectSelector';
@@ -117,6 +117,10 @@ const ChatWindow = ({
   const [sessionsLoadingMore, setSessionsLoadingMore] = useState(false);
   const [sessionsCacheKey, setSessionsCacheKey] = useState(null);
   
+  // SSE for real-time agent steps
+  const agentStepsSSERef = useRef(null);
+  const [currentAgentSteps, setCurrentAgentSteps] = useState({}); // { sessionId: [steps] }
+  
   // @ mention state
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
@@ -177,6 +181,151 @@ const ChatWindow = ({
       initializeSession();
     }
   }, [propSessionId, isNewChat, isSendingMessage]);
+
+  // Set up SSE connection for real-time agent steps
+  useEffect(() => {
+    console.log('[SSE] Setting up agent steps SSE connection...');
+    
+    // Get token first - use getToken() utility like DocumentPanel does
+    const token = getToken();
+    if (!token) {
+      console.warn('[SSE] No token available, skipping agent steps SSE connection');
+      return;
+    }
+    
+    console.log('[SSE] Token found, proceeding with connection...');
+
+    // Set up SSE connection
+    const eventSourceUrl = chatAPI.getAgentStepsSSEUrl();
+    console.log('[SSE] Connecting to agent steps:', eventSourceUrl.replace(/token=[^&]+/, 'token=***'));
+    
+    let eventSource;
+    try {
+      eventSource = new EventSource(eventSourceUrl);
+      agentStepsSSERef.current = eventSource;
+      console.log('[SSE] EventSource created, readyState:', eventSource.readyState);
+    } catch (err) {
+      console.error('[SSE] Failed to create EventSource:', err);
+      return;
+    }
+
+    // Handle connection open
+    eventSource.onopen = () => {
+      console.log('[SSE] ✅ Agent steps connection established successfully in ChatWindow');
+      console.log('[SSE] EventSource readyState:', eventSource.readyState, '(1 = OPEN)');
+    };
+    
+    // Handle connection error - this fires on connection issues
+    eventSource.onerror = (err) => {
+      const readyState = eventSource.readyState;
+      console.error('[SSE] ❌ Agent steps connection error in ChatWindow:', err);
+      console.log('[SSE] EventSource readyState:', readyState, '(0=CONNECTING, 1=OPEN, 2=CLOSED)');
+      console.log('[SSE] EventSource URL:', eventSourceUrl.replace(/token=[^&]+/, 'token=***'));
+      
+      // ReadyState: 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
+      if (readyState === EventSource.CLOSED) {
+        console.error('[SSE] Connection closed - check backend logs and network tab');
+      } else if (readyState === EventSource.CONNECTING) {
+        console.warn('[SSE] Still connecting... (this may be normal on first connection)');
+      }
+    };
+
+    // Handle incoming events
+    eventSource.onmessage = (event) => {
+      try {
+        // Skip keepalive pings
+        if (event.data.trim() === '' || event.data.startsWith(':')) {
+          return;
+        }
+        
+        const data = JSON.parse(event.data);
+        console.log('[SSE] Received agent step event:', data);
+
+        if (data.type === 'agent_step' && data.data) {
+          const stepData = data.data;
+          const stepSessionId = stepData.session_id;
+          
+          console.log('[SSE] Processing step:', stepData.description, 'for session:', stepSessionId);
+          
+          if (stepSessionId) {
+            // Add step to current session's steps
+            setCurrentAgentSteps((prev) => {
+              const sessionSteps = prev[stepSessionId] || [];
+              // Avoid duplicates
+              const stepExists = sessionSteps.some(
+                step => step.description === stepData.description && step.timestamp === stepData.timestamp
+              );
+              if (!stepExists) {
+                console.log('[SSE] Adding step to currentAgentSteps:', stepData.description);
+                return {
+                  ...prev,
+                  [stepSessionId]: [...sessionSteps, stepData]
+                };
+              }
+              return prev;
+            });
+            
+            // Update the placeholder message or any assistant message for this session
+            setMessages((prev) => {
+              let updated = false;
+              const newMessages = prev.map((msg) => {
+                // Check if this message matches the session
+                const matchesSession = msg._sessionId === stepSessionId;
+                const isPlaceholder = msg._placeholderId;
+                const isPending = msg.pending_content_id;
+                
+                // Update placeholder message or pending message for this session
+                if (msg.role === 'assistant' && (matchesSession || isPlaceholder || isPending)) {
+                  const existingSteps = msg.agent_steps || [];
+                  const stepExists = existingSteps.some(
+                    step => step.description === stepData.description && step.timestamp === stepData.timestamp
+                  );
+                  if (!stepExists) {
+                    console.log('[SSE] Adding step to message:', stepData.description, 'Message ID:', msg._placeholderId || 'none');
+                    updated = true;
+                    return {
+                      ...msg,
+                      agent_steps: [...existingSteps, stepData]
+                    };
+                  }
+                }
+                return msg;
+              });
+              
+              // If no message was found to update, create a placeholder if we have a session
+              if (!updated && stepSessionId) {
+                console.log('[SSE] No message found, creating placeholder for session:', stepSessionId);
+                const placeholderMessage = {
+                  role: 'assistant',
+                  content: '',
+                  agent_steps: [stepData],
+                  timestamp: new Date().toISOString(),
+                  _placeholderId: `placeholder-${Date.now()}`,
+                  _sessionId: stepSessionId
+                };
+                return [...newMessages, placeholderMessage];
+              }
+              
+              return newMessages;
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[SSE] Error parsing agent step event:', err, event.data);
+      }
+    };
+
+    // Error handler is set above
+
+    // Cleanup on unmount
+    return () => {
+      if (eventSource) {
+        console.log('[SSE] Closing agent steps connection');
+        eventSource.close();
+        agentStepsSSERef.current = null;
+      }
+    };
+  }, []); // Only set up once on mount
 
   useEffect(() => {
     scrollToBottom();
@@ -1175,6 +1324,24 @@ const ChatWindow = ({
       attachedHighlights: attachedHighlightsToSend.length > 0 ? attachedHighlightsToSend : undefined
     };
     setMessages((prev) => [...prev, newUserMessage]);
+    
+    // Create a placeholder assistant message that will be updated with real-time steps
+    // IMPORTANT: Create this BEFORE sending the message so SSE events can update it
+    const placeholderMessageId = `placeholder-${Date.now()}`;
+    const placeholderMessage = {
+      role: 'assistant',
+      content: '', // Will be updated when final response arrives
+      agent_steps: [], // Will be updated in real-time via SSE
+      timestamp: new Date().toISOString(),
+      _placeholderId: placeholderMessageId,
+      _sessionId: targetSessionId
+    };
+    console.log('[CHAT] Creating placeholder message for session:', targetSessionId, 'with ID:', placeholderMessageId);
+    setMessages((prev) => {
+      const newMessages = [...prev, placeholderMessage];
+      console.log('[CHAT] Total messages after placeholder:', newMessages.length);
+      return newMessages;
+    });
 
     try {
       // Combine sections and highlights for API call
@@ -1186,23 +1353,48 @@ const ChatWindow = ({
         }))
       ];
       const response = await chatAPI.sendMessage(targetSessionId, userMessage, allAttachments, chatMode);
-      // Extract message, document_content, sources, status, and pending_content_id from response
+      // Extract message, document_content, sources, status, pending_content_id, and agent_steps from response
       const chatMessage = response.data.response || '';
       const documentContent = response.data.document_content || '';
       const sources = response.data.sources || [];
       const status = response.data.status;
       const pendingContentId = response.data.pending_content_id;
+      const agentSteps = response.data.agent_steps || [];
       
-      const aiMessage = {
-        role: 'assistant',
-        content: chatMessage,
-        sources: sources,
-        document_content: documentContent,
-        status: status,
-        pending_content_id: pendingContentId,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, aiMessage]);
+      // Get real-time steps for this session if available
+      const realtimeSteps = currentAgentSteps[targetSessionId] || [];
+      const allSteps = [...realtimeSteps, ...agentSteps];
+      // Remove duplicates
+      const uniqueSteps = allSteps.filter((step, index, self) =>
+        index === self.findIndex((s) => s.description === step.description && s.timestamp === step.timestamp)
+      );
+      
+      // Update the placeholder message instead of creating a new one
+      setMessages((prev) => {
+        return prev.map((msg) => {
+          if (msg._placeholderId && msg._sessionId === targetSessionId) {
+            // Replace placeholder with actual message
+            return {
+              role: 'assistant',
+              content: chatMessage,
+              sources: sources,
+              document_content: documentContent,
+              status: status,
+              pending_content_id: pendingContentId,
+              agent_steps: uniqueSteps,  // Agent execution steps for UI display (includes real-time + final)
+              timestamp: msg.timestamp, // Keep original timestamp
+            };
+          }
+          return msg;
+        });
+      });
+      
+      // Clear real-time steps for this session after adding to message
+      setCurrentAgentSteps((prev) => {
+        const updated = { ...prev };
+        delete updated[targetSessionId];
+        return updated;
+      });
       
       // Don't notify parent for pending content - only notify when approved
     } catch (error) {
@@ -1968,16 +2160,33 @@ const ChatWindow = ({
               )}
               <div className="assistant-responses">
                 {commandsFilter !== 'commands' &&
-                  pair.assistantMessages.map(({ message, index }) => (
-                    <MessageBubble 
-                      key={index} 
-                      message={message}
-                      onApprove={handleApprove}
-                      onEdit={handleEdit}
-                      editedContent={editingContent[message.pending_content_id]}
-                      mode={chatMode}
-                    />
-                  ))}
+                  pair.assistantMessages.map(({ message, index }) => {
+                    // Merge real-time steps if available for this message
+                    const sessionIdForMessage = sessionId || propSessionId;
+                    const realtimeSteps = sessionIdForMessage ? (currentAgentSteps[sessionIdForMessage] || []) : [];
+                    const messageSteps = message.agent_steps || [];
+                    const allSteps = [...realtimeSteps, ...messageSteps];
+                    // Remove duplicates
+                    const uniqueSteps = allSteps.filter((step, idx, self) =>
+                      idx === self.findIndex((s) => s.description === step.description && s.timestamp === step.timestamp)
+                    );
+                    
+                    const messageWithSteps = {
+                      ...message,
+                      agent_steps: uniqueSteps.length > 0 ? uniqueSteps : message.agent_steps
+                    };
+                    
+                    return (
+                      <MessageBubble 
+                        key={index} 
+                        message={messageWithSteps}
+                        onApprove={handleApprove}
+                        onEdit={handleEdit}
+                        editedContent={editingContent[message.pending_content_id]}
+                        mode={chatMode}
+                      />
+                    );
+                  })}
               </div>
             </div>
           ))}
