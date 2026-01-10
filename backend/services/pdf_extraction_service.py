@@ -821,6 +821,56 @@ Now analyze the image carefully and extract ALL highlights with their correct co
         except Exception as e:
             logger.debug(f"Error generating image preview: {e}")
             return None
+    
+    def extract_full_text(self, file_base64_data, content_type='application/pdf'):
+        """
+        Extract full text from a PDF using PyMuPDF's get_text() method.
+        
+        Args:
+            file_base64_data: Base64 encoded PDF file data
+            content_type: MIME type (should be 'application/pdf')
+        
+        Returns:
+            Full text string extracted from all pages of the PDF, or None if extraction fails
+        """
+        if content_type != 'application/pdf':
+            logger.warning(f"extract_full_text called with non-PDF content type: {content_type}")
+            return None
+        
+        if not PYMUPDF_AVAILABLE:
+            logger.warning("PyMuPDF not available for text extraction")
+            return None
+        
+        try:
+            # Decode base64 to bytes
+            pdf_bytes = base64.b64decode(file_base64_data)
+            
+            # Open the PDF document
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            
+            # Get page count before processing
+            num_pages = len(doc)
+            
+            # Extract text from all pages
+            full_text_parts = []
+            for page_num in range(num_pages):
+                page = doc[page_num]
+                # Use get_text() to extract text from the page
+                page_text = page.get_text()
+                if page_text:
+                    full_text_parts.append(page_text)
+            
+            doc.close()
+            
+            # Combine all pages into single text
+            full_text = '\n\n'.join(full_text_parts)
+            
+            logger.debug(f"Extracted {len(full_text)} characters from PDF ({num_pages} pages)")
+            return full_text
+            
+        except Exception as e:
+            logger.error(f"Error extracting full text from PDF: {e}")
+            return None
 
 
 # Singleton instance

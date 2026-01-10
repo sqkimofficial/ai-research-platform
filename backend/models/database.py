@@ -576,8 +576,22 @@ class ResearchDocumentModel:
 
 class DocumentEmbeddingModel:
     @staticmethod
-    def create_embedding(document_id, chunk_index, chunk_text, embedding, metadata):
-        """Create a new document embedding"""
+    def create_embedding(document_id, chunk_index, chunk_text, embedding, metadata, 
+                       source_type=None, source_id=None, project_id=None, user_id=None):
+        """
+        Create a new document embedding with multi-source support.
+        
+        Args:
+            document_id: Document ID (can be session_id for research documents, or source_id for other sources)
+            chunk_index: Index of the chunk within the document
+            chunk_text: Text content of the chunk
+            embedding: Vector embedding of the chunk
+            metadata: Additional metadata dict
+            source_type: Type of source ('research_document', 'highlight', 'pdf', 'image_ocr')
+            source_id: ID of the source (highlight_id, pdf_id, image_id, document_id)
+            project_id: Project ID for filtering
+            user_id: User ID for user isolation
+        """
         db = Database.get_db()
         embedding_doc = {
             'document_id': document_id,
@@ -587,6 +601,17 @@ class DocumentEmbeddingModel:
             'metadata': metadata,
             'created_at': datetime.utcnow()
         }
+        
+        # Add multi-source fields if provided
+        if source_type:
+            embedding_doc['source_type'] = source_type
+        if source_id:
+            embedding_doc['source_id'] = source_id
+        if project_id:
+            embedding_doc['project_id'] = project_id
+        if user_id:
+            embedding_doc['user_id'] = user_id
+        
         db.document_embeddings.insert_one(embedding_doc)
     
     @staticmethod
@@ -601,10 +626,92 @@ class DocumentEmbeddingModel:
         return embeddings
     
     @staticmethod
+    def get_embeddings_by_source(source_type, source_id, user_id=None, project_id=None):
+        """
+        Get all embeddings for a specific source.
+        
+        Args:
+            source_type: Type of source ('research_document', 'highlight', 'pdf', 'image_ocr')
+            source_id: ID of the source
+            user_id: Optional user ID for filtering
+            project_id: Optional project ID for filtering
+        
+        Returns:
+            List of embedding documents
+        """
+        db = Database.get_db()
+        query = {
+            'source_type': source_type,
+            'source_id': source_id
+        }
+        if user_id:
+            query['user_id'] = user_id
+        if project_id:
+            query['project_id'] = project_id
+        
+        embeddings = list(db.document_embeddings.find(query).sort('chunk_index', 1))
+        # Convert BSON arrays to Python lists
+        for emb in embeddings:
+            if 'embedding' in emb and isinstance(emb['embedding'], list):
+                emb['embedding'] = list(emb['embedding'])
+        return embeddings
+    
+    @staticmethod
+    def get_embeddings_by_filters(user_id, project_id=None, source_types=None):
+        """
+        Get embeddings filtered by user, project, and source types.
+        
+        Args:
+            user_id: User ID (required)
+            project_id: Optional project ID
+            source_types: Optional list of source types to filter by
+        
+        Returns:
+            List of embedding documents
+        """
+        db = Database.get_db()
+        query = {'user_id': user_id}
+        if project_id:
+            query['project_id'] = project_id
+        if source_types:
+            query['source_type'] = {'$in': source_types}
+        
+        embeddings = list(db.document_embeddings.find(query).sort('chunk_index', 1))
+        # Convert BSON arrays to Python lists
+        for emb in embeddings:
+            if 'embedding' in emb and isinstance(emb['embedding'], list):
+                emb['embedding'] = list(emb['embedding'])
+        return embeddings
+    
+    @staticmethod
     def delete_embeddings_by_document(document_id):
         """Delete all embeddings for a document"""
         db = Database.get_db()
         result = db.document_embeddings.delete_many({'document_id': document_id})
+        return result.deleted_count
+    
+    @staticmethod
+    def delete_embeddings_by_source(source_type, source_id, user_id=None):
+        """
+        Delete all embeddings for a specific source.
+        
+        Args:
+            source_type: Type of source ('research_document', 'highlight', 'pdf', 'image_ocr')
+            source_id: ID of the source
+            user_id: Optional user ID for safety (ensures we only delete user's own embeddings)
+        
+        Returns:
+            Number of embeddings deleted
+        """
+        db = Database.get_db()
+        query = {
+            'source_type': source_type,
+            'source_id': source_id
+        }
+        if user_id:
+            query['user_id'] = user_id
+        
+        result = db.document_embeddings.delete_many(query)
         return result.deleted_count
 
 class ResearchMilestoneModel:
@@ -745,6 +852,18 @@ class HighlightModel:
             'user_id': user_id,
             'project_id': project_id,
             'source_url': source_url
+        })
+    
+    @staticmethod
+    def get_highlights_by_page_title(user_id, project_id, page_title):
+        """Get highlights for a specific page title (case-insensitive)"""
+        db = Database.get_db()
+        # Use case-insensitive regex for page_title match
+        import re
+        return db.highlights.find_one({
+            'user_id': user_id,
+            'project_id': project_id,
+            'page_title': {'$regex': f'^{re.escape(page_title)}$', '$options': 'i'}
         })
     
     @staticmethod

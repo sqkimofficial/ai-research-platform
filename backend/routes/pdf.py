@@ -7,6 +7,8 @@ from models.database import PDFDocumentModel, ProjectModel, HighlightModel
 from utils.auth import get_user_id_from_token
 from utils.rate_limiter import get_limiter
 from services.pdf_extraction_service import get_highlight_extraction_service
+from services.vector_service import VectorService
+from services.ocr_position_service import get_ocr_position_service
 from services.redis_service import get_redis_service
 from services.s3_service import S3Service
 from services.sse_service import SSEService
@@ -113,6 +115,89 @@ def extract_highlights_async(doc_id, file_base64_data=None, content_type='applic
         
         logger.debug(f"Extracted {len(highlights)} highlights from document {doc_id}")
         logger.debug(f"[EXTRACTION] Continuing to verification and cache invalidation for PDF {doc_id}, user_id: {user_id}")
+        
+        # Index highlights for semantic search (Phase I)
+        project_id = pdf_doc.get('project_id')
+        file_url = pdf_doc.get('file_url')
+        try:
+            # Get saved highlights from database to index them
+            if file_url and project_id:
+                highlight_doc = HighlightModel.get_highlights_by_url(user_id, project_id, file_url)
+                if highlight_doc:
+                    vector_service = VectorService()
+                    for highlight in highlight_doc.get('highlights', []):
+                        highlight_id = highlight.get('highlight_id')
+                        highlight_text = highlight.get('text', '')
+                        note = highlight.get('note')
+                        
+                        # Combine text and note for indexing
+                        combined_text = highlight_text
+                        if note:
+                            combined_text = f"{highlight_text}\n\n{note}"
+                        
+                        if highlight_id and combined_text:
+                            vector_service.index_highlight(
+                                highlight_id=highlight_id,
+                                text=combined_text,
+                                user_id=user_id,
+                                project_id=project_id,
+                                source_url=file_url
+                            )
+                    logger.debug(f"[VECTORIZATION] Successfully indexed {len(highlight_doc.get('highlights', []))} highlights for PDF {doc_id}")
+        except Exception as vec_error:
+            logger.error(f"[VECTORIZATION] Error indexing highlights: {vec_error}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the entire extraction if vectorization fails
+        
+        # Extract and index full text for semantic search (Phase I)
+        project_id = pdf_doc.get('project_id')
+        vector_service = VectorService()
+        
+        if content_type == 'application/pdf':
+            # Extract and index full PDF text
+            try:
+                logger.debug(f"[VECTORIZATION] Extracting full text from PDF {doc_id}")
+                full_text = extraction_service.extract_full_text(file_base64_data, content_type)
+                if full_text:
+                    vector_service.index_pdf_full_text(
+                        pdf_id=doc_id,
+                        full_text=full_text,
+                        user_id=user_id,
+                        project_id=project_id
+                    )
+                    logger.debug(f"[VECTORIZATION] Successfully indexed full PDF text for {doc_id}")
+                else:
+                    logger.debug(f"[VECTORIZATION] No text extracted from PDF {doc_id}")
+            except Exception as vec_error:
+                logger.error(f"[VECTORIZATION] Error indexing PDF full text: {vec_error}")
+                import traceback
+                traceback.print_exc()
+                # Don't fail the entire extraction if vectorization fails
+        elif content_type in ['image/jpeg', 'image/jpg', 'image/png']:
+            # Extract and index OCR text from image
+            try:
+                logger.debug(f"[VECTORIZATION] Extracting OCR text from image {doc_id}")
+                ocr_service = get_ocr_position_service()
+                if ocr_service and ocr_service.available:
+                    ocr_text = ocr_service.extract_full_text(file_base64_data)
+                    if ocr_text:
+                        vector_service.index_image_ocr(
+                            image_id=doc_id,
+                            ocr_text=ocr_text,
+                            user_id=user_id,
+                            project_id=project_id
+                        )
+                        logger.debug(f"[VECTORIZATION] Successfully indexed OCR text for image {doc_id}")
+                    else:
+                        logger.debug(f"[VECTORIZATION] No OCR text extracted from image {doc_id}")
+                else:
+                    logger.debug(f"[VECTORIZATION] OCR service not available for image {doc_id}")
+            except Exception as vec_error:
+                logger.error(f"[VECTORIZATION] Error indexing image OCR text: {vec_error}")
+                import traceback
+                traceback.print_exc()
+                # Don't fail the entire extraction if vectorization fails
         
         # Verify the update was successful by reading back from DB
         try:

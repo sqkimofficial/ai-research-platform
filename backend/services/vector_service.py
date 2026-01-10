@@ -58,10 +58,22 @@ class VectorService:
         
         return chunks
     
-    def index_document(self, session_id: str, document_text: str) -> bool:
-        """Create embeddings for document chunks and store in database"""
+    def index_document(self, session_id: str, document_text: str, 
+                      user_id: str = None, project_id: str = None) -> bool:
+        """
+        Create embeddings for document chunks and store in database.
+        
+        Args:
+            session_id: Session ID (used as document_id)
+            document_text: HTML document text
+            user_id: Optional user ID for multi-source support
+            project_id: Optional project ID for multi-source support
+        
+        Returns:
+            True if successful, False otherwise
+        """
         try:
-            # Use session_id as document_id for now
+            # Use session_id as document_id for backward compatibility
             document_id = session_id
             
             # Delete existing embeddings for this document
@@ -80,7 +92,7 @@ class VectorService:
             for chunk in chunks:
                 embedding = self.openai_service.create_embedding(chunk['text'])
                 
-                # Store in database
+                # Store in database with optional multi-source fields
                 DocumentEmbeddingModel.create_embedding(
                     document_id=document_id,
                     chunk_index=chunk['index'],
@@ -90,7 +102,11 @@ class VectorService:
                         'session_id': session_id,
                         'start_char': chunk['start_char'],
                         'end_char': chunk['end_char']
-                    }
+                    },
+                    source_type='research_document' if user_id else None,
+                    source_id=document_id if user_id else None,
+                    project_id=project_id,
+                    user_id=user_id
                 )
             
             return True
@@ -109,16 +125,201 @@ class VectorService:
             return 0.0
         return dot_product / (norm1 * norm2)
     
-    def search_relevant_chunks(self, session_id: str, query: str, top_k: int = 3) -> List[Dict]:
-        """Find most relevant document chunks for a query using semantic search"""
+    def index_highlight(self, highlight_id: str, text: str, user_id: str, project_id: str, source_url: str = None) -> bool:
+        """
+        Index a highlight (text + note) for semantic search.
+        
+        Args:
+            highlight_id: Highlight ID
+            text: Combined highlight text and note
+            user_id: User ID
+            project_id: Project ID
+            source_url: Optional source URL for metadata
+        
+        Returns:
+            True if successful, False otherwise
+        """
         try:
-            document_id = session_id
+            # Delete existing embeddings for this highlight
+            DocumentEmbeddingModel.delete_embeddings_by_source('highlight', highlight_id, user_id)
             
+            if not text or not text.strip():
+                return True
+            
+            # Chunk the text
+            chunks = self.chunk_text(text)
+            
+            if not chunks:
+                return True
+            
+            # Create embeddings for each chunk
+            for chunk in chunks:
+                embedding = self.openai_service.create_embedding(chunk['text'])
+                
+                # Store in database with source metadata
+                DocumentEmbeddingModel.create_embedding(
+                    document_id=highlight_id,  # Use highlight_id as document_id for backward compatibility
+                    chunk_index=chunk['index'],
+                    chunk_text=chunk['text'],
+                    embedding=embedding,
+                    metadata={
+                        'highlight_id': highlight_id,
+                        'source_url': source_url,
+                        'start_char': chunk['start_char'],
+                        'end_char': chunk['end_char']
+                    },
+                    source_type='highlight',
+                    source_id=highlight_id,
+                    project_id=project_id,
+                    user_id=user_id
+                )
+            
+            logger.debug(f"Indexed highlight {highlight_id} with {len(chunks)} chunks")
+            return True
+        except Exception as e:
+            logger.error(f"Error indexing highlight: {e}")
+            return False
+    
+    def index_pdf_full_text(self, pdf_id: str, full_text: str, user_id: str, project_id: str) -> bool:
+        """
+        Index full PDF text for semantic search.
+        
+        Args:
+            pdf_id: PDF document ID
+            full_text: Full text extracted from PDF
+            user_id: User ID
+            project_id: Project ID
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Delete existing embeddings for this PDF
+            DocumentEmbeddingModel.delete_embeddings_by_source('pdf', pdf_id, user_id)
+            
+            if not full_text or not full_text.strip():
+                return True
+            
+            # Chunk the text
+            chunks = self.chunk_text(full_text)
+            
+            if not chunks:
+                return True
+            
+            # Create embeddings for each chunk
+            for chunk in chunks:
+                embedding = self.openai_service.create_embedding(chunk['text'])
+                
+                # Store in database with source metadata
+                DocumentEmbeddingModel.create_embedding(
+                    document_id=pdf_id,  # Use pdf_id as document_id for backward compatibility
+                    chunk_index=chunk['index'],
+                    chunk_text=chunk['text'],
+                    embedding=embedding,
+                    metadata={
+                        'pdf_id': pdf_id,
+                        'start_char': chunk['start_char'],
+                        'end_char': chunk['end_char']
+                    },
+                    source_type='pdf',
+                    source_id=pdf_id,
+                    project_id=project_id,
+                    user_id=user_id
+                )
+            
+            logger.debug(f"Indexed PDF {pdf_id} full text with {len(chunks)} chunks")
+            return True
+        except Exception as e:
+            logger.error(f"Error indexing PDF full text: {e}")
+            return False
+    
+    def index_image_ocr(self, image_id: str, ocr_text: str, user_id: str, project_id: str) -> bool:
+        """
+        Index OCR text from an image for semantic search.
+        
+        Args:
+            image_id: Image ID (can be pdf_id if image is part of PDF)
+            ocr_text: Full OCR text from image
+            user_id: User ID
+            project_id: Project ID
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Delete existing embeddings for this image
+            DocumentEmbeddingModel.delete_embeddings_by_source('image_ocr', image_id, user_id)
+            
+            if not ocr_text or not ocr_text.strip():
+                return True
+            
+            # Chunk the text
+            chunks = self.chunk_text(ocr_text)
+            
+            if not chunks:
+                return True
+            
+            # Create embeddings for each chunk
+            for chunk in chunks:
+                embedding = self.openai_service.create_embedding(chunk['text'])
+                
+                # Store in database with source metadata
+                DocumentEmbeddingModel.create_embedding(
+                    document_id=image_id,  # Use image_id as document_id for backward compatibility
+                    chunk_index=chunk['index'],
+                    chunk_text=chunk['text'],
+                    embedding=embedding,
+                    metadata={
+                        'image_id': image_id,
+                        'start_char': chunk['start_char'],
+                        'end_char': chunk['end_char']
+                    },
+                    source_type='image_ocr',
+                    source_id=image_id,
+                    project_id=project_id,
+                    user_id=user_id
+                )
+            
+            logger.debug(f"Indexed image OCR {image_id} with {len(chunks)} chunks")
+            return True
+        except Exception as e:
+            logger.error(f"Error indexing image OCR: {e}")
+            return False
+    
+    def search_relevant_chunks(self, session_id: str, query: str, top_k: int = 3, 
+                              user_id: str = None, project_id: str = None, 
+                              source_types: List[str] = None) -> List[Dict]:
+        """
+        Find most relevant document chunks for a query using semantic search.
+        Supports multi-source search with filtering.
+        
+        Args:
+            session_id: Session ID (for backward compatibility with research documents)
+            query: Search query
+            top_k: Number of top results to return
+            user_id: Optional user ID for filtering
+            project_id: Optional project ID for filtering
+            source_types: Optional list of source types to filter by ('research_document', 'highlight', 'pdf', 'image_ocr')
+        
+        Returns:
+            List of relevant chunks with similarity scores and metadata
+        """
+        try:
             # Get query embedding
             query_embedding = self.openai_service.create_embedding(query)
             
-            # Get all embeddings for this document
-            embeddings = DocumentEmbeddingModel.get_embeddings_by_document(document_id)
+            # Get embeddings based on filters
+            if user_id:
+                # Multi-source search with filters
+                embeddings = DocumentEmbeddingModel.get_embeddings_by_filters(
+                    user_id=user_id,
+                    project_id=project_id,
+                    source_types=source_types
+                )
+            else:
+                # Backward compatibility: search by session_id (document_id)
+                document_id = session_id
+                embeddings = DocumentEmbeddingModel.get_embeddings_by_document(document_id)
             
             if not embeddings:
                 return []
@@ -127,12 +328,24 @@ class VectorService:
             results = []
             for emb_doc in embeddings:
                 similarity = self.cosine_similarity(query_embedding, emb_doc['embedding'])
-                results.append({
+                
+                # Build result with source metadata
+                result = {
                     'chunk_text': emb_doc['chunk_text'],
-                    'chunk_index': emb_doc['chunk_index'],
+                    'chunk_index': emb_doc.get('chunk_index', 0),
                     'similarity': similarity,
                     'metadata': emb_doc.get('metadata', {})
-                })
+                }
+                
+                # Add source type and ID if available
+                if 'source_type' in emb_doc:
+                    result['source_type'] = emb_doc['source_type']
+                if 'source_id' in emb_doc:
+                    result['source_id'] = emb_doc['source_id']
+                if 'project_id' in emb_doc:
+                    result['project_id'] = emb_doc['project_id']
+                
+                results.append(result)
             
             # Sort by similarity and return top_k
             results.sort(key=lambda x: x['similarity'], reverse=True)

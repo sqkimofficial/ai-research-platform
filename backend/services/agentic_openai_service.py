@@ -89,7 +89,7 @@ except ImportError:
     raise
 
 
-# Store session_id in a thread-local or context for function tools
+# Store session_id and project_id in a thread-local or context for function tools
 import threading
 _context = threading.local()
 
@@ -100,6 +100,14 @@ def get_session_id():
 def set_session_id(session_id):
     """Set current session_id in context"""
     _context.session_id = session_id
+
+def get_project_id():
+    """Get current project_id from context"""
+    return getattr(_context, 'project_id', None)
+
+def set_project_id(project_id):
+    """Set current project_id in context"""
+    _context.project_id = project_id
 
 
 class AgenticOpenAIService:
@@ -159,10 +167,10 @@ Always respond in valid JSON format with this exact structure:
             name="Research Assistant",
             instructions=self.base_instructions,
             model=self.model,  # Use OpenAIChatCompletionsModel instead of string
-            tools=[self.perplexity_research_tool, self.search_vector_database_tool]
+            tools=[self.perplexity_research_tool, self.search_vector_database_tool, self.get_pdfs_tool, self.get_highlights_tool]
         )
         
-        logger.info("AgenticOpenAIService initialized with OpenAI agent (Chat Completions API) and function tools (perplexity_research, search_vector_database)")
+        logger.info("AgenticOpenAIService initialized with OpenAI agent (Chat Completions API) and function tools (perplexity_research, search_vector_database, get_pdfs, get_highlights)")
     
     def _create_function_tools(self, user_id: Optional[str] = None, session_id: Optional[str] = None, collect_step_fn=None):
         """Create function tools with proper async handling
@@ -376,9 +384,9 @@ Always respond in valid JSON format with this exact structure:
                 return f"Error performing research: {str(e)}"
         
         @function_tool
-        def search_vector_database(query: str) -> str:
+        def search_vector_database(query: str, source_types: str = None) -> str:
             """
-            Search the user's saved documents, highlights, and content using semantic search.
+            Search the user's saved documents, highlights, PDFs, and images using semantic search.
             
             ALWAYS use this tool when the user:
             - Asks to summarize their document ("summarize my document", "summarize the document")
@@ -386,15 +394,22 @@ Always respond in valid JSON format with this exact structure:
             - Mentions "my document", "the document", "my saved content", "my highlights"
             - Asks to find information from their saved content
             - Wants to know what they've written or saved
+            - Asks about highlights, PDFs, or images they've uploaded
             
-            This tool searches through the user's actual saved documents and content.
-            If the user asks about THEIR document or content, you MUST call this tool first.
+            This tool searches through the user's actual saved documents, highlights, PDFs, and images.
+            If the user asks about THEIR content, you MUST call this tool first.
             
             Args:
                 query: The search query to find relevant content (use the user's question or topic)
+                source_types: Optional comma-separated string of source types to filter by:
+                    - "research_document" for research documents
+                    - "highlight" for highlights
+                    - "pdf" for PDF full text
+                    - "image_ocr" for image OCR text
+                    - Leave empty or omit to search all sources
             
             Returns:
-                Formatted string with relevant document chunks from the user's documents
+                Formatted string with relevant document chunks from the user's documents, highlights, PDFs, and images
             """
             try:
                 logger.info(f"[TOOL CALLED] search_vector_database with query: {query[:100]}...")
@@ -450,15 +465,40 @@ Always respond in valid JSON format with this exact structure:
                     if collect_step_fn:
                         collect_step_fn(step4)
                 
-                # Get session_id from context
+                # Get session_id and project_id from context
                 session_id_from_context = get_session_id()
-                logger.debug(f"Session ID from context: {session_id_from_context}")
+                project_id_from_context = get_project_id()
+                logger.debug(f"Session ID from context: {session_id_from_context}, Project ID: {project_id_from_context}")
             
                 # Use session_id from parameter if available, otherwise from context
                 search_session_id = session_id if session_id else session_id_from_context
-                if not search_session_id:
-                    logger.warning("Session ID not available in context for vector search")
-                    return "Error: Session ID not available. Cannot search documents."
+                
+                # Parse source_types if provided
+                source_types_list = None
+                if source_types:
+                    # Parse comma-separated string into list
+                    source_types_list = [s.strip() for s in source_types.split(',') if s.strip()]
+                    logger.debug(f"Filtering by source types: {source_types_list}")
+                
+                # For multi-source search, we need user_id and project_id
+                if user_id and project_id_from_context:
+                    # Use multi-source search with filters
+                    logger.debug(f"Using multi-source search with user_id={user_id}, project_id={project_id_from_context}")
+                    relevant_chunks = vector_service.search_relevant_chunks(
+                        session_id=search_session_id or '',  # Still pass for backward compatibility
+                        query=query,
+                        top_k=5,
+                        user_id=user_id,
+                        project_id=project_id_from_context,
+                        source_types=source_types_list
+                    )
+                elif search_session_id:
+                    # Backward compatibility: search by session_id only
+                    logger.debug(f"Using backward-compatible search by session_id only")
+                    relevant_chunks = vector_service.search_relevant_chunks(search_session_id, query, top_k=5)
+                else:
+                    logger.warning("Neither user_id/project_id nor session_id available for vector search")
+                    return "Error: Session ID or user context not available. Cannot search documents."
                 
                 logger.debug(f"Searching vector database with query: {query[:100]}...")
                 
@@ -474,9 +514,6 @@ Always respond in valid JSON format with this exact structure:
                     SSEService.broadcast_to_user(user_id, 'agent_step', step5)
                     if collect_step_fn:
                         collect_step_fn(step5)
-                
-                # Search for relevant chunks
-                relevant_chunks = vector_service.search_relevant_chunks(search_session_id, query, top_k=5)
                 
                 if not relevant_chunks:
                     if user_id:
@@ -517,12 +554,22 @@ Always respond in valid JSON format with this exact structure:
                     if collect_step_fn:
                         collect_step_fn(step7)
                 
-                # Format results
+                # Format results with source type information
                 results = []
                 for i, chunk in enumerate(relevant_chunks, 1):
                     chunk_text = chunk.get('chunk_text', '')
                     similarity = chunk.get('similarity', 0)
-                    results.append(f"[Chunk {i}, Similarity: {similarity:.2f}]\n{chunk_text}")
+                    source_type = chunk.get('source_type', 'document')
+                    
+                    # Format source type for display
+                    source_label = {
+                        'research_document': 'Document',
+                        'highlight': 'Highlight',
+                        'pdf': 'PDF',
+                        'image_ocr': 'Image OCR'
+                    }.get(source_type, 'Document')
+                    
+                    results.append(f"[{source_label} - Chunk {i}, Similarity: {similarity:.2f}]\n{chunk_text}")
                 
                 # Emit step: Formatting results
                 if user_id:
@@ -560,9 +607,551 @@ Always respond in valid JSON format with this exact structure:
                 log_error(logger, e, "Error in search_vector_database function tool")
                 return f"Error searching documents: {str(e)}"
         
+        @function_tool
+        def get_pdfs(project_id: str = None) -> str:
+            """
+            Get PDF documents for the user's project.
+            
+            Use this tool when the user:
+            - Asks about their PDFs ("show me my PDFs", "what PDFs do I have")
+            - Wants to see uploaded documents
+            - Asks about specific PDF content or metadata
+            - Needs to reference PDFs they've uploaded
+            
+            Args:
+                project_id: Optional project ID to filter PDFs. If not provided, uses project_id from session context.
+            
+            Returns:
+                Formatted string with list of PDF documents and their metadata
+            """
+            try:
+                logger.info(f"[TOOL CALLED] get_pdfs with project_id: {project_id}")
+                
+                # Get project_id from context if not provided
+                project_id_from_context = get_project_id()
+                final_project_id = project_id if project_id else project_id_from_context
+                
+                if not user_id:
+                    return "Error: User context not available. Cannot fetch PDFs."
+                
+                if not final_project_id:
+                    return "Error: Project ID not available. Cannot fetch PDFs."
+                
+                # Emit comprehensive SSE events for PDF fetching
+                if user_id:
+                    # Step 1: Tool selection
+                    step1 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_pdfs',
+                        'description': 'Deciding to fetch your PDFs...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step1)
+                    if collect_step_fn:
+                        collect_step_fn(step1)
+                    
+                    # Step 2: Querying database
+                    step2 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_pdfs',
+                        'description': 'Querying database for PDF documents...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step2)
+                    if collect_step_fn:
+                        collect_step_fn(step2)
+                    
+                    # Step 3: Fetching PDFs
+                    step3 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_pdfs',
+                        'description': f'Fetching PDFs for project...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step3)
+                    if collect_step_fn:
+                        collect_step_fn(step3)
+                
+                # Import models
+                from models.database import PDFDocumentModel, HighlightModel
+                
+                # Get PDFs for the project
+                pdfs = PDFDocumentModel.get_pdf_documents_by_project(user_id, final_project_id)
+                
+                if not pdfs:
+                    if user_id:
+                        step4 = {
+                            'type': 'tool_call',
+                            'tool_name': 'get_pdfs',
+                            'description': 'No PDFs found in your project...',
+                            'session_id': session_id,
+                            'timestamp': datetime.utcnow().isoformat()
+                        }
+                        SSEService.broadcast_to_user(user_id, 'agent_step', step4)
+                        if collect_step_fn:
+                            collect_step_fn(step4)
+                    return "No PDF documents found in your project."
+                
+                # Emit step: Found PDFs
+                if user_id:
+                    step4 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_pdfs',
+                        'description': f'Found {len(pdfs)} PDF document(s)...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step4)
+                    if collect_step_fn:
+                        collect_step_fn(step4)
+                    
+                    # Step: Processing PDF metadata
+                    step5 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_pdfs',
+                        'description': 'Processing PDF metadata and highlights...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step5)
+                    if collect_step_fn:
+                        collect_step_fn(step5)
+                
+                # Format results
+                results = []
+                for pdf in pdfs:
+                    pdf_id = pdf.get('pdf_id', 'unknown')
+                    filename = pdf.get('filename', 'Untitled')
+                    extraction_status = pdf.get('extraction_status', 'unknown')
+                    file_url = pdf.get('file_url')
+                    
+                    # Get highlight count
+                    highlight_count = 0
+                    if file_url:
+                        highlight_doc = HighlightModel.get_highlights_by_url(user_id, final_project_id, file_url)
+                        if highlight_doc:
+                            highlight_count = len(highlight_doc.get('highlights', []))
+                    
+                    status_emoji = {
+                        'completed': '✓',
+                        'processing': '⏳',
+                        'pending': '⏸',
+                        'failed': '✗'
+                    }.get(extraction_status, '?')
+                    
+                    pdf_info = f"- {filename} (ID: {pdf_id})\n  Status: {status_emoji} {extraction_status}\n  Highlights: {highlight_count}"
+                    results.append(pdf_info)
+                
+                # Emit step: Formatting results
+                if user_id:
+                    step6 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_pdfs',
+                        'description': 'Formatting PDF list...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step6)
+                    if collect_step_fn:
+                        collect_step_fn(step6)
+                
+                result = f"Found {len(pdfs)} PDF document(s) in your project:\n\n" + "\n\n".join(results)
+                
+                # Emit completion step
+                if user_id:
+                    step7 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_pdfs',
+                        'description': 'PDF fetch completed...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step7)
+                    if collect_step_fn:
+                        collect_step_fn(step7)
+                
+                logger.debug(f"PDF fetch completed, found {len(pdfs)} PDFs")
+                return result
+                
+            except Exception as e:
+                log_error(logger, e, "Error in get_pdfs function tool")
+                return f"Error fetching PDFs: {str(e)}"
+        
+        @function_tool
+        def get_highlights(query: str = None, project_id: str = None, source_url: str = None, page_title: str = None) -> str:
+            """
+            Get highlights for the user's project using semantic search on highlight content and notes.
+            
+            DEFAULT SEARCH METHOD: Semantic/vector search on highlight text and notes (uses embeddings).
+            This searches the actual content of highlights, not just titles or URLs.
+            
+            Use this tool when the user:
+            - Asks about their highlights ("show me my highlights", "what did I highlight about X")
+            - Wants to see saved highlights matching a topic or content
+            - Asks "what highlights do I have about [topic]" - use query parameter with the topic
+            - Mentions highlight content or notes they want to find
+            
+            ONLY use exact matching (source_url/page_title) if:
+            - User explicitly mentions a URL (use source_url)
+            - User explicitly mentions "page title" or "title" (use page_title)
+            
+            Args:
+                query: REQUIRED for content search. The search query to find highlights by content/notes using semantic search.
+                       This searches highlight text and notes via embeddings. ALWAYS use this when searching by content.
+                       Example: if user asks "what highlights do I have about machine learning", use query="machine learning"
+                project_id: Optional project ID to filter highlights. If not provided, uses project_id from session context.
+                source_url: Optional source URL for exact match filtering (http://, https://, s3://). 
+                           ONLY use if user explicitly provides a URL.
+                page_title: Optional page title for exact match filtering. 
+                           ONLY use if user explicitly mentions "page title" or "title" and provides the exact title.
+            
+            Returns:
+                Formatted string with list of highlights and their metadata
+            """
+            try:
+                logger.info(f"[TOOL CALLED] get_highlights with query: {query}, project_id: {project_id}, source_url: {source_url}, page_title: {page_title}")
+                
+                # Get project_id from context if not provided
+                project_id_from_context = get_project_id()
+                final_project_id = project_id if project_id else project_id_from_context
+                
+                if not user_id:
+                    return "Error: User context not available. Cannot fetch highlights."
+                
+                if not final_project_id:
+                    return "Error: Project ID not available. Cannot fetch highlights."
+                
+                # Emit comprehensive SSE events for highlight fetching
+                if user_id:
+                    # Step 1: Tool selection
+                    step1 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_highlights',
+                        'description': 'Deciding to fetch your highlights...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step1)
+                    if collect_step_fn:
+                        collect_step_fn(step1)
+                    
+                    # Step 2: Determine search method description
+                    # Priority: query (semantic) > URL (exact) > page_title (exact) > all
+                    if query:
+                        step2_desc = f'Searching highlights by content: {query[:100]}{"..." if len(query) > 100 else ""}...'
+                    elif source_url and (source_url.startswith('http://') or source_url.startswith('https://') or source_url.startswith('s3://') or source_url.startswith('www.')):
+                        step2_desc = 'Searching highlights by URL...'
+                    elif page_title:
+                        step2_desc = f'Searching highlights by page title: {page_title}...'
+                    else:
+                        step2_desc = 'Fetching all highlights...'
+                    
+                    step2 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_highlights',
+                        'description': step2_desc,
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step2)
+                    if collect_step_fn:
+                        collect_step_fn(step2)
+                    
+                    # Step 3: Performing search
+                    if query:
+                        step3 = {
+                            'type': 'tool_call',
+                            'tool_name': 'get_highlights',
+                            'description': 'Using semantic search on highlight content...',
+                            'session_id': session_id,
+                            'timestamp': datetime.utcnow().isoformat()
+                        }
+                    else:
+                        step3 = {
+                            'type': 'tool_call',
+                            'tool_name': 'get_highlights',
+                            'description': 'Querying database...',
+                            'session_id': session_id,
+                            'timestamp': datetime.utcnow().isoformat()
+                        }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step3)
+                    if collect_step_fn:
+                        collect_step_fn(step3)
+                
+                # Import models
+                from models.database import HighlightModel, Database
+                
+                # Determine search strategy - Priority: query (semantic) > URL (exact) > page_title (exact) > all
+                highlights = []
+                
+                # Check if source_url is actually a URL
+                is_url = False
+                if source_url:
+                    is_url = (
+                        source_url.startswith('http://') or 
+                        source_url.startswith('https://') or 
+                        source_url.startswith('s3://') or
+                        source_url.startswith('www.')
+                    )
+                
+                # Priority 1: If query is provided, ALWAYS use semantic/vector search (default method)
+                # This searches highlight text and notes via embeddings - takes precedence over page_title and source_url
+                if query:
+                    search_query = query  # Use provided query for semantic search
+                    logger.debug(f"Using semantic search (priority 1): query='{search_query}'")
+                    logger.debug(f"Ignoring page_title='{page_title}' and source_url='{source_url}' when query is provided")
+                    logger.debug(f"Parameters: user_id={user_id}, project_id={final_project_id}, source_types=['highlight']")
+                    
+                    # Use vector search to find relevant highlight chunks
+                    relevant_chunks = vector_service.search_relevant_chunks(
+                        session_id='',  # Not needed for multi-source search
+                        query=search_query,
+                        top_k=10,
+                        user_id=user_id,
+                        project_id=final_project_id,
+                        source_types=['highlight']  # Only search highlights
+                    )
+                    
+                    logger.debug(f"Vector search returned {len(relevant_chunks)} chunks for query: {search_query}")
+                    
+                    if relevant_chunks:
+                        # Get unique highlight_ids from search results
+                        highlight_ids = set()
+                        for chunk in relevant_chunks:
+                            source_id = chunk.get('source_id')
+                            similarity = chunk.get('similarity', 0)
+                            chunk_text_preview = chunk.get('chunk_text', '')[:50]
+                            if source_id:
+                                highlight_ids.add(source_id)
+                                logger.debug(f"Found highlight_id: {source_id}, similarity: {similarity:.3f}, chunk_preview: {chunk_text_preview}...")
+                        
+                        logger.debug(f"Extracted {len(highlight_ids)} unique highlight_ids from search results: {list(highlight_ids)}")
+                        
+                        # Fetch full highlight documents for the matched highlight_ids
+                        if highlight_ids:
+                            all_project_highlights = HighlightModel.get_highlights_by_project(
+                                user_id=user_id,
+                                project_id=final_project_id,
+                                limit=None
+                            )
+                            
+                            logger.debug(f"Fetched {len(all_project_highlights)} highlight documents from project")
+                            
+                            # Match highlights by highlight_id
+                            matched_highlight_docs = {}
+                            total_highlights_scanned = 0
+                            for h_doc in all_project_highlights:
+                                for h in h_doc.get('highlights', []):
+                                    total_highlights_scanned += 1
+                                    highlight_id = h.get('highlight_id')
+                                    if highlight_id in highlight_ids:
+                                        # Add this highlight document if not already added
+                                        source_url_doc = h_doc.get('source_url')
+                                        if source_url_doc not in matched_highlight_docs:
+                                            matched_highlight_docs[source_url_doc] = {
+                                                'source_url': source_url_doc,
+                                                'page_title': h_doc.get('page_title'),
+                                                'highlights': [],
+                                                '_id': h_doc.get('_id'),
+                                                'updated_at': h_doc.get('updated_at')
+                                            }
+                                        # Add the matching highlight
+                                        matched_highlight_docs[source_url_doc]['highlights'].append(h)
+                                        logger.debug(f"✓ Matched highlight_id: {highlight_id} from source: {source_url_doc}, page_title: {h_doc.get('page_title')}")
+                            
+                            highlights = list(matched_highlight_docs.values())
+                            logger.debug(f"Scanned {total_highlights_scanned} total highlights, matched {len(highlights)} highlight documents with {sum(len(h.get('highlights', [])) for h in highlights)} highlights")
+                        else:
+                            logger.warning(f"Vector search returned chunks but no highlight_ids found in source_id field")
+                            logger.debug(f"Sample chunk structure: {relevant_chunks[0] if relevant_chunks else 'no chunks'}")
+                    else:
+                        logger.debug(f"No chunks returned from vector search for query: {search_query}")
+                        logger.debug(f"This could mean: 1) highlights are not indexed yet, 2) no highlights exist, or 3) query doesn't match any highlight content")
+                        
+                        # Check if any highlights exist in the database and if they have embeddings (for debugging)
+                        try:
+                            from models.database import DocumentEmbeddingModel
+                            all_project_highlights = HighlightModel.get_highlights_by_project(
+                                user_id=user_id,
+                                project_id=final_project_id,
+                                limit=1
+                            )
+                            if all_project_highlights:
+                                total_highlights = sum(len(h.get('highlights', [])) for h in HighlightModel.get_highlights_by_project(
+                                    user_id=user_id,
+                                    project_id=final_project_id,
+                                    limit=None
+                                ))
+                                logger.debug(f"Highlights exist in database ({len(all_project_highlights)} sources, {total_highlights} total highlights), but vector search returned no results")
+                                
+                                # Check if any highlight embeddings exist
+                                highlight_embeddings = DocumentEmbeddingModel.get_embeddings_by_filters(
+                                    user_id=user_id,
+                                    project_id=final_project_id,
+                                    source_types=['highlight']
+                                )
+                                logger.debug(f"Found {len(highlight_embeddings)} highlight embeddings in database")
+                                
+                                if len(highlight_embeddings) == 0:
+                                    logger.warning(f"⚠️ No highlight embeddings found! Highlights may not be indexed yet.")
+                                    logger.warning(f"   - Total highlights in database: {total_highlights}")
+                                    logger.warning(f"   - Highlights need to be indexed when saved. Check if index_highlight() is being called.")
+                                else:
+                                    logger.debug(f"Highlights are indexed ({len(highlight_embeddings)} embeddings), but query '{search_query}' doesn't match any highlight content")
+                                    # Show sample of what IS indexed
+                                    if highlight_embeddings:
+                                        sample_chunk = highlight_embeddings[0]
+                                        logger.debug(f"Sample indexed chunk preview: {sample_chunk.get('chunk_text', '')[:100]}...")
+                            else:
+                                logger.debug(f"No highlights found in database for this project")
+                        except Exception as check_error:
+                            logger.error(f"Error checking highlights in database: {check_error}")
+                            import traceback
+                            traceback.print_exc()
+                    
+                    # Ensure highlights is set even if search returned no results
+                    if 'highlights' not in locals() or highlights is None:
+                        highlights = []
+                
+                # Priority 2: If source_url is provided and is a URL (and no query), use exact URL match
+                elif source_url and is_url:
+                    logger.debug(f"Using exact URL match (priority 2): source_url='{source_url}'")
+                    highlight_doc = HighlightModel.get_highlights_by_url(
+                        user_id=user_id,
+                        project_id=final_project_id,
+                        source_url=source_url
+                    )
+                    highlights = [highlight_doc] if highlight_doc else []
+                
+                # Priority 3: If page_title is explicitly provided (and no query), use exact page_title match
+                elif page_title:
+                    logger.debug(f"Using exact page_title match (priority 3): page_title='{page_title}'")
+                    highlight_doc = HighlightModel.get_highlights_by_page_title(
+                        user_id=user_id,
+                        project_id=final_project_id,
+                        page_title=page_title
+                    )
+                    highlights = [highlight_doc] if highlight_doc else []
+                
+                # Priority 4: If no query, source_url, or page_title, return all highlights
+                else:
+                    logger.debug(f"Fetching all highlights for project (no filters)")
+                    highlights = HighlightModel.get_highlights_by_project(
+                        user_id=user_id,
+                        project_id=final_project_id,
+                        limit=None
+                    )
+                
+                if not highlights:
+                    if user_id:
+                        step4 = {
+                            'type': 'tool_call',
+                            'tool_name': 'get_highlights',
+                            'description': 'No highlights found...',
+                            'session_id': session_id,
+                            'timestamp': datetime.utcnow().isoformat()
+                        }
+                        SSEService.broadcast_to_user(user_id, 'agent_step', step4)
+                        if collect_step_fn:
+                            collect_step_fn(step4)
+                    return "No highlights found in your project."
+                
+                # Emit step: Found highlights
+                total_highlight_count = sum(len(h.get('highlights', [])) for h in highlights)
+                if user_id:
+                    step4 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_highlights',
+                        'description': f'Found {len(highlights)} source(s) with {total_highlight_count} highlight(s)...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step4)
+                    if collect_step_fn:
+                        collect_step_fn(step4)
+                    
+                    # Step: Processing highlights
+                    step5 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_highlights',
+                        'description': 'Processing highlight data...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step5)
+                    if collect_step_fn:
+                        collect_step_fn(step5)
+                
+                # Format results
+                results = []
+                for highlight_doc in highlights:
+                    source_url_doc = highlight_doc.get('source_url', 'unknown')
+                    page_title = highlight_doc.get('page_title', 'Untitled')
+                    highlight_list = highlight_doc.get('highlights', [])
+                    
+                    source_info = f"Source: {page_title}\nURL: {source_url_doc}\nHighlights ({len(highlight_list)}):"
+                    highlight_items = []
+                    
+                    for i, highlight in enumerate(highlight_list[:10], 1):  # Limit to first 10 per source
+                        highlight_text = highlight.get('text', '')[:100]  # Truncate long text
+                        if len(highlight.get('text', '')) > 100:
+                            highlight_text += '...'
+                        note = highlight.get('note')
+                        color_tag = highlight.get('color_tag', 'yellow')
+                        
+                        highlight_item = f"  {i}. [{color_tag}] {highlight_text}"
+                        if note:
+                            highlight_item += f"\n     Note: {note[:50]}{'...' if len(note) > 50 else ''}"
+                        highlight_items.append(highlight_item)
+                    
+                    if len(highlight_list) > 10:
+                        highlight_items.append(f"  ... and {len(highlight_list) - 10} more highlight(s)")
+                    
+                    results.append(f"{source_info}\n" + "\n".join(highlight_items))
+                
+                # Emit step: Formatting results
+                if user_id:
+                    step6 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_highlights',
+                        'description': 'Formatting highlight list...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step6)
+                    if collect_step_fn:
+                        collect_step_fn(step6)
+                
+                result = f"Found {len(highlights)} source(s) with {total_highlight_count} highlight(s):\n\n" + "\n\n".join(results)
+                
+                # Emit completion step
+                if user_id:
+                    step7 = {
+                        'type': 'tool_call',
+                        'tool_name': 'get_highlights',
+                        'description': 'Highlight fetch completed...',
+                        'session_id': session_id,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    SSEService.broadcast_to_user(user_id, 'agent_step', step7)
+                    if collect_step_fn:
+                        collect_step_fn(step7)
+                
+                logger.debug(f"Highlight fetch completed, found {len(highlights)} sources with {total_highlight_count} highlights")
+                return result
+                
+            except Exception as e:
+                log_error(logger, e, "Error in get_highlights function tool")
+                return f"Error fetching highlights: {str(e)}"
+        
         # Store tools as instance attributes
         self.perplexity_research_tool = perplexity_research
         self.search_vector_database_tool = search_vector_database
+        self.get_pdfs_tool = get_pdfs
+        self.get_highlights_tool = get_highlights
     
     async def chat_completion_agentic(
         self,
@@ -588,9 +1177,20 @@ Always respond in valid JSON format with this exact structure:
             Dict with 'content' field containing the agent's response
         """
         try:
-            # Set session_id in context for function tools
+            # Set session_id and project_id in context for function tools
             if session_id:
                 set_session_id(session_id)
+                # Get project_id from session
+                try:
+                    from models.database import ChatSessionModel
+                    session = ChatSessionModel.get_session(session_id)
+                    if session:
+                        project_id = session.get('project_id')
+                        if project_id:
+                            set_project_id(project_id)
+                            logger.debug(f"Set project_id in context: {project_id}")
+                except Exception as e:
+                    logger.debug(f"Could not get project_id from session: {e}")
             
             # Extract user messages for the agent input
             user_messages = [msg for msg in messages if msg.get('role') == 'user']
@@ -628,7 +1228,7 @@ Always respond in valid JSON format with this exact structure:
             # Pass collect_sse_step so tools can also collect their steps
             self._create_function_tools(user_id=user_id, session_id=session_id, collect_step_fn=collect_sse_step)
             # Update agent tools with the new tools that have user_id/session_id
-            self.agent.tools = [self.perplexity_research_tool, self.search_vector_database_tool]
+            self.agent.tools = [self.perplexity_research_tool, self.search_vector_database_tool, self.get_pdfs_tool, self.get_highlights_tool]
             
             # Emit initial processing steps via SSE AND collect them
             if user_id:
@@ -794,6 +1394,26 @@ Always respond in valid JSON format with this exact structure:
                             step_description = f"Searching your documents for: {query[:100]}{'...' if len(query) > 100 else ''}"
                     except:
                         pass
+                elif tool_name == 'get_pdfs':
+                    try:
+                        args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
+                        project_id = args_dict.get('project_id', '') if isinstance(args_dict, dict) else ''
+                        if project_id:
+                            step_description = f"Fetching PDFs for project..."
+                        else:
+                            step_description = "Fetching your PDFs..."
+                    except:
+                        step_description = "Fetching your PDFs..."
+                elif tool_name == 'get_highlights':
+                    try:
+                        args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
+                        source_url = args_dict.get('source_url', '') if isinstance(args_dict, dict) else ''
+                        if source_url:
+                            step_description = f"Fetching highlights from specific source..."
+                        else:
+                            step_description = "Fetching your highlights..."
+                    except:
+                        step_description = "Fetching your highlights..."
                 
                 return step_description
             
@@ -817,21 +1437,28 @@ Always respond in valid JSON format with this exact structure:
                                     
                                     # Avoid duplicates
                                     if not any(step.get('tool_name') == tool_name and step.get('description') == step_description for step in agent_steps):
-                                        # Extract query from args for step data
+                                        # Extract args for step data
+                                        args_dict = {}
                                         try:
-                                            args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
-                                            query = args_dict.get('query', '') if isinstance(args_dict, dict) else ''
+                                            parsed_args = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
+                                            if isinstance(parsed_args, dict):
+                                                args_dict = parsed_args
                                         except:
-                                            query = ''
+                                            pass
                                         
                                         # Determine step_id based on tool_name
-                                        step_id = STEP_ID_SEARCHING_PERPLEXITY if tool_name == 'perplexity_research' else STEP_ID_SEARCHING_VECTOR_DB if tool_name == 'search_vector_database' else None
+                                        step_id = (
+                                            STEP_ID_SEARCHING_PERPLEXITY if tool_name == 'perplexity_research' 
+                                            else STEP_ID_SEARCHING_VECTOR_DB if tool_name == 'search_vector_database'
+                                            else f'calling_{tool_name}' if tool_name in ['get_pdfs', 'get_highlights']
+                                            else None
+                                        )
                                         
                                         agent_steps.append(create_step_data(
                                             step_id=step_id or f'tool_call_{tool_name}',
                                             step_type=STEP_TYPE_TOOL_CALL,
                                             tool_name=tool_name,
-                                            args={'query': query} if query else {},
+                                            args=args_dict,
                                             description=step_description  # Keep description for backward compatibility
                                         ))
             
@@ -847,21 +1474,28 @@ Always respond in valid JSON format with this exact structure:
                                 step_description = create_step_description(tool_name, tool_args)
                                 
                                 if not any(step.get('tool_name') == tool_name and step.get('description') == step_description for step in agent_steps):
-                                    # Extract query from args for step data
+                                    # Extract args for step data
+                                    args_dict = {}
                                     try:
-                                        args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
-                                        query = args_dict.get('query', '') if isinstance(args_dict, dict) else ''
+                                        parsed_args = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
+                                        if isinstance(parsed_args, dict):
+                                            args_dict = parsed_args
                                     except:
-                                        query = ''
+                                        pass
                                     
                                     # Determine step_id based on tool_name
-                                    step_id = STEP_ID_SEARCHING_PERPLEXITY if tool_name == 'perplexity_research' else STEP_ID_SEARCHING_VECTOR_DB if tool_name == 'search_vector_database' else None
+                                    step_id = (
+                                        STEP_ID_SEARCHING_PERPLEXITY if tool_name == 'perplexity_research' 
+                                        else STEP_ID_SEARCHING_VECTOR_DB if tool_name == 'search_vector_database'
+                                        else f'calling_{tool_name}' if tool_name in ['get_pdfs', 'get_highlights']
+                                        else None
+                                    )
                                     
                                     agent_steps.append(create_step_data(
                                         step_id=step_id or f'tool_call_{tool_name}',
                                         step_type=STEP_TYPE_TOOL_CALL,
                                         tool_name=tool_name,
-                                        args={'query': query} if query else {},
+                                        args=args_dict,
                                         description=step_description  # Keep description for backward compatibility
                                     ))
             
@@ -880,21 +1514,28 @@ Always respond in valid JSON format with this exact structure:
                             step_description = create_step_description(tool_name, tool_args)
                             
                             if not any(step.get('tool_name') == tool_name and step.get('description') == step_description for step in agent_steps):
-                                # Extract query from args for step data
+                                # Extract args for step data
+                                args_dict = {}
                                 try:
-                                    args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
-                                    query = args_dict.get('query', '') if isinstance(args_dict, dict) else ''
+                                    parsed_args = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
+                                    if isinstance(parsed_args, dict):
+                                        args_dict = parsed_args
                                 except:
-                                    query = ''
+                                    pass
                                 
                                 # Determine step_id based on tool_name
-                                step_id = STEP_ID_SEARCHING_PERPLEXITY if tool_name == 'perplexity_research' else STEP_ID_SEARCHING_VECTOR_DB if tool_name == 'search_vector_database' else None
+                                step_id = (
+                                    STEP_ID_SEARCHING_PERPLEXITY if tool_name == 'perplexity_research' 
+                                    else STEP_ID_SEARCHING_VECTOR_DB if tool_name == 'search_vector_database'
+                                    else f'calling_{tool_name}' if tool_name in ['get_pdfs', 'get_highlights']
+                                    else None
+                                )
                                 
                                 agent_steps.append(create_step_data(
                                     step_id=step_id or f'tool_call_{tool_name}',
                                     step_type=STEP_TYPE_TOOL_CALL,
                                     tool_name=tool_name,
-                                    args={'query': query} if query else {},
+                                    args=args_dict,
                                     description=step_description  # Keep description for backward compatibility
                                 ))
             
@@ -958,9 +1599,20 @@ Always respond in valid JSON format with this exact structure:
             Dict with 'content' field
         """
         try:
-            # Set session_id in context for function tools
+            # Set session_id and project_id in context for function tools
             if session_id:
                 set_session_id(session_id)
+                # Get project_id from session
+                try:
+                    from models.database import ChatSessionModel
+                    session = ChatSessionModel.get_session(session_id)
+                    if session:
+                        project_id = session.get('project_id')
+                        if project_id:
+                            set_project_id(project_id)
+                            logger.debug(f"Set project_id in context: {project_id}")
+                except Exception as e:
+                    logger.debug(f"Could not get project_id from session: {e}")
             
             # Extract user messages for the agent input
             user_messages = [msg for msg in messages if msg.get('role') == 'user']

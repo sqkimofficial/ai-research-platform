@@ -213,6 +213,38 @@ class OCRPositionService:
             'x1': x1 / img_width,
             'y1': y1 / img_height
         }
+    
+    def extract_full_text(self, image_base64):
+        """
+        Extract full OCR text from an image using Tesseract OCR.
+        
+        Args:
+            image_base64: Base64 encoded image data
+        
+        Returns:
+            Full OCR text string, or None if extraction fails
+        """
+        if not self.available:
+            logger.warning("OCRPositionService: Cannot extract text - dependencies not available")
+            return None
+        
+        if not image_base64:
+            return None
+        
+        try:
+            # Decode image
+            img_bytes = base64.b64decode(image_base64)
+            img = Image.open(io.BytesIO(img_bytes))
+            
+            # Run Tesseract OCR on entire image
+            ocr_text = pytesseract.image_to_string(img)
+            
+            logger.debug(f"Extracted {len(ocr_text)} characters from image via OCR")
+            return ocr_text.strip() if ocr_text else None
+            
+        except Exception as e:
+            logger.error(f"Error extracting OCR text from image: {e}")
+            return None
 
 
 # Singleton instance

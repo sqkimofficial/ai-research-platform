@@ -3,6 +3,7 @@ from models.database import HighlightModel, ProjectModel, PDFDocumentModel
 from utils.auth import get_user_id_from_token, log_auth_info
 from utils.rate_limiter import get_limiter
 from services.s3_service import S3Service
+from services.vector_service import VectorService
 from services.redis_service import get_redis_service
 from services.sse_service import SSEService
 from config import Config
@@ -262,6 +263,28 @@ def save_highlight():
         highlight_id=highlight_id,  # Pass the pre-generated ID
         timestamp=timestamp  # Pass timestamp from browser if available
     )
+    
+    # Index highlight for semantic search (Phase I)
+    try:
+        # Combine highlight text and note for indexing
+        combined_text = text
+        if note:
+            combined_text = f"{text}\n\n{note}"
+        
+        vector_service = VectorService()
+        vector_service.index_highlight(
+            highlight_id=saved_highlight_id,
+            text=combined_text,
+            user_id=user_id,
+            project_id=project_id,
+            source_url=source_url
+        )
+        logger.debug(f"[VECTORIZATION] Successfully indexed highlight {saved_highlight_id}")
+    except Exception as vec_error:
+        logger.error(f"[VECTORIZATION] Error indexing highlight: {vec_error}")
+        import traceback
+        traceback.print_exc()
+        # Don't fail highlight save if vectorization fails
     
     # Invalidate cache
     redis_service = get_redis_service()
