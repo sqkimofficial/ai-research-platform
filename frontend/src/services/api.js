@@ -68,16 +68,51 @@ api.interceptors.request.use(
 
 /**
  * Response interceptor for handling auth errors
+ * Handles token refresh and retries requests on 401 errors
  */
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      // Token expired or invalid
-      // The Auth0 SDK will handle refresh, but if it fails,
-      // we should redirect to login
-      console.warn('Unauthorized request - token may be expired');
+  async (error) => {
+    const originalRequest = error.config;
+    
+    // Only handle 401 errors and avoid infinite retry loops
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      
+      // Try to refresh token using Auth0 SDK
+      if (tokenGetter) {
+        try {
+          const newToken = await tokenGetter();
+          if (newToken) {
+            // Update custom token in storage if it exists (for email/password login)
+            // Note: Auth0 SDK tokens are cached separately, so we only update custom token
+            const { hasToken, setToken } = await import('../utils/auth');
+            if (hasToken()) {
+              setToken(newToken);
+            }
+            
+            // Retry the original request with new token
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            return api(originalRequest);
+          }
+        } catch (refreshError) {
+          console.warn('Token refresh failed:', refreshError);
+          // Fall through to redirect to login
+        }
+      }
+      
+      // If token refresh fails or no tokenGetter, clear tokens and redirect to login
+      console.warn('Unauthorized request - redirecting to login');
+      const { clearAuthData } = await import('../utils/auth');
+      clearAuthData();
+      
+      // Only redirect if we're not already on the login page
+      if (!window.location.pathname.includes('/login') && 
+          !window.location.pathname.includes('/callback')) {
+        window.location.href = '/login';
+      }
     }
+    
     return Promise.reject(error);
   }
 );

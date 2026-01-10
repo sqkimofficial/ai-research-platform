@@ -84,9 +84,13 @@ def sanitize_data(data: Any) -> Any:
     return data
 
 
-def get_request_context() -> Dict[str, Any]:
+def get_request_context(skip_user_lookup: bool = False) -> Dict[str, Any]:
     """
     Get request context information for logging.
+    
+    Args:
+        skip_user_lookup: If True, skip getting user_id from token
+                         (prevents circular dependency when called from auth logging)
     
     Returns:
         Dictionary with request context (user_id, IP, endpoint, method, request_id)
@@ -110,14 +114,16 @@ def get_request_context() -> Dict[str, Any]:
     except RuntimeError:
         pass
     
-    # Get user_id if available from token
-    try:
-        from utils.auth import get_user_id_from_token
-        user_id = get_user_id_from_token()
-        if user_id:
-            context['user_id'] = user_id
-    except Exception:
-        pass
+    # Get user_id if available from token (skip if called from auth code to prevent recursion)
+    if not skip_user_lookup:
+        try:
+            from utils.auth import get_user_id_from_token
+            user_id = get_user_id_from_token()
+            if user_id:
+                context['user_id'] = user_id
+        except Exception:
+            # Silently fail if token validation fails (prevents circular logging)
+            pass
     
     return context
 
@@ -127,7 +133,9 @@ class ContextFilter(logging.Filter):
     
     def filter(self, record):
         """Add request context to log record."""
-        context = get_request_context()
+        # Skip user lookup in filter to prevent circular dependency during auth failures
+        # The user_id will be added elsewhere if available
+        context = get_request_context(skip_user_lookup=True)
         for key, value in context.items():
             setattr(record, key, value)
         # Set default values for formatter fields that might not exist
@@ -152,8 +160,9 @@ class JSONFormatter(logging.Formatter):
             'message': record.getMessage(),
         }
         
-        # Add request context
-        context = get_request_context()
+        # Add request context (skip user lookup to prevent circular dependency)
+        # user_id will be added via extra fields if available
+        context = get_request_context(skip_user_lookup=True)
         if context:
             log_data['context'] = context
         
@@ -316,7 +325,9 @@ def log_security_event(logger: logging.Logger, event_type: str,
         severity: Log level ('WARNING', 'ERROR', 'CRITICAL')
         **kwargs: Additional context to log
     """
-    context = get_request_context()
+    # Use skip_user_lookup=True to prevent circular dependency when logging auth failures
+    # This prevents get_user_id_from_token() -> log_security_event() -> get_request_context() -> get_user_id_from_token() recursion
+    context = get_request_context(skip_user_lookup=True)
     sanitized_kwargs = sanitize_data(kwargs)
     context.update(sanitized_kwargs)
     context['security_event_type'] = event_type

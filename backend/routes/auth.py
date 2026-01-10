@@ -161,8 +161,6 @@ def login():
         )
         
         logger.debug(f"Auth0 login response status: {token_response.status_code}")
-        if Config.IS_DEVELOPMENT:
-            logger.debug(f"Auth0 login response: {token_response.text}")
         
         if token_response.status_code == 200:
             token_data = token_response.json()
