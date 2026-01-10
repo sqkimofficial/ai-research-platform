@@ -770,7 +770,7 @@
 
 .assistant-message {
   background: transparent;
-  padding: 16px 0 0 0;
+  padding: 8px 0 24px 0;
 }
 
 .assistant-message .message-content {
@@ -875,38 +875,40 @@
 
 /* Agent Steps Styles - Collapsible with "Thought for x seconds" */
 .agent-steps-collapsible {
-  margin-top: 8px;
   margin-bottom: 8px;
 }
 
 .agent-steps-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   padding: 4px 0;
   background: none;
   border: none;
   cursor: pointer;
   font-family: 'DM Sans', sans-serif;
-  font-size: 11px;
-  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  color: #808080;
   transition: color 0.2s ease;
 }
 
 .agent-steps-header:hover {
-  color: rgba(0, 0, 0, 0.7);
+  color: #666666;
 }
 
 .agent-steps-arrow {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   transition: transform 0.2s ease;
   flex-shrink: 0;
+  filter: brightness(0) saturate(100%) invert(50%);
 }
 
 .agent-steps-header-text {
   font-weight: 400;
   line-height: 1.4;
+  font-size: 12px;
+  color: #808080;
 }
 
 .agent-steps-list {
@@ -924,8 +926,8 @@
 
 .agent-step-text {
   font-family: 'DM Sans', sans-serif;
-  font-size: 11px;
-  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  color: #808080;
   line-height: 1.4;
   font-weight: 400;
 }
@@ -2022,7 +2024,7 @@
   transition: all 0.2s ease;
   z-index: 6;
   pointer-events: auto;
-  box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .inline-edit-btn:hover {

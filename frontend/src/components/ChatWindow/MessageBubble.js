@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -55,6 +55,15 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
     } else if (message.content && agentSteps.length > 0) {
       // Final response received - collapse the steps
       setIsStepsCollapsed(true);
+      
+      // Freeze the thought duration when final answer is received
+      if (frozenThoughtDurationRef.current === null && agentSteps.length > 0) {
+        const firstStepTime = agentSteps[0]?.timestamp ? new Date(agentSteps[0].timestamp) : null;
+        const lastStepTime = agentSteps[agentSteps.length - 1]?.timestamp ? new Date(agentSteps[agentSteps.length - 1].timestamp) : null;
+        if (firstStepTime && lastStepTime) {
+          frozenThoughtDurationRef.current = Math.round((lastStepTime - firstStepTime) / 1000);
+        }
+      }
     }
   }, [agentSteps.length, message.content]);
   const [localEditedContent, setLocalEditedContent] = useState(documentContent);
@@ -68,6 +77,8 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
   const contentWrapperRef = useRef(null);
   const contentRef = useRef(null);
   const sourcesDropdownRef = useRef(null);
+  // Freeze the thought duration once the final answer is received
+  const frozenThoughtDurationRef = useRef(null);
 
   // Check if content overflows 3 lines
   const checkOverflow = useCallback(() => {
@@ -214,13 +225,23 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
         <>
           {/* Agent Steps (Tool Calls, Thinking, etc.) - Collapsible with "Thought for x seconds" */}
           {agentSteps && agentSteps.length > 0 && (() => {
-            // Calculate time difference between first and last step
-            const firstStepTime = agentSteps[0]?.timestamp ? new Date(agentSteps[0].timestamp) : null;
-            const lastStepTime = agentSteps[agentSteps.length - 1]?.timestamp ? new Date(agentSteps[agentSteps.length - 1].timestamp) : null;
-            const thoughtDuration = firstStepTime && lastStepTime ? Math.round((lastStepTime - firstStepTime) / 1000) : 0;
-            
             // Only show "Thought for x seconds" if message content exists (steps are complete)
             const stepsComplete = !!message.content;
+            
+            // Calculate thought duration - freeze it once the final answer is received
+            // If we have a frozen duration (final answer received), use it
+            let thoughtDuration = 0;
+            if (frozenThoughtDurationRef.current !== null) {
+              thoughtDuration = frozenThoughtDurationRef.current;
+            } else {
+              // Otherwise, calculate from current steps (still receiving steps)
+              const firstStepTime = agentSteps[0]?.timestamp ? new Date(agentSteps[0].timestamp) : null;
+              const lastStepTime = agentSteps[agentSteps.length - 1]?.timestamp ? new Date(agentSteps[agentSteps.length - 1].timestamp) : null;
+              
+              if (firstStepTime && lastStepTime) {
+                thoughtDuration = Math.round((lastStepTime - firstStepTime) / 1000);
+              }
+            }
             
             return (
               <div className="agent-steps-collapsible">
@@ -250,7 +271,6 @@ const MessageBubble = ({ message, onApprove, onEdit, editedContent, mode = 'writ
                     {agentSteps.map((step, index) => (
                       <div key={index} className="agent-step-item">
                         <span className="agent-step-text">
-                          {step.type === 'thinking' ? '💭 ' : step.type === 'tool_call' ? '🔧 ' : ''}
                           {step.description || `Step ${index + 1}`}
                         </span>
                       </div>
