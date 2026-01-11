@@ -6,6 +6,7 @@ from services.agentic_openai_service import AgenticOpenAIService
 from services.vector_service import VectorService
 from services.redis_service import get_redis_service
 from services.sse_service import SSEService
+from services.memory_service import orchestrate_summarization, determine_keep_window, count_tokens_for_messages, count_tokens_for_message
 from utils.auth import get_user_id_from_token, log_auth_info
 from utils.file_helpers import get_session_dir
 from utils.html_helpers import strip_html_tags
@@ -624,39 +625,154 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         # Get conversation history
         messages = ChatSessionModel.get_messages(session_id)
         
-        # Convert to OpenAI format with clear separation of current vs historical
-        # Note: attached sections are already included in the user message content
+        logger.debug("=" * 80)
+        logger.debug("[MEMORY] Phase 6: Summarization orchestration check")
+        logger.debug("=" * 80)
+        logger.debug(f"[MEMORY] Total messages retrieved: {len(messages)}")
+        
+        # Phase 6: Check if summarization is needed and execute if so
+        summarizing = False
+        memory_compression = ChatSessionModel.get_memory_compression(session_id)
+        
+        try:
+            logger.debug(f"[MEMORY] Checking if summarization needed...")
+            updated_memory = orchestrate_summarization(
+                session_id=session_id,
+                messages=messages,
+                system_prompt=system_message
+            )
+            
+            if updated_memory:
+                logger.info(f"[MEMORY] ✓ Summarization executed (version: {updated_memory['summary_version']})")
+                summarizing = True
+                memory_compression = updated_memory
+            else:
+                logger.debug(f"[MEMORY] Summarization not needed - messages under threshold")
+                # Get existing memory compression if no new summarization
+                if not memory_compression:
+                    memory_compression = ChatSessionModel.get_memory_compression(session_id)
+        except Exception as e:
+            logger.error(f"[MEMORY] Error during summarization: {str(e)}")
+            log_error(logger, e, "[MEMORY] Summarization failed, falling back to all messages")
+            # Fallback: continue with all messages if summarization fails
+            memory_compression = None
+        
+        # Phase 7: Build prompt with summaries + recent messages
+        logger.debug("=" * 80)
+        logger.debug("[MEMORY] Phase 7: Building prompt with summaries")
+        logger.debug("=" * 80)
+        
         openai_messages = [
             {'role': 'system', 'content': system_message}
         ]
         
-        # Add all messages, but mark the current one clearly
-        # The last user message is always the current instruction
-        for i, msg in enumerate(messages):
-            content = msg['content']
+        # Add important data and summary if they exist
+        if memory_compression:
+            important_data = memory_compression.get('important_data', {})
+            conversation_summary = memory_compression.get('conversation_summary', '')
             
-            # Find the last user message - that's the current instruction
-            last_user_msg_index = None
-            for j in range(len(messages) - 1, -1, -1):
-                if messages[j]['role'] == 'user':
-                    last_user_msg_index = j
-                    break
+            if important_data and any(important_data.values()):
+                logger.debug(f"[MEMORY] Adding important data to prompt")
+                important_data_str = json.dumps(important_data, indent=2)
+                openai_messages.append({
+                    'role': 'system',
+                    'content': f"[IMPORTANT DATA FROM PREVIOUS CONVERSATIONS]\n\n{important_data_str}\n\n[END OF IMPORTANT DATA]"
+                })
             
-            # If this is the current instruction (last user message), mark it clearly
-            if i == last_user_msg_index and msg['role'] == 'user':
-                content = f"[CURRENT INSTRUCTION - RESPOND TO THIS ONLY]\n\n{content}\n\n[END OF CURRENT INSTRUCTION]\n\nIMPORTANT: This is the ONLY message you should act on. All previous messages are historical context only."
-            elif i < last_user_msg_index or (i > last_user_msg_index and msg['role'] == 'assistant'):
-                # Historical messages - add context marker
-                content = f"[HISTORICAL CONTEXT - DO NOT ACT ON THIS - FOR REFERENCE ONLY]\n\n{content}\n\n[END OF HISTORICAL CONTEXT]"
+            if conversation_summary:
+                logger.debug(f"[MEMORY] Adding conversation summary to prompt ({len(conversation_summary)} chars, {len(conversation_summary.split())} words)")
+                openai_messages.append({
+                    'role': 'system',
+                    'content': f"[CONVERSATION SUMMARY]\n\n{conversation_summary}\n\n[END OF CONVERSATION SUMMARY]"
+                })
             
-            openai_messages.append({
-                'role': msg['role'],
-                'content': content
-            })
+            # Get recent messages (keep window) instead of all messages
+            logger.debug(f"[MEMORY] Determining keep window for recent messages...")
+            keep_window, keep_indices = determine_keep_window(
+                messages=messages,
+                system_prompt=system_message,
+                conversation_summary=conversation_summary,
+                important_data=important_data,
+                max_tokens=2500
+            )
+            
+            logger.info(f"[MEMORY] ✓ Using keep window: {len(keep_window)} recent messages (indices: {keep_indices})")
+            messages_to_use = keep_window
+        else:
+            # No summaries - use all messages
+            logger.debug(f"[MEMORY] No summaries - using all {len(messages)} messages")
+            messages_to_use = messages
         
-        # OpenAI Agent SDK doesn't require message alternation like Perplexity
-        # Use messages as-is (OpenAI handles conversation history properly)
-        alternated_messages = openai_messages
+        # Format conversation history for system message
+        # The OpenAI Agents SDK only accepts a string input, so we include conversation
+        # history in the instructions/system_message instead of passing messages array
+        logger.debug(f"[MEMORY] Formatting conversation history for system message ({len(messages_to_use)} messages)")
+        
+        # Find the last user message to separate it from history
+        last_user_msg_index = None
+        for j in range(len(messages_to_use) - 1, -1, -1):
+            if messages_to_use[j]['role'] == 'user':
+                last_user_msg_index = j
+                break
+        
+        # Build conversation history text (all messages except the last user message)
+        conversation_history_parts = []
+        if last_user_msg_index is not None and last_user_msg_index > 0:
+            # Add all messages before the last user message as conversation history
+            for msg in messages_to_use[:last_user_msg_index]:
+                role = msg['role'].upper()
+                content = msg['content']
+                conversation_history_parts.append(f"{role}: {content}")
+            
+            # Add assistant messages after the last user message (if any - shouldn't happen normally)
+            if last_user_msg_index + 1 < len(messages_to_use):
+                for msg in messages_to_use[last_user_msg_index + 1:]:
+                    role = msg['role'].upper()
+                    content = msg['content']
+                    conversation_history_parts.append(f"{role}: {content}")
+        elif last_user_msg_index is None:
+            # No user messages found (edge case) - include all messages as history
+            for msg in messages_to_use:
+                role = msg['role'].upper()
+                content = msg['content']
+                conversation_history_parts.append(f"{role}: {content}")
+        
+        # Extract the current user message (last user message)
+        current_user_message = ""
+        if last_user_msg_index is not None:
+            current_user_message = messages_to_use[last_user_msg_index]['content']
+        
+        # Format conversation history as text
+        conversation_history_text = ""
+        if conversation_history_parts:
+            conversation_history_text = "\n\n[CONVERSATION HISTORY]\n\n" + "\n\n".join(conversation_history_parts) + "\n\n[END OF CONVERSATION HISTORY]\n\n"
+            logger.debug(f"[MEMORY] Formatted conversation history: {len(conversation_history_parts)} messages, {len(conversation_history_text)} chars")
+        
+        # Append conversation history to system message
+        enhanced_system_message = system_message
+        if conversation_history_text:
+            enhanced_system_message = system_message + conversation_history_text
+            logger.info(f"[MEMORY] ✓ Enhanced system message with conversation history ({len(conversation_history_parts)} messages)")
+        
+        # Log token counts
+        if memory_compression:
+            # Count tokens for enhanced system message + current user message
+            system_tokens = count_tokens_for_messages([{'role': 'system', 'content': enhanced_system_message}])
+            user_tokens = count_tokens_for_message({'role': 'user', 'content': current_user_message}) if current_user_message else 0
+            total_tokens = system_tokens + user_tokens
+            logger.info(f"[MEMORY] ✓ Final prompt token count: {total_tokens} tokens (system: {system_tokens}, user: {user_tokens})")
+        else:
+            # Count tokens for all messages (fallback calculation)
+            all_messages_for_counting = [{'role': 'system', 'content': enhanced_system_message}]
+            if current_user_message:
+                all_messages_for_counting.append({'role': 'user', 'content': current_user_message})
+            total_tokens = count_tokens_for_messages(all_messages_for_counting)
+            logger.info(f"[MEMORY] ✓ Final prompt token count: {total_tokens} tokens")
+        logger.debug("=" * 80)
+        
+        # OpenAI Agent SDK accepts only string input (not messages array)
+        # We pass the enhanced system_message as instructions and current_user_message as input
+        alternated_messages = []  # Not used by agent SDK, but kept for compatibility
         
         # Stage 1 AI - Perplexity (content generation with web search)
         # Log highlights/attachments before sending to Perplexity API
@@ -689,13 +805,18 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
         logger.debug("=" * 80)
         
         # Phase 0: Use OpenAI Agent SDK with function tools
+        # The agent SDK accepts only string input, so we pass:
+        # - enhanced_system_message (includes conversation history) as instructions
+        # - current_user_message as the input string
         try:
             logger.debug("Calling OpenAI Agent SDK (Phase 0 - with function tools)")
+            logger.debug(f"[MEMORY] Current user message length: {len(current_user_message)} chars")
             ai_response = await agentic_openai_service.chat_completion_agentic(
-                alternated_messages,
-                system_message=system_message,
+                alternated_messages,  # Not used, but kept for compatibility
+                system_message=enhanced_system_message,  # Enhanced with conversation history
                 session_id=session_id,
-                user_id=user_id  # Pass user_id for SSE broadcasting
+                user_id=user_id,  # Pass user_id for SSE broadcasting
+                current_user_message=current_user_message  # Pass current user message as input
             )
         except Exception as e:
             log_error(logger, e, "Error calling OpenAI Agent SDK")
@@ -888,7 +1009,8 @@ DO NOT return only the modified part. DO NOT return only the new part. You MUST 
             'document_content': document_content_to_add,
             'sources': sources,
             'session_id': session_id,
-            'agent_steps': agent_steps if agent_steps else []  # Agent execution steps for UI display - always include as array
+            'agent_steps': agent_steps if agent_steps else [],  # Agent execution steps for UI display - always include as array
+            'summarizing': summarizing  # Summarization status - True when summarization was executed
         }
         
         # Add pending approval fields if content was generated

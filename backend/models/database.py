@@ -408,6 +408,195 @@ class ChatSessionModel:
             }
         )
         return result.modified_count > 0
+    
+    @staticmethod
+    def initialize_memory_compression(session_id):
+        """
+        Initialize memory_compression field for a session with default structure.
+        
+        Args:
+            session_id: The session ID
+            
+        Returns:
+            bool: True if initialized successfully, False if session not found
+        """
+        db = Database.get_db()
+        
+        # Check if session exists
+        session = ChatSessionModel.get_session(session_id)
+        if not session:
+            logger.warning(f"Session {session_id} not found when initializing memory compression")
+            return False
+        
+        # Check if memory_compression already exists
+        if session.get('memory_compression'):
+            logger.debug(f"Memory compression already initialized for session {session_id}")
+            return True
+        
+        # Initialize with default structure
+        memory_compression = {
+            'important_data': {
+                'user_preferences': {},
+                'key_decisions': [],
+                'important_facts': [],
+                'source_urls': [],
+                'document_structure': {},
+                'entities': [],
+                'custom_fields': {}
+            },
+            'conversation_summary': '',
+            'summary_version': 0,
+            'last_summarized_at': None,
+            'messages_summarized_count': 0,
+            'last_keep_window_index': 0
+        }
+        
+        result = db.chat_sessions.update_one(
+            {'session_id': session_id},
+            {
+                '$set': {
+                    'memory_compression': memory_compression,
+                    'updated_at': datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.modified_count > 0:
+            logger.debug(f"Initialized memory compression for session {session_id}")
+            return True
+        else:
+            logger.warning(f"Failed to initialize memory compression for session {session_id}")
+            return False
+    
+    @staticmethod
+    def get_memory_compression(session_id):
+        """
+        Get memory compression data for a session.
+        
+        Args:
+            session_id: The session ID
+            
+        Returns:
+            dict: Memory compression data, or None if session not found or no memory compression exists
+        """
+        session = ChatSessionModel.get_session(session_id)
+        if not session:
+            return None
+        
+        return session.get('memory_compression')
+    
+    @staticmethod
+    def update_memory_compression(session_id, memory_compression_data):
+        """
+        Update memory compression data for a session.
+        
+        This completely replaces the existing memory_compression field with the new data.
+        Use this when you have complete updated memory compression data.
+        
+        Args:
+            session_id: The session ID
+            memory_compression_data: Complete memory compression dict with all fields:
+                - important_data: dict
+                - conversation_summary: str
+                - summary_version: int
+                - last_summarized_at: str (ISO format) or None
+                - messages_summarized_count: int
+                - last_keep_window_index: int
+                
+        Returns:
+            bool: True if updated successfully, False if session not found
+        """
+        db = Database.get_db()
+        
+        # Validate memory_compression_data structure
+        if not isinstance(memory_compression_data, dict):
+            logger.error(f"Invalid memory_compression_data type: {type(memory_compression_data)}")
+            return False
+        
+        # Ensure all required fields are present with defaults
+        validated_data = {
+            'important_data': memory_compression_data.get('important_data', {
+                'user_preferences': {},
+                'key_decisions': [],
+                'important_facts': [],
+                'source_urls': [],
+                'document_structure': {},
+                'entities': [],
+                'custom_fields': {}
+            }),
+            'conversation_summary': memory_compression_data.get('conversation_summary', ''),
+            'summary_version': memory_compression_data.get('summary_version', 0),
+            'last_summarized_at': memory_compression_data.get('last_summarized_at'),
+            'messages_summarized_count': memory_compression_data.get('messages_summarized_count', 0),
+            'last_keep_window_index': memory_compression_data.get('last_keep_window_index', 0)
+        }
+        
+        # Validate important_data structure
+        if not isinstance(validated_data['important_data'], dict):
+            logger.error("Invalid important_data type, must be dict")
+            return False
+        
+        # Ensure important_data has all required fields
+        required_important_data_fields = [
+            'user_preferences', 'key_decisions', 'important_facts',
+            'source_urls', 'document_structure', 'entities', 'custom_fields'
+        ]
+        for field in required_important_data_fields:
+            if field not in validated_data['important_data']:
+                validated_data['important_data'][field] = [] if 's' in field or field in ['key_decisions', 'important_facts', 'source_urls', 'entities'] else {}
+        
+        result = db.chat_sessions.update_one(
+            {'session_id': session_id},
+            {
+                '$set': {
+                    'memory_compression': validated_data,
+                    'updated_at': datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.modified_count > 0:
+            logger.debug(f"Updated memory compression for session {session_id}, version: {validated_data['summary_version']}")
+            return True
+        elif result.matched_count > 0:
+            # Session found but no changes (data was identical)
+            logger.debug(f"Memory compression for session {session_id} unchanged")
+            return True
+        else:
+            logger.warning(f"Session {session_id} not found when updating memory compression")
+            return False
+    
+    @staticmethod
+    def clear_memory_compression(session_id):
+        """
+        Clear memory compression data for a session (for testing purposes).
+        
+        Args:
+            session_id: The session ID
+            
+        Returns:
+            bool: True if cleared successfully, False if session not found
+        """
+        db = Database.get_db()
+        
+        result = db.chat_sessions.update_one(
+            {'session_id': session_id},
+            {
+                '$unset': {'memory_compression': ''},
+                '$set': {'updated_at': datetime.utcnow()}
+            }
+        )
+        
+        if result.modified_count > 0:
+            logger.debug(f"Cleared memory compression for session {session_id}")
+            return True
+        elif result.matched_count > 0:
+            # Session found but memory_compression didn't exist (already cleared)
+            logger.debug(f"Memory compression already cleared for session {session_id}")
+            return True
+        else:
+            logger.warning(f"Session {session_id} not found when clearing memory compression")
+            return False
 
 class ResearchDocumentModel:
     """Model for managing research documents (separate from sessions)"""

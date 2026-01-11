@@ -1158,7 +1158,8 @@ Always respond in valid JSON format with this exact structure:
         messages: List[Dict[str, str]],
         system_message: Optional[str] = None,
         session_id: Optional[str] = None,
-        user_id: Optional[str] = None  # For SSE broadcasting
+        user_id: Optional[str] = None,  # For SSE broadcasting
+        current_user_message: Optional[str] = None  # Current user message as input (if provided, use instead of extracting from messages)
     ) -> Dict:
         """
         Run the agentic OpenAI service with function tools.
@@ -1192,16 +1193,19 @@ Always respond in valid JSON format with this exact structure:
                 except Exception as e:
                     logger.debug(f"Could not get project_id from session: {e}")
             
-            # Extract user messages for the agent input
-            user_messages = [msg for msg in messages if msg.get('role') == 'user']
-            
-            if not user_messages:
-                raise ValueError("No user messages found in messages list")
-            
-            # Get the last user message as the current input
-            # For Phase 0, we use the last user message
-            # In future phases, we'll use sessions for full conversation history
-            current_input = user_messages[-1].get('content', '')
+            # Get the current user message as input
+            # If current_user_message is provided, use it (conversation history is in system_message)
+            # Otherwise, extract from messages array (backward compatibility)
+            if current_user_message:
+                current_input = current_user_message
+                logger.debug(f"Using provided current_user_message as input (length: {len(current_input)})")
+            else:
+                # Fallback: extract from messages array (for backward compatibility)
+                user_messages = [msg for msg in messages if msg.get('role') == 'user']
+                if not user_messages:
+                    raise ValueError("No user messages found in messages list and current_user_message not provided")
+                current_input = user_messages[-1].get('content', '')
+                logger.debug(f"Extracted last user message from messages array as input (length: {len(current_input)})")
             
             # Update agent instructions if system message is provided
             # The system message contains mode-specific instructions

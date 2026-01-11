@@ -106,6 +106,7 @@ const ChatWindow = ({
   const [sortOrder, setSortOrder] = useState('oldest'); // oldest | newest
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false); // Track if we're currently sending a message
+  const [isSummarizing, setIsSummarizing] = useState(false); // Track if summarization is in progress
   const [currentDocumentName, setCurrentDocumentName] = useState('');
   const [availableDocuments, setAvailableDocuments] = useState([]);
   const [isDocumentDropdownOpen, setIsDocumentDropdownOpen] = useState(false);
@@ -1166,7 +1167,7 @@ const ChatWindow = ({
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!inputMessage.trim() || loading) return;
+    if (!inputMessage.trim() || loading || isSummarizing) return;
 
     const userMessage = inputMessage.trim();
     
@@ -1353,13 +1354,17 @@ const ChatWindow = ({
         }))
       ];
       const response = await chatAPI.sendMessage(targetSessionId, userMessage, allAttachments, chatMode);
-      // Extract message, document_content, sources, status, pending_content_id, and agent_steps from response
+      // Extract message, document_content, sources, status, pending_content_id, agent_steps, and summarizing from response
       const chatMessage = response.data.response || '';
       const documentContent = response.data.document_content || '';
       const sources = response.data.sources || [];
       const status = response.data.status;
       const pendingContentId = response.data.pending_content_id;
       const agentSteps = response.data.agent_steps || [];
+      const summarizing = response.data.summarizing || false; // Summarization status from backend
+      
+      // Update summarization state
+      setIsSummarizing(summarizing);
       
       // Get real-time steps for this session if available
       const realtimeSteps = currentAgentSteps[targetSessionId] || [];
@@ -1408,6 +1413,7 @@ const ChatWindow = ({
     } finally {
       setLoading(false);
       setIsSendingMessage(false); // Clear the flag when done
+      setIsSummarizing(false); // Clear summarization state on error
     }
   };
   
@@ -1575,7 +1581,7 @@ const ChatWindow = ({
   const chatInputArea = (
     <div className="chat-input-area">
         <div 
-          className={`chat-input-container ${isDraggingOver ? 'drag-over' : ''}`}
+          className={`chat-input-container ${isDraggingOver ? 'drag-over' : ''} ${isSummarizing ? 'summarizing' : ''}`}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -1609,6 +1615,7 @@ const ChatWindow = ({
                 onClick={() => setIsDocumentDropdownOpen((prev) => !prev)}
                 aria-expanded={isDocumentDropdownOpen}
                 aria-haspopup="true"
+                disabled={isSummarizing}
               >
                 <DocumentIcon className="document-selector-icon" />
                 <span className="document-selector-name">
@@ -1641,7 +1648,7 @@ const ChatWindow = ({
               type="button"
               className="attach-button"
               onClick={() => chatFileInputRef.current?.click()}
-              disabled={uploadingFiles}
+              disabled={uploadingFiles || isSummarizing}
               aria-label="Attach file"
               title="Attach PDF or image"
             >
@@ -1752,7 +1759,7 @@ const ChatWindow = ({
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
                 placeholder="Ask Anything..."
-                disabled={loading}
+                disabled={loading || isSummarizing}
                 rows={1}
               />
               
@@ -1869,6 +1876,7 @@ const ChatWindow = ({
                   onClick={() => setIsModeMenuOpen((prev) => !prev)}
                   aria-expanded={isModeMenuOpen}
                   aria-haspopup="true"
+                  disabled={isSummarizing}
                 >
                   {chatMode === 'write' ? (
                     <WriteIcon className="mode-toggle-icon" />
@@ -1914,7 +1922,7 @@ const ChatWindow = ({
               <button
                 type="submit"
                 className="send-button"
-                disabled={loading || !inputMessage.trim()}
+                disabled={loading || isSummarizing || !inputMessage.trim()}
               >
                 <SendIcon className="send-icon" />
               </button>
@@ -2196,6 +2204,16 @@ const ChatWindow = ({
               <span></span>
               <span></span>
               <span></span>
+            </div>
+          </div>
+        )}
+        {isSummarizing && (
+          <div className="summarizing-indicator">
+            <div className="summarizing-content">
+              <div className="summarizing-spinner">
+                <div className="spinner-circle"></div>
+              </div>
+              <span className="summarizing-text">Summarising chat content...</span>
             </div>
           </div>
         )}
